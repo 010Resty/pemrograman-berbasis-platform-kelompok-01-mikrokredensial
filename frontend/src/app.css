@@ -1,0 +1,176 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400..800;1,400..800&display=swap');
+@import 'tailwindcss';
+
+@theme {
+	--font-heading: 'Plus Jakarta Sans', system-ui, sans-serif;
+	--font-body: 'Plus Jakarta Sans', system-ui, sans-serif;
+
+	/* Brand */
+	--color-primary: #2563eb;
+	--color-primary-hover: #1d4ed8;
+	--color-navy: #0f172a;
+
+	/* Accent */
+	--color-accent: #38bdf8;
+	--color-info-bg: #eff6ff;
+
+	/* Surface */
+	--color-background: #ffffff;
+	--color-surface: #f8fafc;
+	--color-border: #e2e8f0;
+
+	/* Text */
+	--color-text: #0f172a;
+	--color-text-muted: #64748b;
+
+	/* Status */
+	--color-success: #16a34a;
+	--color-warning: #d97706;
+	--color-danger: #dc2626;
+
+	/* Sistem motion khas: easing lembut + entrance terorkestrasi */
+	--ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+	--ease-spring: cubic-bezier(0.34, 1.25, 0.4, 1);
+	--animate-rise: rise 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+
+	@keyframes rise {
+		from {
+			opacity: 0;
+			transform: translateY(14px);
+		}
+		to {
+			opacity: 1;
+			transform: translateY(0);
+		}
+	}
+}
+
+@layer base {
+	html {
+		font-family: var(--font-body);
+		-webkit-font-smoothing: antialiased;
+		-moz-osx-font-smoothing: grayscale;
+		text-rendering: optimizeLegibility;
+		scroll-behavior: smooth;
+	}
+
+	body {
+		font-family: var(--font-body);
+		font-size: 16px;
+		line-height: 1.6;
+		color: #0f172a;
+		background-color: #ffffff;
+	}
+
+	::selection {
+		background: #2563eb;
+		color: #ffffff;
+	}
+
+	h1,
+	h2,
+	h3,
+	h4,
+	h5,
+	h6 {
+		font-family: var(--font-heading);
+		line-height: 1.2;
+		letter-spacing: -0.02em;
+	}
+
+	h1 {
+		font-size: 3.5rem;
+		font-weight: 800;
+	}
+
+	h2 {
+		font-size: 2.5rem;
+		font-weight: 700;
+	}
+
+	h3 {
+		font-size: 2rem;
+		font-weight: 700;
+	}
+
+	h4 {
+		font-size: 1.5rem;
+		font-weight: 600;
+	}
+
+	h5 {
+		font-size: 1.25rem;
+		font-weight: 600;
+	}
+
+	h6 {
+		font-size: 1rem;
+		font-weight: 600;
+	}
+
+	p {
+		font-family: var(--font-body);
+		font-size: 1rem;
+		line-height: 1.6;
+	}
+
+	@media (max-width: 1024px) {
+		h1 {
+			font-size: 2.75rem;
+		}
+		h2 {
+			font-size: 2rem;
+		}
+		h3 {
+			font-size: 1.75rem;
+		}
+		h4 {
+			font-size: 1.25rem;
+		}
+	}
+
+	@media (max-width: 768px) {
+		h1 {
+			font-size: 2.25rem;
+		}
+		h2 {
+			font-size: 1.75rem;
+		}
+		h3 {
+			font-size: 1.5rem;
+		}
+		h4 {
+			font-size: 1.125rem;
+		}
+		h5 {
+			font-size: 1rem;
+		}
+	}
+
+	@media (max-width: 640px) {
+		h1 {
+			font-size: 1.875rem;
+		}
+		h2 {
+			font-size: 1.5rem;
+		}
+		h3 {
+			font-size: 1.25rem;
+		}
+	}
+}
+
+/* Hormati preferensi gerak pengguna: matikan transisi/animasi non-esensial. */
+@media (prefers-reduced-motion: reduce) {
+	html {
+		scroll-behavior: auto;
+	}
+
+	*,
+	*::before,
+	*::after {
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
+}
