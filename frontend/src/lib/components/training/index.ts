@@ -13,5 +13,6 @@ export { default as InfoDrawer } from './organisms/InfoDrawer.svelte';
 export { default as ModuleAccordion } from './organisms/ModuleAccordion.svelte';
 export { default as TrainingCurriculum } from './organisms/TrainingCurriculum.svelte';
 export { default as LearningPathRoadmap } from './organisms/LearningPathRoadmap.svelte';
+export { default as ModuleLearningPath } from './organisms/ModuleLearningPath.svelte';
 export { default as TrainingHero } from './organisms/TrainingHero.svelte';
 export { default as TrainingActionCard } from './organisms/TrainingActionCard.svelte';

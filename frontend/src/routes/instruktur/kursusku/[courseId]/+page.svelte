@@ -3,7 +3,13 @@
 	import { getCourseById, type CourseModule } from '$lib/data/courses';
 	import { getCourseMeta } from '$lib/data/course-meta';
 	import { getTrainingStats } from '$lib/data/training';
+	import {
+		loadCurriculumDraft,
+		saveCurriculumDraft,
+		withSyncedFlat
+	} from '$lib/stores/curriculum';
 	import CurriculumEditor from '$lib/components/training/organisms/CurriculumEditor.svelte';
+	import LearningPathManager from '$lib/components/training/organisms/LearningPathManager.svelte';
 	import CourseRoadmap from '$lib/components/training/organisms/CourseRoadmap.svelte';
 
 	const courseId = $derived(Number(page.params.courseId));
@@ -13,29 +19,24 @@
 	let editableModules = $state<CourseModule[]>([]);
 	let isPublished = $state(true);
 	let savedMessage = $state('');
+	let activeTab = $state<'path' | 'materi'>('path');
+	let initializedFor = $state<number | null>(null);
 
-	/** Normalisasi draf: pastikan tiap modul punya sub-modul + flat materials sinkron. */
-	function normalize(mod: CourseModule): CourseModule {
-		const subs =
-			mod.subModules?.length && mod.subModules.length > 0
-				? mod.subModules
-				: [
-						{
-							id: `${mod.id}-sub1`,
-							title: 'Sub-modul 1',
-							description: mod.description,
-							materials: mod.materials
-						}
-					];
-		return { ...mod, subModules: subs, materials: subs.flatMap((s) => s.materials) };
-	}
-
+	/* Muat draf bersama (memori + localStorage) agar suntingan terbawa
+	   saat drill-down ke halaman sub-modul / materi. */
 	$effect(() => {
-		if (!course) return;
-		// Deep copy agar edit lokal tidak mengubah data global sebelum disimpan.
-		editableModules = structuredClone(course.modules).map(normalize);
+		if (!course || initializedFor === courseId) return;
+		editableModules = loadCurriculumDraft(courseId).map(withSyncedFlat);
 		isPublished = course.id !== 4;
 		savedMessage = '';
+		activeTab = 'path';
+		initializedFor = courseId;
+	});
+
+	/* Simpan setiap perubahan kembali ke draf bersama. */
+	$effect(() => {
+		if (initializedFor !== courseId || !course) return;
+		saveCurriculumDraft(courseId, editableModules);
 	});
 
 	const totalMats = $derived(editableModules.reduce((n, m) => n + m.materials.length, 0));
@@ -52,7 +53,7 @@
 </script>
 
 <svelte:head>
-	<title>{course ? `Kelola ${course.title}` : 'Kursus tidak ditemukan'} — Instruktur Aristotle</title>
+	<title>{course ? `Kelola ${course.title}` : 'Kursus tidak ditemukan'} — Instruktur Aristoteles</title>
 	<meta name="description" content={course ? `Kelola kurikulum, modul, sub-modul, dan materi ${course.title}` : 'Kelola kurikulum kursus'} />
 </svelte:head>
 
@@ -142,15 +143,63 @@
 			{/if}
 		</header>
 
+		<!-- Tab kelola: Learning Path (modul/sub) vs Detail Materi -->
 		<div class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 			<div>
 				<h2 class="text-lg font-bold text-slate-900">Kurikulum ({editableModules.length} Modul · {totalSubs} Sub-modul)</h2>
-				<p class="text-xs text-slate-500">Klik modul untuk membuka, susun sub-modul, tambah/hapus materi langsung.</p>
+				<p class="text-xs text-slate-500">Klik judul modul untuk mengelola sub-modulnya, klik judul sub-modul untuk mengelola materinya.</p>
+			</div>
+			<div role="tablist" aria-label="Mode kelola kurikulum" class="inline-flex rounded-2xl border border-slate-200 bg-white p-1 shadow-sm">
+				<button
+					type="button"
+					role="tab"
+					id="tab-path"
+					aria-selected={activeTab === 'path'}
+					aria-controls="panel-path"
+					onclick={() => (activeTab = 'path')}
+					class="inline-flex min-h-10 items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all focus-visible:outline-2 focus-visible:outline-blue-600 {activeTab === 'path' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}"
+				>
+					<i class="fa-solid fa-route" aria-hidden="true"></i>
+					Learning Path
+				</button>
+				<button
+					type="button"
+					role="tab"
+					id="tab-materi"
+					aria-selected={activeTab === 'materi'}
+					aria-controls="panel-materi"
+					onclick={() => (activeTab = 'materi')}
+					class="inline-flex min-h-10 items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all focus-visible:outline-2 focus-visible:outline-blue-600 {activeTab === 'materi' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}"
+				>
+					<i class="fa-solid fa-list-check" aria-hidden="true"></i>
+					Detail Materi
+				</button>
 			</div>
 		</div>
 
-		<!-- ORGANISM: editor kurikulum hierarkis bersama -->
-		<CurriculumEditor bind:modules={editableModules} onnotice={markSaved} />
+		{#if activeTab === 'path'}
+			<div id="panel-path" role="tabpanel" aria-labelledby="tab-path">
+				<!-- MANAJER LEARNING PATH: tambah/kurang modul & sub-modul dari patch jalur.
+				     Klik judul modul → halaman kelola sub-modul,
+				     klik judul sub-modul → halaman kelola materi. -->
+				<LearningPathManager
+					bind:modules={editableModules}
+					onnotice={markSaved}
+					moduleHref={(mod) => `/instruktur/kursusku/${courseId}/${mod.id}`}
+					subHref={(mod, sub) => `/instruktur/kursusku/${courseId}/${mod.id}/${sub.id}`}
+				/>
+			</div>
+		{:else}
+			<div id="panel-materi" role="tabpanel" aria-labelledby="tab-materi">
+				<p class="mb-3 rounded-2xl border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-xs leading-relaxed text-slate-600">
+					<i class="fa-solid fa-circle-info mr-1.5 text-blue-500" aria-hidden="true"></i>
+					Tambah / hapus <strong>materi</strong> di tiap sub-modul di sini. Untuk tambah / hapus
+					<strong>modul &amp; sub-modul</strong>, gunakan tab Learning Path.
+				</p>
+				<!-- ORGANISM: editor kurikulum hierarkis bersama -->
+				<CurriculumEditor bind:modules={editableModules} onnotice={markSaved} />
+			</div>
+		{/if}
 
 		<!-- ORGANISM: pratinjau alur belajar draf (langsung mengikuti edit) -->
 		<section aria-labelledby="roadmap-preview-heading" class="mt-6">

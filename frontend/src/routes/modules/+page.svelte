@@ -1,7 +1,7 @@
 <script lang="ts">
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
-	import { aristotleLogo as logoUrl } from '$lib/assets/logo';
+	import { aristotelesLogo as logoUrl } from '$lib/assets/logo';
 	import { courses } from '$lib/data/courses';
 	import {
 		getCourseMeta,
@@ -52,17 +52,17 @@
 </script>
 
 <svelte:head>
-	<title>Semua Pelatihan — Aristotle Platform</title>
+	<title>Semua Pelatihan — Aristoteles Platform</title>
 	<meta
 		name="description"
-		content="Katalog lengkap pelatihan mikrokredensial Aristotle: info, rating, periode, dan kurikulum."
+		content="Katalog lengkap pelatihan mikrokredensial Aristoteles: info, rating, periode, dan kurikulum."
 	/>
 </svelte:head>
 
 <!-- Navbar publik (selaras landing page) -->
 <header class="sticky top-0 z-50 bg-white shadow-sm">
 	<div class="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-		<a href="/" class="flex shrink-0 items-center gap-3 rounded-lg focus-visible:outline-2 focus-visible:outline-blue-600" aria-label="Aristotle - Beranda">
+		<a href="/" class="flex shrink-0 items-center gap-3 rounded-lg focus-visible:outline-2 focus-visible:outline-blue-600" aria-label="Aristoteles - Beranda">
 			<Logo size="md" showText={true} textSize="xl" />
 		</a>
 		<nav aria-label="Navigasi utama" class="hidden min-w-0 flex-1 items-center justify-center gap-5 font-semibold text-[13px] text-slate-700 lg:flex xl:gap-7">
@@ -287,5 +287,5 @@
 </main>
 
 <footer class="border-t border-slate-800 bg-slate-900 py-8 text-center text-xs text-slate-500">
-	&copy; 2026 Aristotle Platform Mikrokredensial. Semua hak dilindungi.
+	&copy; 2026 Aristoteles Platform Mikrokredensial. Semua hak dilindungi.
 </footer>

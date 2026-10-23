@@ -237,10 +237,10 @@
 </script>
 
 <svelte:head>
-	<title>Pembayaran {course?.title ?? 'Pelatihan'} — Aristotle Platform</title>
+	<title>Pembayaran {course?.title ?? 'Pelatihan'} — Aristoteles Platform</title>
 	<meta
 		name="description"
-		content="Halaman pembayaran aman pelatihan berbayar Aristotle: QRIS, Virtual Account, e-wallet, kartu, dan gerai retail."
+		content="Halaman pembayaran aman pelatihan berbayar Aristoteles: QRIS, Virtual Account, e-wallet, kartu, dan gerai retail."
 	/>
 	<meta name="robots" content="noindex,nofollow" />
 </svelte:head>
@@ -436,7 +436,7 @@
 						</li>
 						<li class="flex gap-2.5">
 							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-700">3</span>
-							Butuh bantuan? Hubungi support@aristotle.id
+							Butuh bantuan? Hubungi support@aristoteles.id
 						</li>
 					</ol>
 					<a href={resolve('/user/semua-kursus')} class="inline-flex min-h-[44px] items-center gap-2 text-sm font-bold text-blue-600 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600">
@@ -465,7 +465,7 @@
 								{/each}
 							</div>
 							<p class="text-2xl font-black text-slate-900">{formatIDR(total)}</p>
-							<p class="text-xs text-slate-500">QRIS · {invoice} · a.n. Aristotle Platform</p>
+							<p class="text-xs text-slate-500">QRIS · {invoice} · a.n. Aristoteles Platform</p>
 							<button
 								type="button"
 								onclick={() => copyText(String(total), 'nominal')}

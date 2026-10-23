@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { aristotleLogo as favicon } from '$lib/assets/logo';
+	import { aristotelesLogo as favicon } from '$lib/assets/logo';
 
 	let { children } = $props();
 </script>

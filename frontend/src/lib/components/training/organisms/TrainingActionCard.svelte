@@ -115,8 +115,8 @@
 				→ sub-modul → materi bertahap
 			</li>
 			<li class="flex items-center gap-2.5">
-				<i class="fa-solid fa-award w-4 text-center text-slate-400" aria-hidden="true"></i> Sertifikat
-				kelulusan
+				<i class="fa-solid fa-award w-4 text-center text-amber-500" aria-hidden="true"></i>
+				<span><strong>1 sertifikat per modul</strong> + sertifikat pelatihan</span>
 			</li>
 			<li class="flex items-center gap-2.5">
 				<i class="fa-solid fa-mobile-screen w-4 text-center text-slate-400" aria-hidden="true"></i> Belajar

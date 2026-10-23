@@ -44,10 +44,10 @@
 </script>
 
 <svelte:head>
-	<title>Semua Kursus — Aristotle Platform</title>
+	<title>Semua Kursus — Aristoteles Platform</title>
 	<meta
 		name="description"
-		content="Katalog semua kursus mikrokredensial Aristotle yang dapat diikuti."
+		content="Katalog semua kursus mikrokredensial Aristoteles yang dapat diikuti."
 	/>
 </svelte:head>
 

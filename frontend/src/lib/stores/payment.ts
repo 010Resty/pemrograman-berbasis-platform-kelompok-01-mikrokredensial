@@ -11,7 +11,7 @@ export interface PaymentReceipt {
 	paidAt: string;
 }
 
-const KEY = 'aristotle:payment-receipts:v1';
+const KEY = 'aristoteles:payment-receipts:v1';
 
 function load(): PaymentReceipt[] {
 	if (!browser) return [];

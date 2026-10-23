@@ -19,7 +19,7 @@
 		{ name: 'Ahmad Farizi', email: 'ahmad@student.ac.id', role: 'Mahasiswa', status: 'Aktif', date: 'Hari ini' },
 		{ name: 'Sarah Johnson', email: 'sarah@student.ac.id', role: 'Mahasiswa', status: 'Aktif', date: 'Kemarin' },
 		{ name: 'Rian Pratama', email: 'rian@student.ac.id', role: 'Mahasiswa', status: 'Pending', date: '2 hari lalu' },
-		{ name: 'Kevin Perry', email: 'kevin@aristotle.ac.id', role: 'Instruktur', status: 'Aktif', date: '3 hari lalu' }
+		{ name: 'Kevin Perry', email: 'kevin@aristoteles.ac.id', role: 'Instruktur', status: 'Aktif', date: '3 hari lalu' }
 	];
 
 	const recentCourses = [
@@ -30,8 +30,8 @@
 </script>
 
 <svelte:head>
-	<title>Dashboard Admin — Aristotle Platform</title>
-	<meta name="description" content="Dashboard admin Aristotle untuk mengelola users, instruktur, dan courses." />
+	<title>Dashboard Admin — Aristoteles Platform</title>
+	<meta name="description" content="Dashboard admin Aristoteles untuk mengelola users, instruktur, dan courses." />
 </svelte:head>
 
 <div class="p-4 sm:p-6 lg:p-8">

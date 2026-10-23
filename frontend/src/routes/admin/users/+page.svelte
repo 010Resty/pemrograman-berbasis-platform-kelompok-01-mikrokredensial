@@ -13,15 +13,22 @@
 
 	let query = $state('');
 	let filter = $state<Status>('all');
+	let showAdd = $state(false);
+	let formName = $state('');
+	let formEmail = $state('');
+	let formRole = $state('Mahasiswa');
+	let formStatus = $state<Exclude<Status, 'all'>>('Aktif');
 
-	const users: User[] = [
+	let users = $state<User[]>([
 		{ id: 1, name: 'Ahmad Farizi', email: 'ahmad@student.ac.id', role: 'Mahasiswa', status: 'Aktif', joined: '12 Jan 2026', courses: 6 },
 		{ id: 2, name: 'Sarah Johnson', email: 'sarah@student.ac.id', role: 'Mahasiswa', status: 'Aktif', joined: '28 Feb 2026', courses: 4 },
 		{ id: 3, name: 'Rian Pratama', email: 'rian@student.ac.id', role: 'Mahasiswa', status: 'Pending', joined: '05 Mar 2026', courses: 1 },
-		{ id: 4, name: 'Kevin Perry', email: 'kevin@aristotle.ac.id', role: 'Instruktur', status: 'Aktif', joined: '10 Jan 2026', courses: 8 },
-		{ id: 5, name: 'Max Alexix', email: 'max@aristotle.ac.id', role: 'Instruktur', status: 'Aktif', joined: '18 Jan 2026', courses: 5 },
+		{ id: 4, name: 'Kevin Perry', email: 'kevin@aristoteles.ac.id', role: 'Instruktur', status: 'Aktif', joined: '10 Jan 2026', courses: 8 },
+		{ id: 5, name: 'Max Alexix', email: 'max@aristoteles.ac.id', role: 'Instruktur', status: 'Aktif', joined: '18 Jan 2026', courses: 5 },
 		{ id: 6, name: 'Dewi Lestari', email: 'dewi@student.ac.id', role: 'Mahasiswa', status: 'Nonaktif', joined: '02 Feb 2026', courses: 2 }
-	];
+	]);
+
+	let nextId = $derived(users.reduce((m, u) => Math.max(m, u.id), 0) + 1);
 
 	const filtered = $derived(
 		users.filter((u) => {
@@ -37,11 +44,37 @@
 		if (s === 'Pending') return 'border-amber-200 bg-amber-50 text-amber-700';
 		return 'border-slate-200 bg-slate-100 text-slate-600';
 	}
+
+	function closeAdd() {
+		showAdd = false;
+		formName = '';
+		formEmail = '';
+		formRole = 'Mahasiswa';
+		formStatus = 'Aktif';
+	}
+
+	function submitAdd(event: Event) {
+		event.preventDefault();
+		if (!formName.trim() || !formEmail.trim()) return;
+		users = [
+			...users,
+			{
+				id: nextId,
+				name: formName.trim(),
+				email: formEmail.trim(),
+				role: formRole,
+				status: formStatus,
+				joined: 'Hari ini',
+				courses: 0
+			}
+		];
+		closeAdd();
+	}
 </script>
 
 <svelte:head>
-	<title>Users — Admin Aristotle</title>
-	<meta name="description" content="Kelola pengguna platform Aristotle." />
+	<title>Users — Admin Aristoteles</title>
+	<meta name="description" content="Kelola pengguna platform Aristoteles." />
 </svelte:head>
 
 <div class="p-4 sm:p-6 lg:p-8">
@@ -53,7 +86,7 @@
 				{filtered.length} dari {users.length} pengguna ditampilkan
 			</p>
 		</div>
-		<button type="button" class="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600">
+		<button type="button" onclick={() => (showAdd = true)} class="inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600">
 			<i class="fa-solid fa-user-plus" aria-hidden="true"></i> Tambah User
 		</button>
 	</div>
@@ -78,7 +111,7 @@
 	<div class="overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
 		<div class="overflow-x-auto">
 			<table class="w-full min-w-[720px] text-sm">
-				<caption class="sr-only">Daftar pengguna platform Aristotle</caption>
+				<caption class="sr-only">Daftar pengguna platform Aristoteles</caption>
 				<thead class="bg-slate-900 text-white">
 					<tr>
 						<th scope="col" class="px-6 py-3.5 text-left text-xs font-bold tracking-wider uppercase">Pengguna</th>
@@ -111,9 +144,13 @@
 							</td>
 							<td class="px-6 py-3.5">
 								<div class="flex justify-end gap-2">
-									<button type="button" aria-label={`Lihat detail ${u.name}`} class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600">
+									<a
+										href={`/admin/users/${u.id}`}
+										aria-label={`Lihat detail ${u.name}`}
+										class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600"
+									>
 										<i class="fa-solid fa-eye text-sm" aria-hidden="true"></i>
-									</button>
+									</a>
 									<button type="button" aria-label={`Ubah ${u.name}`} class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-amber-600 focus-visible:outline-2 focus-visible:outline-amber-600">
 										<i class="fa-solid fa-pen text-sm" aria-hidden="true"></i>
 									</button>
@@ -128,4 +165,52 @@
 			<p class="p-8 text-center text-sm text-slate-500">Tidak ada user yang cocok dengan pencarian.</p>
 		{/if}
 	</div>
+
+	{#if showAdd}
+		<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="add-user-title">
+			<form
+				onsubmit={submitAdd}
+				class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl"
+			>
+				<h2 id="add-user-title" class="text-lg font-bold text-slate-900">Tambah User</h2>
+				<p class="mt-0.5 text-xs text-slate-500">User baru langsung tampil di daftar.</p>
+				<div class="mt-4 space-y-3">
+					<div>
+						<label for="add-name" class="mb-1 block text-xs font-bold text-slate-700">Nama lengkap</label>
+						<input id="add-name" type="text" bind:value={formName} required placeholder="cth. Budi Santoso" class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none" />
+					</div>
+					<div>
+						<label for="add-email" class="mb-1 block text-xs font-bold text-slate-700">Email</label>
+						<input id="add-email" type="email" bind:value={formEmail} required placeholder="nama@email.com" class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none" />
+					</div>
+					<div class="grid grid-cols-2 gap-3">
+						<div>
+							<label for="add-role" class="mb-1 block text-xs font-bold text-slate-700">Role</label>
+							<select id="add-role" bind:value={formRole} class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-blue-500 focus:outline-none">
+								<option>Mahasiswa</option>
+								<option>Instruktur</option>
+								<option>Administrator</option>
+							</select>
+						</div>
+						<div>
+							<label for="add-status" class="mb-1 block text-xs font-bold text-slate-700">Status</label>
+							<select id="add-status" bind:value={formStatus} class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2.5 text-sm focus:border-blue-500 focus:outline-none">
+								<option>Aktif</option>
+								<option>Pending</option>
+								<option>Nonaktif</option>
+							</select>
+						</div>
+					</div>
+				</div>
+				<div class="mt-5 flex gap-2">
+					<button type="button" onclick={closeAdd} class="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50">
+						Batal
+					</button>
+					<button type="submit" class="flex-1 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-blue-700">
+						Simpan User
+					</button>
+				</div>
+			</form>
+		</div>
+	{/if}
 </div>

@@ -210,7 +210,7 @@
 
 <svelte:head>
 	<title>
-		{material && course ? `${material.title} — ${course.title}` : 'Materi tidak ditemukan'} — Aristotle
+		{material && course ? `${material.title} — ${course.title}` : 'Materi tidak ditemukan'} — Aristoteles
 	</title>
 	<meta
 		name="description"

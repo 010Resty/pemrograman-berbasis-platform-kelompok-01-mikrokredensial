@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { aristotleLogo as logoUrl } from '$lib/assets/logo';
+	import { aristotelesLogo as logoUrl } from '$lib/assets/logo';
 
 	let {
 		size = 'md',
@@ -31,13 +31,13 @@
 <div class="flex items-center gap-3">
 	<img
 		src={logoUrl}
-		alt="Aristotle Logo"
+		alt="Aristoteles Logo"
 		class="{sizeClasses[size]} rounded-full object-cover shadow-lg"
 	/>
 	{#if showText}
 		<div>
 			<h1 class="{textSizeClasses[textSize]} font-bold {dark ? 'text-white' : 'text-slate-900'} tracking-tight">
-				Aristotle
+				Aristoteles
 			</h1>
 			<p class="text-xs {dark ? 'text-blue-200' : 'text-slate-500'} font-medium -mt-0.5">
 				Platform Mikrokredensial

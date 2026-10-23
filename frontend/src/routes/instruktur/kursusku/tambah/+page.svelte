@@ -193,7 +193,7 @@
 </script>
 
 <svelte:head>
-	<title>Tambah Pelatihan — Instruktur Aristotle</title>
+	<title>Tambah Pelatihan — Instruktur Aristoteles</title>
 	<meta
 		name="description"
 		content="Buat pelatihan baru dalam satu langkah: isi info dasar dan hasil belajar, otomatis masuk daftar upcoming."

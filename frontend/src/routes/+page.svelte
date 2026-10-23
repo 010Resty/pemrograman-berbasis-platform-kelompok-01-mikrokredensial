@@ -2,11 +2,107 @@
 	import '../app.css';
 	import { resolve } from '$app/paths';
 	import Logo from '$lib/components/Logo.svelte';
-	import { aristotleLogo as logoUrl } from '$lib/assets/logo';
+	import { aristotelesLogo as logoUrl } from '$lib/assets/logo';
 	import { courses } from '$lib/data/courses';
 	import { getCourseMeta } from '$lib/data/course-meta';
 
 	let menuOpen = $state(false);
+
+	const rankings = [
+		{
+			rank: 1,
+			title: 'Belajar Figma – Pelatihan Desain UI/UX Esensial',
+			category: 'Desain UI/UX',
+			instructor: 'Kevin Perry',
+			rating: '4.8',
+			participants: '2.450',
+			initials: 'KP'
+		},
+		{
+			rank: 2,
+			title: 'Statistik TI, Sains Data, dan Analisis Bisnis',
+			category: 'Sains Data',
+			instructor: 'Kevin Perry',
+			rating: '4.7',
+			participants: '2.180',
+			initials: 'KP'
+		},
+		{
+			rank: 3,
+			title: 'Perangkat Lunak Pendidikan dan Sistem PHP & JS',
+			category: 'Pengembangan Web',
+			instructor: 'Max Alexix',
+			rating: '4.7',
+			participants: '1.920',
+			initials: 'MA'
+		},
+		{
+			rank: 4,
+			title: 'Kursus Pengembangan Android 12 & Kotlin Lanjutan',
+			category: 'Pengembangan Mobile',
+			instructor: 'Max Alexix',
+			rating: '4.7',
+			participants: '1.750',
+			initials: 'MA'
+		},
+		{
+			rank: 5,
+			title: 'Pemasaran Digital untuk Pemula',
+			category: 'Pemasaran Digital',
+			instructor: 'Sarah Johnson',
+			rating: '4.6',
+			participants: '1.540',
+			initials: 'SJ'
+		},
+		{
+			rank: 6,
+			title: 'Copywriting & Content Marketing untuk Brand',
+			category: 'Pemasaran Digital',
+			instructor: 'Dewi Lestari',
+			rating: '4.6',
+			participants: '1.320',
+			initials: 'DL'
+		},
+		{
+			rank: 7,
+			title: 'Analisis Data dengan Python & Visualisasi Dashboard',
+			category: 'Sains Data',
+			instructor: 'Rizky Pratama',
+			rating: '4.5',
+			participants: '1.180',
+			initials: 'RP'
+		},
+		{
+			rank: 8,
+			title: 'Fundamental JavaScript & Frontend Modern',
+			category: 'Pengembangan Web',
+			instructor: 'Andi Wijaya',
+			rating: '4.5',
+			participants: '1.050',
+			initials: 'AW'
+		},
+		{
+			rank: 9,
+			title: 'Manajemen Proyek Agile & Scrum Master',
+			category: 'Manajemen',
+			instructor: 'Putri Ayu',
+			rating: '4.4',
+			participants: '980',
+			initials: 'PA'
+		},
+		{
+			rank: 10,
+			title: 'Fotografi & Editing untuk Kreator Konten',
+			category: 'Desain Grafis',
+			instructor: 'Bagas Saputra',
+			rating: '4.4',
+			participants: '870',
+			initials: 'BS'
+		}
+	];
+
+	const podiumOrder = [rankings[1], rankings[0], rankings[2]];
+	const tableRankings = rankings.slice(3);
 
 	const mobileLinks = [
 		{ id: 'beranda', label: 'Beranda' },
@@ -18,10 +114,10 @@
 </script>
 
 <svelte:head>
-	<title>Ubah Rasa Ingin Tahu Menjadi Keahlian yang Bermakna — Aristotle</title>
+	<title>Ubah Rasa Ingin Tahu Menjadi Keahlian yang Bermakna — Aristoteles</title>
 	<meta
 		name="description"
-		content="ARISTOTLE — Artificial Intelligence Research, Innovation, Science, Technology, and Engineering Laboratory for Education and Systems. Dari memilih pelatihan hingga memperoleh sertifikat. Terstruktur, terukur, dan berkelanjutan."
+		content="ARISTOTELES — Artificial Intelligence Research, Innovation, Science, Technology, and Engineering Laboratory for Education and Systems. Dari memilih pelatihan hingga memperoleh sertifikat. Terstruktur, terukur, dan berkelanjutan."
 	/>
 </svelte:head>
 
@@ -33,7 +129,7 @@
 			<a
 				href="#beranda"
 				class="flex shrink-0 items-center gap-3 rounded-lg focus-visible:outline-2 focus-visible:outline-blue-600"
-				aria-label="Aristotle - Beranda"
+				aria-label="Aristoteles - Beranda"
 			>
 				<Logo size="md" showText={true} textSize="xl" />
 			</a>
@@ -176,7 +272,7 @@
 					</h1>
 
 					<p class="max-w-xl text-xs leading-relaxed text-text-muted sm:text-sm">
-						<strong class="font-bold text-navy">ARISTOTLE</strong> — Artificial Intelligence Research,
+						<strong class="font-bold text-navy">ARISTOTELES</strong> — Artificial Intelligence Research,
 						Innovation, Science, Technology, and Engineering Laboratory for Education and Systems.
 					</p>
 
@@ -209,7 +305,7 @@
 					<!-- Action Buttons -->
 					<div class="flex animate-rise flex-wrap gap-4 pt-4" style="animation-delay:270ms">
 						<a
-							href="#"
+							href="/register"
 							class="group flex items-center gap-3 rounded-xl bg-primary px-8 py-4 font-bold text-white shadow-lg shadow-primary/25 transition-all duration-300 hover:bg-primary-hover active:scale-[0.98]"
 						>
 							DAFTAR SEKARANG <i
@@ -449,8 +545,18 @@
 	</section>
 
 	<!-- Rankings Section (Peringkat) -->
-	<section id="peringkat" class="py-20 bg-slate-50">
-		<div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+	<section id="peringkat" class="relative overflow-hidden py-20 bg-slate-50">
+		<div
+			class="pointer-events-none absolute inset-0"
+			aria-hidden="true"
+		>
+			<div
+				class="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:44px_44px] opacity-60 [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]"
+			></div>
+			<div class="absolute -top-10 left-1/2 h-56 w-[36rem] -translate-x-1/2 rounded-full bg-blue-200/40 blur-3xl"></div>
+		</div>
+
+		<div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 			<div class="text-center max-w-2xl mx-auto mb-12 space-y-3">
 				<span
 					class="text-blue-600 font-bold text-xs uppercase tracking-widest bg-blue-100 px-3 py-1 rounded-full"
@@ -464,10 +570,143 @@
 				</p>
 			</div>
 
-			<!-- Rankings Table -->
+			<!-- Podium Top 3 -->
+			<ol
+				aria-label="Tiga pelatihan peringkat teratas"
+				class="mx-auto mb-12 grid max-w-4xl grid-cols-3 items-end gap-3 sm:gap-6"
+			>
+				{#each podiumOrder as item (item.rank)}
+					{@const isFirst = item.rank === 1}
+					{@const isSecond = item.rank === 2}
+					<li
+						class="animate-rise flex flex-col items-center text-center {isFirst
+							? 'order-2 -mt-2'
+							: isSecond
+								? 'order-1'
+								: 'order-3'}"
+						style="animation-delay:{item.rank * 90}ms"
+					>
+						{#if isFirst}
+							<span
+								class="mb-1 inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-400 text-slate-900 shadow-lg shadow-amber-400/40 ring-4 ring-amber-100"
+								aria-hidden="true"
+							>
+								<i class="fa-solid fa-crown text-base"></i>
+							</span>
+						{/if}
+
+						<!-- Medali / avatar -->
+						<div class="relative">
+							<div
+								class="flex items-center justify-center rounded-2xl font-black {isFirst
+									? 'h-16 w-16 sm:h-20 sm:w-20 text-xl bg-slate-900 text-amber-300 ring-4 ring-amber-400 shadow-xl shadow-slate-900/20'
+									: isSecond
+										? 'h-14 w-14 sm:h-16 sm:w-16 text-lg bg-white text-slate-700 ring-2 ring-slate-300 shadow-lg'
+										: 'h-14 w-14 sm:h-16 sm:w-16 text-lg bg-white text-orange-700 ring-2 ring-orange-300 shadow-lg'}"
+								aria-hidden="true"
+							>
+								{isFirst ? '1' : isSecond ? '2' : '3'}
+							</div>
+							<span
+								class="absolute -right-2 -bottom-2 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-xs shadow {isFirst
+									? 'bg-amber-400 text-slate-900'
+									: isSecond
+										? 'bg-slate-400 text-white'
+										: 'bg-orange-600 text-white'}"
+								aria-hidden="true"
+							>
+								<i
+									class="fa-solid {isFirst ? 'fa-trophy' : isSecond ? 'fa-medal' : 'fa-award'}"
+								></i>
+							</span>
+						</div>
+
+						<!-- Info kartu -->
+						<div
+							class="mt-3 w-full rounded-2xl border bg-white px-2 py-3 shadow-sm sm:px-4 {isFirst
+								? 'border-amber-300 shadow-amber-100'
+								: 'border-slate-200'}"
+						>
+							<p
+								class="text-[10px] font-extrabold tracking-[0.16em] uppercase {isFirst
+									? 'text-amber-600'
+									: isSecond
+										? 'text-slate-500'
+										: 'text-orange-600'}"
+							>
+								Juara {item.rank}
+							</p>
+							<h3
+								class="mt-1 line-clamp-2 min-h-8 text-[11px] leading-snug font-extrabold text-slate-900 sm:min-h-10 sm:text-sm"
+							>
+								{item.title}
+							</h3>
+							<p class="mt-1 hidden text-[11px] font-semibold text-slate-500 sm:block">
+								{item.category} · {item.instructor}
+							</p>
+							<div class="mt-2 flex items-center justify-center gap-2 text-[11px] font-bold">
+								<span class="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-amber-600">
+									<i class="fa-solid fa-star text-[10px]" aria-hidden="true"></i>
+									{item.rating}
+								</span>
+								<span class="hidden items-center gap-1 text-slate-500 sm:inline-flex">
+									<i class="fa-solid fa-users text-[10px]" aria-hidden="true"></i>
+									{item.participants}
+								</span>
+							</div>
+						</div>
+
+						<!-- Balok podium bertingkat -->
+						<div
+							class="mt-3 flex w-full flex-col items-center justify-start rounded-t-2xl border-x border-t px-2 pt-3 text-white {isFirst
+								? 'h-40 sm:h-48 bg-slate-900 border-slate-900 shadow-[0_-8px_30px_-10px_rgba(245,158,11,0.5)]'
+								: isSecond
+									? 'h-28 sm:h-32 bg-white border-slate-200 text-slate-700'
+									: 'h-24 sm:h-28 bg-white border-slate-200 text-slate-700'}"
+							aria-hidden="true"
+						>
+							{#if isFirst}
+								<span class="h-1 w-12 rounded-full bg-amber-400"></span>
+							{/if}
+							<span
+								class="mt-1 text-3xl font-black tracking-tight tabular-nums sm:text-4xl {isFirst
+									? 'text-amber-300'
+									: 'text-slate-300'}"
+							>
+								{item.rank}
+							</span>
+							<span
+								class="text-[10px] font-bold tracking-[0.2em] uppercase {isFirst
+									? 'text-slate-300'
+									: 'text-slate-400'}"
+							>
+								{item.participants} peserta
+							</span>
+						</div>
+						<div
+							class="h-2 w-full rounded-b-lg {isFirst
+								? 'bg-amber-400'
+								: isSecond
+									? 'bg-slate-400'
+									: 'bg-orange-600'}"
+							aria-hidden="true"
+						></div>
+					</li>
+				{/each}
+			</ol>
+
+			<!-- Rankings Table (peringkat 4 ke bawah) -->
 			<div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+				<div class="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-6 py-4">
+					<h3 class="text-sm font-extrabold text-slate-900">
+						<i class="fa-solid fa-list-ol text-blue-600" aria-hidden="true"></i>
+						Peringkat 4 – 10
+					</h3>
+					<p class="text-xs text-slate-500">Berdasarkan penilaian peserta</p>
+				</div>
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
+						<caption class="sr-only">Tabel peringkat pelatihan posisi 4 sampai 10</caption>
 						<thead class="bg-slate-900 text-white">
 							<tr>
 								<th class="px-6 py-4 text-left font-bold text-xs uppercase tracking-wider"
@@ -494,99 +733,27 @@
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-slate-100">
-							<tr class="hover:bg-blue-50/50 transition">
-								<td class="px-6 py-4">
-									<span
-										class="inline-flex items-center justify-center w-8 h-8 bg-amber-400 text-white font-black text-sm rounded-lg"
-										>1</span
-									>
-								</td>
-								<td class="px-6 py-4 font-bold text-slate-900"
-									>Belajar Figma – Pelatihan Desain UI/UX Esensial</td
-								>
-								<td class="px-6 py-4 text-slate-600 hidden sm:table-cell">Desain UI/UX</td>
-								<td class="px-6 py-4 text-slate-600 hidden md:table-cell">Kevin Perry</td>
-								<td class="px-6 py-4 text-center">
-									<span class="inline-flex items-center gap-1 text-amber-500 font-bold"
-										><i class="fa-solid fa-star"></i> 4.8</span
-									>
-								</td>
-								<td class="px-6 py-4 text-center text-slate-600 hidden lg:table-cell">2.450</td>
-							</tr>
-							<tr class="hover:bg-blue-50/50 transition">
-								<td class="px-6 py-4">
-									<span
-										class="inline-flex items-center justify-center w-8 h-8 bg-slate-400 text-white font-black text-sm rounded-lg"
-										>2</span
-									>
-								</td>
-								<td class="px-6 py-4 font-bold text-slate-900"
-									>Statistik TI, Sains Data, dan Analisis Bisnis</td
-								>
-								<td class="px-6 py-4 text-slate-600 hidden sm:table-cell">Sains Data</td>
-								<td class="px-6 py-4 text-slate-600 hidden md:table-cell">Kevin Perry</td>
-								<td class="px-6 py-4 text-center">
-									<span class="inline-flex items-center gap-1 text-amber-500 font-bold"
-										><i class="fa-solid fa-star"></i> 4.7</span
-									>
-								</td>
-								<td class="px-6 py-4 text-center text-slate-600 hidden lg:table-cell">2.180</td>
-							</tr>
-							<tr class="hover:bg-blue-50/50 transition">
-								<td class="px-6 py-4">
-									<span
-										class="inline-flex items-center justify-center w-8 h-8 bg-orange-600 text-white font-black text-sm rounded-lg"
-										>3</span
-									>
-								</td>
-								<td class="px-6 py-4 font-bold text-slate-900"
-									>Perangkat Lunak Pendidikan dan Sistem PHP & JS</td
-								>
-								<td class="px-6 py-4 text-slate-600 hidden sm:table-cell">Pengembangan Web</td>
-								<td class="px-6 py-4 text-slate-600 hidden md:table-cell">Max Alexix</td>
-								<td class="px-6 py-4 text-center">
-									<span class="inline-flex items-center gap-1 text-amber-500 font-bold"
-										><i class="fa-solid fa-star"></i> 4.7</span
-									>
-								</td>
-								<td class="px-6 py-4 text-center text-slate-600 hidden lg:table-cell">1.920</td>
-							</tr>
-							<tr class="hover:bg-blue-50/50 transition">
-								<td class="px-6 py-4">
-									<span
-										class="inline-flex items-center justify-center w-8 h-8 bg-slate-200 text-slate-700 font-black text-sm rounded-lg"
-										>4</span
-									>
-								</td>
-								<td class="px-6 py-4 font-bold text-slate-900"
-									>Kursus Pengembangan Android 12 & Kotlin Lanjutan</td
-								>
-								<td class="px-6 py-4 text-slate-600 hidden sm:table-cell">Pengembangan Mobile</td>
-								<td class="px-6 py-4 text-slate-600 hidden md:table-cell">Max Alexix</td>
-								<td class="px-6 py-4 text-center">
-									<span class="inline-flex items-center gap-1 text-amber-500 font-bold"
-										><i class="fa-solid fa-star"></i> 4.7</span
-									>
-								</td>
-								<td class="px-6 py-4 text-center text-slate-600 hidden lg:table-cell">1.750</td>
-							</tr>
-							<tr class="hover:bg-blue-50/50 transition">
-								<td class="px-6 py-4">
-									<span
-										class="inline-flex items-center justify-center w-8 h-8 bg-slate-200 text-slate-700 font-black text-sm rounded-lg"
-										>5</span
-									>
-								</td>
-								<td class="px-6 py-4 font-bold text-slate-900">Pemasaran Digital untuk Pemula</td>
-								<td class="px-6 py-4 text-slate-600 hidden sm:table-cell">Pemasaran Digital</td>
-								<td class="px-6 py-4 text-slate-600 hidden md:table-cell">Sarah Johnson</td>
-								<td class="px-6 py-4 text-center">
-									<span class="inline-flex items-center gap-1 text-amber-500 font-bold"
-										><i class="fa-solid fa-star"></i> 4.6</span
-									>
-								</td>
-								<td class="px-6 py-4 text-center text-slate-600 hidden lg:table-cell">1.540</td>
-							</tr>
+							{#each tableRankings as row (row.rank)}
+								<tr class="hover:bg-blue-50/50 transition">
+									<td class="px-6 py-4">
+										<span
+											class="inline-flex items-center justify-center w-8 h-8 bg-slate-200 text-slate-700 font-black text-sm rounded-lg"
+											>{row.rank}</span
+										>
+									</td>
+									<td class="px-6 py-4 font-bold text-slate-900">{row.title}</td>
+									<td class="px-6 py-4 text-slate-600 hidden sm:table-cell">{row.category}</td>
+									<td class="px-6 py-4 text-slate-600 hidden md:table-cell">{row.instructor}</td>
+									<td class="px-6 py-4 text-center">
+										<span class="inline-flex items-center gap-1 text-amber-500 font-bold"
+											><i class="fa-solid fa-star"></i> {row.rating}</span
+										>
+									</td>
+									<td class="px-6 py-4 text-center text-slate-600 hidden lg:table-cell">
+										{row.participants}
+									</td>
+								</tr>
+							{/each}
 						</tbody>
 					</table>
 				</div>
@@ -678,7 +845,7 @@
 
 					<div class="pt-4">
 						<a
-							href="#"
+							href="/modules"
 							class="inline-flex items-center gap-3 bg-blue-600 text-white font-bold text-sm px-8 py-4 rounded-xl hover:bg-blue-700 transition shadow-lg shadow-blue-600/30"
 						>
 							BACA SELENGKAPNYA <i class="fa-solid fa-arrow-right"></i>
@@ -702,7 +869,7 @@
 							<i class="fa-solid fa-shield-halved"></i> Portal Validasi Perusahaan &amp; Institusi
 						</span>
 						<h2 class="text-3xl sm:text-4xl font-extrabold text-slate-900 mb-4">
-							Verifikasi Keaslian Sertifikat Aristotle
+							Verifikasi Keaslian Sertifikat Aristoteles
 						</h2>
 						<p class="text-slate-600 text-sm sm:text-base mb-8 max-w-xl">
 							Apakah Anda seorang recruiter atau pimpinan akademik? Masukkan ID Kredensial kandidat
@@ -779,7 +946,7 @@
 							>
 								<span>Signer: 0x4D2A...81E9</span>
 								<a
-									href="#"
+									href="/user/sertifikat"
 									class="text-blue-600 hover:underline flex items-center gap-1 font-sans font-semibold"
 								>
 									Unduh PDF
@@ -812,16 +979,18 @@
 				<li><a href="#tentang" class="hover:text-white transition">Tentang Kami</a></li>
 				<li><a href="#modul" class="hover:text-white transition">Pelatihan</a></li>
 				<li><a href="#peringkat" class="hover:text-white transition">Peringkat Pelatihan</a></li>
-				<li><a href="#" class="hover:text-white transition">Kebijakan Privasi</a></li>
+				<li><a href="/with_UNIRA" class="hover:text-white transition">Kebijakan Privasi</a></li>
 			</ul>
 		</div>
 		<div>
 			<h4 class="text-white font-bold text-base mb-4">Kategori Program</h4>
 			<ul class="space-y-2 text-xs">
-				<li><a href="#" class="hover:text-white transition">Pemasaran Digital</a></li>
-				<li><a href="#" class="hover:text-white transition">Desain UI/UX</a></li>
-				<li><a href="#" class="hover:text-white transition">Sains Data & Analitik</a></li>
-				<li><a href="#" class="hover:text-white transition">Pengembangan Mobile & Web</a></li>
+				<li><a href="/modules" class="hover:text-white transition">Pemasaran Digital</a></li>
+				<li><a href="/modules" class="hover:text-white transition">Desain UI/UX</a></li>
+				<li><a href="/modules" class="hover:text-white transition">Sains Data & Analitik</a></li>
+				<li>
+					<a href="/modules" class="hover:text-white transition">Pengembangan Mobile & Web</a>
+				</li>
 			</ul>
 		</div>
 		<div>
@@ -836,8 +1005,9 @@
 					class="bg-slate-800 text-xs px-3 py-2 rounded-l-lg focus:outline-none text-white w-full border border-slate-700"
 				/>
 				<button
+					aria-label="Kirim email buletin"
 					class="bg-blue-600 text-white px-4 rounded-r-lg text-xs font-bold hover:bg-blue-700 transition"
-					><i class="fa-solid fa-paper-plane"></i></button
+					><i class="fa-solid fa-paper-plane" aria-hidden="true"></i></button
 				>
 			</div>
 		</div>
@@ -845,7 +1015,7 @@
 	<div
 		class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pt-8 border-t border-slate-800 text-center text-xs text-slate-500"
 	>
-		&copy; 2026 Aristotle Platform Mikrokredensial. Semua hak dilindungi.
+		&copy; 2026 Aristoteles Platform Mikrokredensial. Semua hak dilindungi.
 	</div>
 </footer>
 

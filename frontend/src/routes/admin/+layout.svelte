@@ -1,9 +1,33 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
+	import { homeFor, loadSession, logout } from '$lib/stores/auth.svelte';
 
 	let { children } = $props();
+
+	// Guard portal admin: wajib login dengan role admin.
+	let authorized = $state(false);
+
+	$effect(() => {
+		if (!browser) return;
+		const session = loadSession();
+		if (!session) {
+			goto('/login');
+			return;
+		}
+		if (session.role !== 'admin') {
+			goto(homeFor(session.role));
+			return;
+		}
+		authorized = true;
+	});
+
+	function handleLogout() {
+		logout();
+	}
 
 	let sidebarOpen = $state(false);
 	let isCollapsed = $state(false);
@@ -39,18 +63,20 @@
 	Lewati ke konten utama
 </a>
 
+{#if authorized}
 <div class="grid min-h-screen grid-cols-1 bg-slate-50 lg:grid-cols-[auto_1fr]">
 	<Sidebar
 		{navItems}
 		bind:sidebarOpen
 		bind:isCollapsed
 		onClose={() => (sidebarOpen = false)}
+		onLogout={handleLogout}
 		brandHref="/admin"
-		brandLabel="Aristotle Platform - Dashboard admin"
+		brandLabel="Aristoteles Platform - Dashboard admin"
 		navAriaLabel="Navigasi admin"
-		profileName="ADMIN ARISTOTLE"
+		profileName="ADMIN ARISTOTELES"
 		profileRole="Administrator"
-		profileAlt="Foto profil admin Aristotle"
+		profileAlt="Foto profil admin Aristoteles"
 	/>
 
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -133,7 +159,7 @@
 								AD
 							</span>
 							<span class="hidden text-left sm:block">
-								<span class="block text-sm leading-tight font-semibold text-slate-800">Admin Aristotle</span>
+								<span class="block text-sm leading-tight font-semibold text-slate-800">Admin Aristoteles</span>
 								<span class="block text-xs leading-tight text-slate-500">Administrator</span>
 							</span>
 							<i class="fa-solid fa-chevron-down hidden text-xs text-slate-400 sm:block" aria-hidden="true"></i>
@@ -146,8 +172,8 @@
 								class="absolute top-full right-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-xl"
 							>
 								<div class="border-b border-slate-100 px-4 py-3">
-									<div class="text-sm font-semibold text-slate-800">Admin Aristotle</div>
-									<div class="text-xs text-slate-500">admin@aristotle.ac.id</div>
+									<div class="text-sm font-semibold text-slate-800">Admin Aristoteles</div>
+									<div class="text-xs text-slate-500">admin@aristoteles.ac.id</div>
 								</div>
 								<div class="p-1.5" role="none">
 									<a
@@ -174,7 +200,10 @@
 										role="menuitem"
 										href="/"
 										class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-500"
-										onclick={closeProfileMenu}
+										onclick={() => {
+											handleLogout();
+											closeProfileMenu();
+										}}
 									>
 										<i class="fa-solid fa-right-from-bracket w-4 text-center" aria-hidden="true"></i>
 										Keluar
@@ -192,3 +221,10 @@
 		</main>
 	</div>
 </div>
+{:else}
+	<div class="flex min-h-screen items-center justify-center bg-slate-50" role="status" aria-label="Memeriksa sesi">
+		<p class="flex items-center gap-2 text-sm font-semibold text-slate-500">
+			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memeriksa sesi portal...
+		</p>
+	</div>
+{/if}

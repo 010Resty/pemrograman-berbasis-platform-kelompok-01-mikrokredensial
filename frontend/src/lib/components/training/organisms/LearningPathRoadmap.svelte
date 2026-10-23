@@ -17,7 +17,7 @@
 	 * dihitung deterministik dari data. Node hanya toggle drawer.
 	 */
 
-	let { modules }: { modules: CourseModule[] } = $props();
+	let { modules, courseId }: { modules: CourseModule[]; courseId?: number } = $props();
 
 	let selectedNode = $state<string | null>(null);
 
@@ -273,5 +273,43 @@
 			</p>
 		{/if}
 	</div>
-	<InfoDrawer {selection} onclose={closeDrawer} />
+{#snippet roadmapActions(sel: import('$lib/data/training').RoadmapSelection)}
+		{@const href =
+			courseId !== undefined
+				? sel.kind === 'module'
+					? `/modules/${courseId}/${sel.module.id}`
+					: `/modules/${courseId}/${sel.module.id}/${sel.sub.id}`
+				: '/login'}
+		<div class="space-y-2">
+			{#if courseId !== undefined}
+				<a
+					href={href}
+					class="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-3 text-sm font-bold text-white shadow-lg shadow-primary/25 transition-all duration-200 ease-smooth hover:bg-primary-hover active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-primary"
+				>
+					<i class="fa-solid fa-route" aria-hidden="true"></i>
+					{#if sel.kind === 'module'}
+						Buka detail Modul {sel.moduleIndex + 1}
+					{:else}
+						Buka Sub-modul {sel.moduleIndex + 1}.{sel.subIndex + 1}
+					{/if}
+				</a>
+			{/if}
+			<a
+				href="/login"
+				class={`flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition-all duration-200 ease-smooth active:scale-[0.98] focus-visible:outline-2 ${
+					courseId !== undefined
+						? 'border border-slate-200 text-slate-700 hover:bg-slate-50 focus-visible:outline-slate-500'
+						: 'bg-primary text-white shadow-lg shadow-primary/25 hover:bg-primary-hover focus-visible:outline-primary'
+				}`}
+			>
+				<i class="fa-solid fa-arrow-right-to-bracket" aria-hidden="true"></i>
+				Masuk untuk mulai belajar
+			</a>
+			<p class="text-center text-[11px] text-slate-500">
+				Masuk untuk melacak progres dan membuka seluruh materi.
+			</p>
+		</div>
+	{/snippet}
+
+	<InfoDrawer {selection} onclose={closeDrawer} actions={roadmapActions} />
 </section>

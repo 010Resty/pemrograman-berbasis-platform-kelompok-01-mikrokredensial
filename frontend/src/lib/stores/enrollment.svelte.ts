@@ -9,7 +9,7 @@ import { getCourseMeta } from '$lib/data/course-meta';
  * Course berbayar yang belum dibayar TIDAK tampil di Kursusku.
  * Daftar milik tersimpan di localStorage.
  */
-const KEY = 'aristotle:owned-courses:v2';
+const KEY = 'aristoteles:owned-courses:v2';
 
 export const ownedCourses = new SvelteSet<number>();
 

@@ -658,7 +658,7 @@ export const courses: Course[] = [
 		id: 7,
 		title: 'Full-Stack Web Development Bootcamp',
 		category: 'Pengembangan Web',
-		instructor: 'Tim Aristotle',
+		instructor: 'Tim Aristoteles',
 		image:
 			'https://images.unsplash.com/photo-1542831371-29b0f74f9713?auto=format&fit=crop&w=600&q=80',
 		description:

@@ -1,5 +1,5 @@
 /** Barrel logo: satu pintu impor untuk seluruh aset logo aplikasi. */
-import aristotleLogo from './aristotlelogo.png';
+import aristotelesLogo from './aristoteleslogo.png';
 import uniraLogo from './unira.jpeg';
 
-export { aristotleLogo, uniraLogo };
+export { aristotelesLogo, uniraLogo };

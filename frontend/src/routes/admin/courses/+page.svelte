@@ -15,8 +15,12 @@
 
 	let query = $state('');
 	let filter = $state<Status>('all');
+	let showAdd = $state(false);
+	let formTitle = $state('');
+	let formCategory = $state('');
+	let formInstructor = $state('');
 
-	const courses: Course[] = [
+	let courses = $state<Course[]>([
 		{ id: 1, title: 'Belajar Figma – Desain UI/UX Esensial', category: 'Desain UI/UX', instructor: 'Kevin Perry', lessons: 12, students: 2450, rating: 4.8, status: 'Published', updated: '20 Agu 2026' },
 		{ id: 2, title: 'Sistem PHP & JS untuk Pendidikan', category: 'Pengembangan Web', instructor: 'Max Alexix', lessons: 8, students: 1920, rating: 4.7, status: 'Published', updated: '15 Agu 2026' },
 		{ id: 3, title: 'Statistik TI & Analisis Bisnis', category: 'Sains Data', instructor: 'Kevin Perry', lessons: 16, students: 2180, rating: 4.7, status: 'Published', updated: '10 Agu 2026' },
@@ -24,7 +28,7 @@
 		{ id: 5, title: 'Machine Learning Dasar', category: 'Sains Data', instructor: 'Rian Pratama', lessons: 14, students: 860, rating: 4.9, status: 'Draft', updated: '28 Jul 2026' },
 		{ id: 6, title: 'Keamanan Siber Fundamental', category: 'Keamanan', instructor: 'Dewi Anggraini', lessons: 6, students: 320, rating: 4.5, status: 'Draft', updated: '20 Jul 2026' },
 		{ id: 7, title: 'Jaringan Komputer Legacy 2019', category: 'Jaringan', instructor: 'Budi Santoso', lessons: 7, students: 410, rating: 4.1, status: 'Archived', updated: '10 Jan 2026' }
-	];
+	]);
 
 	const filtered = $derived(
 		courses.filter((c) => {
@@ -40,11 +44,40 @@
 		if (s === 'Draft') return 'border-amber-200 bg-amber-50 text-amber-700';
 		return 'border-slate-200 bg-slate-100 text-slate-600';
 	}
+
+	let nextId = $derived(courses.reduce((m, c) => Math.max(m, c.id), 0) + 1);
+
+	function closeAdd() {
+		showAdd = false;
+		formTitle = '';
+		formCategory = '';
+		formInstructor = '';
+	}
+
+	function submitAdd(event: Event) {
+		event.preventDefault();
+		if (!formTitle.trim()) return;
+		courses = [
+			...courses,
+			{
+				id: nextId,
+				title: formTitle.trim(),
+				category: formCategory.trim() || 'Umum',
+				instructor: formInstructor.trim() || 'Tim Aristoteles',
+				lessons: 0,
+				students: 0,
+				rating: 5.0,
+				status: 'Draft',
+				updated: 'Hari ini'
+			}
+		];
+		closeAdd();
+	}
 </script>
 
 <svelte:head>
-	<title>Courses — Admin Aristotle</title>
-	<meta name="description" content="Kelola course mikrokredensial Aristotle." />
+	<title>Courses — Admin Aristoteles</title>
+	<meta name="description" content="Kelola course mikrokredensial Aristoteles." />
 </svelte:head>
 
 <div class="p-4 sm:p-6 lg:p-8">
@@ -56,7 +89,7 @@
 				{filtered.length} dari {courses.length} course ditampilkan
 			</p>
 		</div>
-		<button type="button" class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/25 transition-colors hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600">
+		<button type="button" onclick={() => (showAdd = true)} class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/25 transition-colors hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600">
 			<i class="fa-solid fa-plus" aria-hidden="true"></i> Buat Course
 		</button>
 	</div>
@@ -81,7 +114,7 @@
 	<div class="overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
 		<div class="overflow-x-auto">
 			<table class="w-full min-w-[820px] text-sm">
-				<caption class="sr-only">Daftar course platform Aristotle</caption>
+				<caption class="sr-only">Daftar course platform Aristoteles</caption>
 				<thead class="bg-slate-900 text-white">
 					<tr>
 						<th scope="col" class="px-6 py-3.5 text-left text-xs font-bold tracking-wider uppercase">Course</th>
@@ -131,4 +164,37 @@
 			<p class="p-8 text-center text-sm text-slate-500">Tidak ada course yang cocok dengan pencarian.</p>
 		{/if}
 	</div>
+
+	{#if showAdd}
+		<div class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="add-course-title">
+			<form onsubmit={submitAdd} class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
+				<h2 id="add-course-title" class="text-lg font-bold text-slate-900">Buat Course</h2>
+				<p class="mt-0.5 text-xs text-slate-500">Course baru tersimpan sebagai Draft.</p>
+				<div class="mt-4 space-y-3">
+					<div>
+						<label for="course-title" class="mb-1 block text-xs font-bold text-slate-700">Judul course</label>
+						<input id="course-title" type="text" bind:value={formTitle} required placeholder="cth. Desain UI/UX Lanjutan" class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 focus:outline-none" />
+					</div>
+					<div class="grid grid-cols-2 gap-3">
+						<div>
+							<label for="course-cat" class="mb-1 block text-xs font-bold text-slate-700">Kategori</label>
+							<input id="course-cat" type="text" bind:value={formCategory} placeholder="cth. Desain" class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 focus:outline-none" />
+						</div>
+						<div>
+							<label for="course-ins" class="mb-1 block text-xs font-bold text-slate-700">Instruktur</label>
+							<input id="course-ins" type="text" bind:value={formInstructor} placeholder="cth. Kevin Perry" class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 focus:outline-none" />
+						</div>
+					</div>
+				</div>
+				<div class="mt-5 flex gap-2">
+					<button type="button" onclick={closeAdd} class="flex-1 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50">
+						Batal
+					</button>
+					<button type="submit" class="flex-1 rounded-xl bg-emerald-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-emerald-700">
+						Simpan Draft
+					</button>
+				</div>
+			</form>
+		</div>
+	{/if}
 </div>

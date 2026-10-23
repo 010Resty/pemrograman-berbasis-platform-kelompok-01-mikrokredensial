@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
-	import type { CourseModule, MaterialType, SubModule } from '$lib/data/courses';
+	import type { CourseModule, Material, MaterialType, SubModule } from '$lib/data/courses';
 	import { resolveSubModules } from '$lib/data/training';
+	import WarningModal from '$lib/components/WarningModal.svelte';
 
 	/**
 	 * Editor kurikulum hierarkis: Modul → Sub-modul → Materi.
@@ -128,6 +129,65 @@
 		onnotice('Materi dihapus dari draf.');
 	}
 
+	/** Hapus yang menunggu konfirmasi modal bahaya. */
+	let pendingDelete = $state<{
+		scope: 'module' | 'sub' | 'material';
+		moduleId: string;
+		subId?: string;
+		matId?: string;
+		title: string;
+		message: string;
+	} | null>(null);
+	let showDelete = $state(false);
+
+	function askDeleteModule(mod: CourseModule, mi: number) {
+		pendingDelete = {
+			scope: 'module',
+			moduleId: mod.id,
+			title: `Hapus Modul ${mi + 1}?`,
+			message: `“${mod.title || '(belum berjudul)'}” beserta seluruh sub-modul dan materi di dalamnya akan dihapus dari draf. Tindakan ini tidak bisa dibatalkan.`
+		};
+		showDelete = true;
+	}
+
+	function askDeleteSub(mod: CourseModule, sub: SubModule, mi: number, si: number) {
+		pendingDelete = {
+			scope: 'sub',
+			moduleId: mod.id,
+			subId: sub.id,
+			title: `Hapus Sub-modul ${mi + 1}.${si + 1}?`,
+			message: `“${sub.title || '(belum berjudul)'}” beserta ${sub.materials.length} materi di dalamnya akan dihapus dari draf. Tindakan ini tidak bisa dibatalkan.`
+		};
+		showDelete = true;
+	}
+
+	function askDeleteMaterial(mod: CourseModule, sub: SubModule, mat: Material, mi: number, si: number) {
+		pendingDelete = {
+			scope: 'material',
+			moduleId: mod.id,
+			subId: sub.id,
+			matId: mat.id,
+			title: `Hapus materi ${mi + 1}.${si + 1}?`,
+			message: `“${mat.title || '(belum berjudul)'}” akan dihapus dari draf. Tindakan ini tidak bisa dibatalkan.`
+		};
+		showDelete = true;
+	}
+
+	function cancelDelete() {
+		pendingDelete = null;
+	}
+
+	function executeDelete() {
+		const target = pendingDelete;
+		pendingDelete = null;
+		showDelete = false;
+		if (!target) return;
+		if (target.scope === 'module') removeModule(target.moduleId);
+		else if (target.scope === 'sub' && target.subId) removeSubModule(target.moduleId, target.subId);
+		else if (target.scope === 'material' && target.subId && target.matId)
+			removeMaterial(target.moduleId, target.subId, target.matId);
+	}
+
 	function typeIcon(type: string) {
 		if (type === 'video') return 'fa-circle-play text-blue-600';
 		if (type === 'audio') return 'fa-headphones text-cyan-600';
@@ -223,7 +283,8 @@
 							</button>
 							<button
 								type="button"
-								onclick={() => removeModule(mod.id)}
+								onclick={() => askDeleteModule(mod, mi)}
+								aria-label={`Hapus Modul ${mi + 1}`}
 								class="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2 text-[11px] font-bold text-red-600 transition-all duration-200 ease-smooth hover:bg-red-100 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-red-500"
 							>
 								<i class="fa-solid fa-trash" aria-hidden="true"></i> Hapus Modul
@@ -255,7 +316,7 @@
 								</div>
 								<button
 									type="button"
-									onclick={() => removeSubModule(mod.id, sub.id)}
+									onclick={() => askDeleteSub(mod, sub, mi, si)}
 									disabled={subs.length <= 1}
 									title={subs.length <= 1 ? 'Setiap modul wajib punya minimal 1 sub-modul' : `Hapus sub-modul ${si + 1}`}
 									aria-label={`Hapus sub-modul ${sub.title || si + 1}`}
@@ -340,7 +401,7 @@
 											</div>
 											<button
 												type="button"
-												onclick={() => removeMaterial(mod.id, sub.id, mat.id)}
+												onclick={() => askDeleteMaterial(mod, sub, mat, mi, si)}
 												disabled={matTotal <= minMaterialsPerModule}
 												aria-label={`Hapus materi ${mat.title || 'baru'}`}
 												class="flex min-h-10 min-w-10 items-center justify-center self-end rounded-lg border border-slate-200 text-slate-400 transition-all duration-200 ease-smooth hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-40 lg:self-auto"
@@ -372,4 +433,17 @@
 	>
 		<i class="fa-solid fa-plus" aria-hidden="true"></i> Tambah Modul
 	</button>
+
+	{#if pendingDelete}
+		<WarningModal
+			bind:open={showDelete}
+			type="danger"
+			title={pendingDelete.title}
+			message={pendingDelete.message}
+			confirmText="Ya, hapus"
+			cancelText="Batal"
+			oncancel={cancelDelete}
+			onconfirm={executeDelete}
+		/>
+	{/if}
 </div>

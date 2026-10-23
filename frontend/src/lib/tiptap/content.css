@@ -1,0 +1,257 @@
+/* Gaya dokumen materi bersama: dipakai editor Tiptap (.mdoc-edit .tiptap)
+   dan pratinjau peserta (.mdoc-preview). Selaras dengan TextMaterial. */
+
+.mdoc {
+	font-size: 0.875rem;
+	line-height: 1.75;
+	color: #334155;
+	overflow-wrap: anywhere;
+}
+
+@media (min-width: 640px) {
+	.mdoc {
+		font-size: 0.9375rem;
+	}
+}
+
+.mdoc > *:first-child {
+	margin-top: 0;
+}
+
+.mdoc > *:last-child {
+	margin-bottom: 0;
+}
+
+.mdoc h1,
+.mdoc h2,
+.mdoc h3 {
+	font-weight: 800;
+	line-height: 1.35;
+	color: #0f172a;
+	text-wrap: balance;
+}
+
+.mdoc h1 {
+	font-size: 1.375rem;
+	margin: 0 0 0.75rem;
+}
+
+.mdoc h2 {
+	font-size: 1.1875rem;
+	margin: 1.25rem 0 0.625rem;
+}
+
+.mdoc h3 {
+	font-size: 1.0625rem;
+	margin: 1.125rem 0 0.5rem;
+}
+
+.mdoc p {
+	margin: 0 0 0.875rem;
+}
+
+.mdoc a.tiptap-link {
+	color: #1d4ed8;
+	font-weight: 600;
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.mdoc a.tiptap-link:hover {
+	color: #1e40af;
+}
+
+.mdoc ul,
+.mdoc ol {
+	margin: 0 0 0.875rem;
+	padding-left: 1.5rem;
+}
+
+.mdoc ul {
+	list-style: disc;
+}
+
+.mdoc ol {
+	list-style: decimal;
+}
+
+.mdoc li {
+	margin-bottom: 0.375rem;
+}
+
+.mdoc li > p {
+	margin: 0;
+}
+
+.mdoc blockquote {
+	margin: 0 0 0.875rem;
+	padding: 0.875rem 1rem;
+	border-left: 4px solid #3b82f6;
+	border-radius: 0 0.75rem 0.75rem 0;
+	background: rgb(239 246 255 / 0.7);
+	font-weight: 500;
+	color: #1e293b;
+}
+
+.mdoc blockquote > p:last-child {
+	margin-bottom: 0;
+}
+
+.mdoc pre.tiptap-codeblock,
+.mdoc pre {
+	margin: 0 0 0.875rem;
+	padding: 1rem 1.125rem;
+	border-radius: 0.875rem;
+	background: #0f172a;
+	color: #e2e8f0;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 0.8125rem;
+	line-height: 1.7;
+	overflow-x: auto;
+	border: 1px solid #1e293b;
+}
+
+.mdoc pre code {
+	background: none;
+	color: inherit;
+	font-size: inherit;
+	padding: 0;
+}
+
+.mdoc p code,
+.mdoc li code,
+.mdoc h1 code,
+.mdoc h2 code,
+.mdoc h3 code {
+	padding: 0.125rem 0.375rem;
+	border-radius: 0.375rem;
+	background: #f1f5f9;
+	border: 1px solid #e2e8f0;
+	color: #b45309;
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 0.8125em;
+}
+
+.mdoc img.tiptap-image {
+	display: block;
+	max-width: 100%;
+	height: auto;
+	border-radius: 0.875rem;
+	border: 1px solid #e2e8f0;
+	margin: 0.25rem auto 0.875rem;
+	box-shadow: 0 8px 24px -12px rgb(15 23 42 / 0.25);
+}
+
+.mdoc hr {
+	margin: 1.25rem 0;
+	border: none;
+	border-top: 2px dashed #cbd5e1;
+}
+
+.mdoc .tiptap-video {
+	margin: 0 0 0.875rem;
+	border-radius: 0.875rem;
+	overflow: hidden;
+	border: 1px solid #e2e8f0;
+	background: #0f172a;
+}
+
+.mdoc .tiptap-video iframe,
+.mdoc .tiptap-video video {
+	display: block;
+	width: 100%;
+	aspect-ratio: 16 / 9;
+	border: 0;
+	background: #000;
+}
+
+.mdoc .tiptap-pdf {
+	margin: 0 0 0.875rem;
+}
+
+.mdoc .tiptap-pdf-link {
+	display: flex;
+	align-items: center;
+	gap: 0.875rem;
+	padding: 0.875rem 1rem;
+	border-radius: 0.875rem;
+	border: 1px solid #fecaca;
+	background: #fef2f2;
+	color: #0f172a;
+	text-decoration: none;
+	transition:
+		background 0.2s,
+		border-color 0.2s;
+}
+
+.mdoc .tiptap-pdf-link:hover {
+	background: #fee2e2;
+	border-color: #fca5a5;
+}
+
+.mdoc .tiptap-pdf-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 2.75rem;
+	height: 2.75rem;
+	border-radius: 0.75rem;
+	background: #dc2626;
+	color: #fff;
+	font-size: 0.6875rem;
+	font-weight: 800;
+	letter-spacing: 0.05em;
+}
+
+.mdoc .tiptap-pdf-meta {
+	display: flex;
+	flex-direction: column;
+	min-width: 0;
+}
+
+.mdoc .tiptap-pdf-name {
+	font-weight: 700;
+	font-size: 0.8125rem;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.mdoc .tiptap-pdf-size {
+	font-size: 0.6875rem;
+	color: #64748b;
+	font-weight: 600;
+}
+
+/* Status khusus editor */
+.mdoc-edit .tiptap {
+	min-height: 22rem;
+	padding: 1.25rem 1.25rem 2rem;
+	border-radius: 0 0 1rem 1rem;
+	outline: none;
+	caret-color: #2563eb;
+}
+
+@media (min-width: 640px) {
+	.mdoc-edit .tiptap {
+		padding: 1.5rem 1.75rem 2.5rem;
+	}
+}
+
+.mdoc-edit .tiptap p.is-editor-empty:first-child::before {
+	content: attr(data-placeholder);
+	float: left;
+	height: 0;
+	pointer-events: none;
+	color: #94a3b8;
+}
+
+.mdoc-edit .tiptap .ProseMirror-selectednode {
+	outline: 3px solid rgb(37 99 235 / 0.45);
+	outline-offset: 2px;
+	border-radius: 0.875rem;
+}
+
+.mdoc-edit .tiptap img.ProseMirror-separator {
+	display: none;
+}

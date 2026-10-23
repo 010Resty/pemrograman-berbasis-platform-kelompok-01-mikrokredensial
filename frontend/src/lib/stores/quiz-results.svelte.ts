@@ -13,7 +13,7 @@ export interface QuizResult {
 	createdAt: string;
 }
 
-const KEY = 'aristotle:quiz-results:v1';
+const KEY = 'aristoteles:quiz-results:v1';
 
 /** Hasil terakhir per materialId. Persisten localStorage agar refresh halaman hasil tetap tampil. */
 export const quizResults = new SvelteMap<string, QuizResult>();

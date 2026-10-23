@@ -1,9 +1,33 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
+	import { goto } from '$app/navigation';
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
+	import { homeFor, loadSession, logout } from '$lib/stores/auth.svelte';
 
 	let { children } = $props();
+
+	// Guard portal teacher: wajib login dengan role teacher.
+	let authorized = $state(false);
+
+	$effect(() => {
+		if (!browser) return;
+		const session = loadSession();
+		if (!session) {
+			goto('/login');
+			return;
+		}
+		if (session.role !== 'teacher') {
+			goto(homeFor(session.role));
+			return;
+		}
+		authorized = true;
+	});
+
+	function handleLogout() {
+		logout();
+	}
 
 	let sidebarOpen = $state(false);
 	let isCollapsed = $state(false);
@@ -41,14 +65,16 @@
 	Lewati ke konten utama
 </a>
 
+{#if authorized}
 <div class="grid min-h-screen grid-cols-1 bg-slate-50 lg:grid-cols-[auto_1fr]">
 	<Sidebar
 		{navItems}
 		bind:sidebarOpen
 		bind:isCollapsed
 		onClose={() => (sidebarOpen = false)}
+		onLogout={handleLogout}
 		brandHref="/instruktur"
-		brandLabel="Aristotle Platform - Dashboard instruktur"
+		brandLabel="Aristoteles Platform - Dashboard instruktur"
 		navAriaLabel="Navigasi instruktur"
 		profileName="KEVIN PERRY"
 		profileRole="Instruktur"
@@ -161,7 +187,7 @@
 							>
 								<div class="border-b border-slate-100 px-4 py-3">
 									<div class="text-sm font-semibold text-slate-800">Kevin Perry</div>
-									<div class="text-xs text-slate-500">kevin@aristotle.ac.id</div>
+									<div class="text-xs text-slate-500">kevin@aristoteles.ac.id</div>
 								</div>
 								<div class="p-1.5" role="none">
 									<a
@@ -188,7 +214,10 @@
 										role="menuitem"
 										href="/"
 										class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-500"
-										onclick={closeProfileMenu}
+										onclick={() => {
+											handleLogout();
+											closeProfileMenu();
+										}}
 									>
 										<i class="fa-solid fa-right-from-bracket w-4 text-center" aria-hidden="true"></i>
 										Keluar
@@ -206,3 +235,10 @@
 		</main>
 	</div>
 </div>
+{:else}
+	<div class="flex min-h-screen items-center justify-center bg-slate-50" role="status" aria-label="Memeriksa sesi">
+		<p class="flex items-center gap-2 text-sm font-semibold text-slate-500">
+			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memeriksa sesi portal...
+		</p>
+	</div>
+{/if}

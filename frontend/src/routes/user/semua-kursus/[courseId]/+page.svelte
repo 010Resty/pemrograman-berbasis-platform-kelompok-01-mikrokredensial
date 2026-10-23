@@ -6,7 +6,7 @@
 </script>
 
 <svelte:head>
-	<title>Pratinjau Kursus — Aristotle Platform</title>
+	<title>Pratinjau Kursus — Aristoteles Platform</title>
 	<meta name="description" content="Pratinjau kursus: info singkat, modul, dan materi yang didapat." />
 </svelte:head>
 

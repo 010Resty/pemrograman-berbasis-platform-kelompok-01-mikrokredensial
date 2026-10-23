@@ -28,7 +28,7 @@
 </script>
 
 <svelte:head>
-	<title>Sertifikat — Instruktur Aristotle</title>
+	<title>Sertifikat — Instruktur Aristoteles</title>
 	<meta name="description" content="Daftar sertifikat yang diterbitkan instruktur untuk peserta yang lulus." />
 </svelte:head>
 
@@ -58,7 +58,7 @@
 			</span>
 			<div>
 				<p class="text-lg font-bold">3 Sertifikat Terverifikasi</p>
-				<p class="text-sm text-amber-100">Ditandatangani digital oleh Kevin Perry · Aristotle Academy.</p>
+				<p class="text-sm text-amber-100">Ditandatangani digital oleh Kevin Perry · Aristoteles Academy.</p>
 			</div>
 		</div>
 		<a

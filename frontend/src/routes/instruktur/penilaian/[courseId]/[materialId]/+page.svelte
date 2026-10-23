@@ -63,7 +63,7 @@
 
 <svelte:head>
 	<title>
-		{info && course ? `${info.title} — Penilaian ${course.title}` : 'Tugas tidak ditemukan'} — Instruktur Aristotle
+		{info && course ? `${info.title} — Penilaian ${course.title}` : 'Tugas tidak ditemukan'} — Instruktur Aristoteles
 	</title>
 	<meta
 		name="description"

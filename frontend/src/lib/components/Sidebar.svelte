@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { aristotleLogo as logoUrl } from '$lib/assets/logo';
+	import { aristotelesLogo as logoUrl } from '$lib/assets/logo';
 
 	export interface NavItem {
 		label: string;
@@ -14,8 +14,9 @@
 		isCollapsed = $bindable(false),
 		sidebarOpen = $bindable(false),
 		onClose,
+		onLogout,
 		brandHref = '/user',
-		brandLabel = 'Aristotle Platform - Dashboard pengguna',
+		brandLabel = 'Aristoteles Platform - Dashboard pengguna',
 		navAriaLabel = 'Navigasi pengguna',
 		profileName = 'AHMAD FARIZI',
 		profileRole = 'Mahasiswa',
@@ -25,6 +26,7 @@
 		isCollapsed?: boolean;
 		sidebarOpen?: boolean;
 		onClose?: () => void;
+		onLogout?: () => void;
 		brandHref?: string;
 		brandLabel?: string;
 		navAriaLabel?: string;
@@ -98,13 +100,13 @@
 			>
 				<img
 					src={logoUrl}
-					alt="Logo Aristotle"
+					alt="Logo Aristoteles"
 					class="h-11 w-11 shrink-0 rounded-xl border border-blue-200 object-cover shadow-md"
 				/>
 				{#if !isCollapsed}
 					<span class="sidebar-text flex min-w-0 flex-col">
 						<span class="flex items-center gap-1">
-							<span class="text-xl font-bold tracking-tight text-slate-900">Aristotle</span>
+							<span class="text-xl font-bold tracking-tight text-slate-900">Aristoteles</span>
 							<span class="h-2 w-2 rounded-full bg-blue-500" aria-hidden="true"></span>
 						</span>
 						<span class="whitespace-nowrap text-[10px] font-semibold tracking-widest text-blue-600"
@@ -216,6 +218,7 @@
 		{#if !isCollapsed}
 			<a
 				href="/"
+				onclick={() => onLogout?.()}
 				class="flex min-h-11 items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"
 			>
 				<span class="flex w-6 justify-center"
@@ -226,13 +229,14 @@
 			<div class="flex items-center justify-between px-2 pt-1">
 				<span
 					class="sidebar-text text-[10px] font-medium tracking-widest whitespace-nowrap text-slate-400 uppercase"
-					>ARISTOTLE · PLATFORM</span
+					>ARISTOTELES · PLATFORM</span
 				>
 				<i class="fa-solid fa-shield-halved text-xs text-slate-300" aria-hidden="true"></i>
 			</div>
 		{:else}
 			<a
 				href="/"
+				onclick={() => onLogout?.()}
 				title="Keluar"
 				aria-label="Keluar"
 				class="flex min-h-11 min-w-11 items-center justify-center rounded-xl p-2 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-500"

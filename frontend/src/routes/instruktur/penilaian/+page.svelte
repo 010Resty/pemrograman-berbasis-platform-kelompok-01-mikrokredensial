@@ -66,7 +66,7 @@
 </script>
 
 <svelte:head>
-	<title>Penilaian — Instruktur Aristotle</title>
+	<title>Penilaian — Instruktur Aristoteles</title>
 	<meta name="description" content="Daftar course untuk antrean penilaian tugas dan kuis peserta." />
 </svelte:head>
 

@@ -20,6 +20,7 @@
 	} from '$lib/data/training';
 	import { doneMaterials, ensureSeeded } from '$lib/stores/progress.svelte';
 	import { getCourseMeta } from '$lib/data/course-meta';
+	import { moduleCredentialId } from '$lib/data/certificates';
 	import { canAccessCourse, isPeriodLocked } from '$lib/stores/enrollment.svelte';
 	import { resolve } from '$app/paths';
 
@@ -177,7 +178,7 @@
 </script>
 
 <svelte:head>
-	<title>{course ? `${course.title} — Modul` : 'Kursus tidak ditemukan'} — Aristotle</title>
+	<title>{course ? `${course.title} — Modul` : 'Kursus tidak ditemukan'} — Aristoteles</title>
 	<meta
 		name="description"
 		content={course ? `Modul pembelajaran ${course.title}` : 'Detail kursus'}
@@ -620,6 +621,40 @@
 								id={`mod-panel-${mod.id}`}
 								class="border-t border-slate-100 bg-slate-50/50 p-3 sm:p-4"
 							>
+								<div
+									class={`mb-2.5 flex flex-col gap-2 rounded-xl border px-3.5 py-3 sm:flex-row sm:items-center sm:justify-between ${modComplete ? 'border-emerald-200 bg-emerald-50/70' : 'border-amber-200 bg-amber-50/70'}`}
+								>
+									<p class="flex items-start gap-2.5 text-[13px]">
+										<span class={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${modComplete ? 'bg-emerald-600 text-white' : 'bg-amber-400 text-slate-900'}`} aria-hidden="true">
+											<i class="fa-solid fa-award" aria-hidden="true"></i>
+										</span>
+										<span>
+											<strong class="block text-[13px] font-extrabold text-slate-900">
+												{#if modComplete}
+													Sertifikat Modul {moduleIndex + 1} terbuka
+												{:else}
+													Sertifikat Modul {moduleIndex + 1}
+												{/if}
+											</strong>
+											<span class="block text-[11px] text-slate-600">
+												ID <span class="font-mono font-bold text-slate-800">{moduleCredentialId(course.id, moduleIndex)}</span>
+												· {mProg.done}/{mProg.total} materi
+											</span>
+										</span>
+									</p>
+									{#if modComplete}
+										<a
+											href="/user/sertifikat"
+											class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-[11px] font-bold text-white hover:bg-emerald-700"
+										>
+											<i class="fa-solid fa-download text-[10px]" aria-hidden="true"></i> Lihat sertifikat
+										</a>
+									{:else}
+										<span class="text-[11px] font-bold text-amber-700">
+											Tuntaskan {mProg.total - mProg.done} materi lagi
+										</span>
+									{/if}
+								</div>
 								<div class="space-y-2.5">
 									{#each subs as { sub, subIndex, mats } (sub.id)}
 										{@const sProg = subModuleProgress(sub, (id) => doneMaterials.has(id))}

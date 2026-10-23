@@ -50,8 +50,8 @@
 </script>
 
 <svelte:head>
-	<title>Dashboard Instruktur — Aristotle Platform</title>
-	<meta name="description" content="Dashboard instruktur Aristotle untuk mengelola kursus, penilaian, dan pendapatan." />
+	<title>Dashboard Instruktur — Aristoteles Platform</title>
+	<meta name="description" content="Dashboard instruktur Aristoteles untuk mengelola kursus, penilaian, dan pendapatan." />
 </svelte:head>
 
 <div class="p-4 sm:p-6 lg:p-8">

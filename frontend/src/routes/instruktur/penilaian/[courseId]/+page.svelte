@@ -62,7 +62,7 @@
 </script>
 
 <svelte:head>
-	<title>{course ? `Penilaian ${course.title}` : 'Course tidak ditemukan'} — Instruktur Aristotle</title>
+	<title>{course ? `Penilaian ${course.title}` : 'Course tidak ditemukan'} — Instruktur Aristoteles</title>
 	<meta
 		name="description"
 		content={course ? `Daftar penugasan ${course.title} yang menunggu penilaian.` : 'Penilaian per course'}

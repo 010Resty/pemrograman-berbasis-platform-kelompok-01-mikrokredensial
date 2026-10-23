@@ -1,7 +1,9 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import { uniraLogo } from '$lib/assets/logo';
+	import { loginWithUnita } from '$lib/stores/auth.svelte';
 
 	let showPassword = $state(false);
 	let nim = $state('');
@@ -14,18 +16,21 @@
 
 	function handleSubmit(event: Event) {
 		event.preventDefault();
+		if (!nim.trim() || !password) return;
 		isLoading = true;
 		setTimeout(() => {
 			isLoading = false;
-		}, 1500);
+			loginWithUnita(nim);
+			goto('/user');
+		}, 900);
 	}
 </script>
 
 <svelte:head>
-	<title>Masuk Portal UNIRA — Aristotle</title>
+	<title>Masuk Portal UNIRA — Aristoteles</title>
 	<meta
 		name="description"
-		content="Masuk ke Portal UNIRA dengan NIM dan kata sandi akademik untuk mengakses Platform Mikrokredensial Aristotle."
+		content="Masuk ke Portal UNIRA dengan NIM dan kata sandi akademik untuk mengakses Platform Mikrokredensial Aristoteles."
 	/>
 </svelte:head>
 
@@ -152,7 +157,7 @@
 						class="w-full flex items-center justify-center gap-2 bg-white hover:bg-slate-50 border border-slate-200 hover:border-slate-300 text-slate-700 py-2.5 px-6 rounded-xl font-semibold text-sm transition-all duration-200 active:scale-[0.98]"
 					>
 						<i class="fa-solid fa-graduation-cap text-blue-600" aria-hidden="true"></i>
-						<span>Masuk dengan Email / Akun Aristotle</span>
+						<span>Masuk dengan Email / Akun Aristoteles</span>
 					</a>
 				</form>
 			</div>
@@ -183,7 +188,7 @@
 
 		<!-- Footer -->
 		<div class="mt-4 text-center text-xs text-white/50">
-			<p>&copy; 2026 Aristotle Platform Mikrokredensial. Semua hak dilindungi.</p>
+			<p>&copy; 2026 Aristoteles Platform Mikrokredensial. Semua hak dilindungi.</p>
 		</div>
 	</div>
 </div>

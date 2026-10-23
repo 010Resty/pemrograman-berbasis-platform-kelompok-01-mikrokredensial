@@ -1,7 +1,7 @@
 import { SvelteMap } from 'svelte/reactivity';
 import type { AssignmentSubmission } from '$lib/types/submission';
 
-const KEY = 'aristotle:submissions:v1';
+const KEY = 'aristoteles:submissions:v1';
 
 /** Riwayat submission per materialId. Persisten localStorage + reaktif Svelte 5. */
 export const submissionsByMaterial = new SvelteMap<string, AssignmentSubmission[]>();

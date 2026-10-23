@@ -13,7 +13,7 @@
 		{
 			id: 1,
 			title: 'Frontend Developer',
-			issuer: 'Aristotle Academy',
+			issuer: 'Aristoteles Academy',
 			date: '15 Agu 2026',
 			credentialId: 'ED-2026-8F3A',
 			score: '92/100',
@@ -22,7 +22,7 @@
 		{
 			id: 2,
 			title: 'Database Administrator',
-			issuer: 'Aristotle Academy',
+			issuer: 'Aristoteles Academy',
 			date: '28 Jul 2026',
 			credentialId: 'ED-2026-71BC',
 			score: '96/100',
@@ -31,7 +31,7 @@
 		{
 			id: 3,
 			title: 'Network Specialist',
-			issuer: 'Aristotle Academy',
+			issuer: 'Aristoteles Academy',
 			date: '10 Jul 2026',
 			credentialId: 'ED-2026-55D0',
 			score: '88/100',
@@ -41,7 +41,7 @@
 </script>
 
 <svelte:head>
-	<title>Sertifikat — Aristotle Platform</title>
+	<title>Sertifikat — Aristoteles Platform</title>
 	<meta name="description" content="Daftar sertifikat mikrokredensial yang telah diperoleh pengguna." />
 </svelte:head>
 
