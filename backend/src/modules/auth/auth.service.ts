@@ -79,8 +79,6 @@ export const createAccessToken = (user: {
 );
 };
 
-// Register/login belum diaktifkan sampai penyimpanan akun
-// dan schema database disetujui oleh ketua kelompok.
 export const registerUser = async (_input: unknown) => {
   const parsed = registerSchema.safeParse(_input);
 
