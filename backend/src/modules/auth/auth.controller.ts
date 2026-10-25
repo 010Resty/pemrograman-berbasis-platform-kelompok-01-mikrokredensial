@@ -1,4 +1,4 @@
-
+import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import { Request, Response, NextFunction } from "express";
 import { registerUser, loginUser } from "./auth.service";
 
@@ -36,4 +36,17 @@ export const login = async (
   } catch (error) {
     next(error);
   }
+};
+
+export const me = (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  res.status(200).json({
+    status: "success",
+    message: "Data user berhasil diambil",
+    data: {
+      user: req.user,
+    },
+  });
 };

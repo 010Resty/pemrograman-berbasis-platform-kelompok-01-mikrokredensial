@@ -4,10 +4,7 @@ import cors from "cors";
 import helmet from "helmet";
 import morgan from "morgan";
 import dotenv from "dotenv";
-import {
-  AuthNotImplementedError,
-  AuthValidationError,
-} from "./modules/auth/auth.service";
+import { AuthValidationError } from "./modules/auth/auth.service";
 
 dotenv.config();
 
@@ -63,14 +60,6 @@ app.use(
       res.status(400).json({
         status: "error",
         message: err.message,
-      });
-      return;
-    }
-
-    if (err instanceof AuthNotImplementedError) {
-      res.status(501).json({
-        status: "error",
-        message: "Fitur autentikasi belum tersedia",
       });
       return;
     }

@@ -10,6 +10,7 @@ import {
 
 export const users = mysqlTable("users", {
   id: varchar("id", { length: 36 }).primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
   email: varchar("email", { length: 191 }).notNull().unique(),
   passwordHash: varchar("password_hash", { length: 255 }).notNull(),
   role: mysqlEnum("role", ["student", "teacher", "admin"])

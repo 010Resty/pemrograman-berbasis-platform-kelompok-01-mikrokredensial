@@ -1,10 +1,9 @@
-
 import { Request, Response, NextFunction } from "express";
 import jwt, { JwtPayload } from "jsonwebtoken";
 
 export interface AuthenticatedRequest extends Request {
   user?: {
-    id: number;
+    id: string;
     email: string;
     role: string;
   };
@@ -51,20 +50,20 @@ export const authenticate = (
       audience: "aristoteles-client",
     }) as JwtPayload;
 
-    const id = Number(payload.sub);
+    const id = payload.sub;
 
     if (
-      !Number.isSafeInteger(id) ||
-      id <= 0 ||
+      typeof id !== "string" ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id) ||
       typeof payload.email !== "string" ||
       typeof payload.role !== "string"
     ) {
-      res.status(401).json({
-        status: "error",
-        message: "Token autentikasi tidak valid",
-      });
-      return;
-    }
+    res.status(401).json({
+      status: "error",
+      message: "Token autentikasi tidak valid",
+    });
+    return;
+  }
 
     req.user = {
       id,

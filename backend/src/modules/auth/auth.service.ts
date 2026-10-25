@@ -1,6 +1,10 @@
 import jwt, { SignOptions } from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
+import { eq } from "drizzle-orm";
+import { db } from "../../db";
+import { users } from "../../db/schema";
 
 
 export class AuthNotImplementedError extends Error {
@@ -57,7 +61,7 @@ export const verifyPassword = async (
 };
 
 export const createAccessToken = (user: {
-  id: number;
+  id: string;
   email: string;
   role: string;
 }): string => { 
@@ -86,10 +90,63 @@ export const registerUser = async (_input: unknown) => {
     throw new AuthValidationError("Data registrasi tidak valid");
   }
 
-  throw new AuthNotImplementedError(
-    "Registrasi belum tersedia: penyimpanan akun belum dikonfigurasi"
-  );
+  const { name, email, password } = parsed.data;
+
+  // Cek apakah email sudah terdaftar
+  const existingUser = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+
+  if (existingUser.length > 0) {
+    throw new AuthValidationError("Email sudah terdaftar");
+  }
+
+  // Hash password sebelum disimpan
+  const passwordHash = await hashPassword(password);
+
+  const user = {
+    id: randomUUID(),
+    name,
+    email,
+    passwordHash,
+    role: "student" as const,
+  };
+
+  try {
+  await db.insert(users).values(user);
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "code" in error &&
+      error.code === "ER_DUP_ENTRY"
+    ) {
+      throw new AuthValidationError("Email sudah terdaftar");
+    }
+
+    throw error;
+  }
+
+  const accessToken = createAccessToken({
+    id: user.id,
+    email: user.email,
+    role: user.role,
+  });
+
+  return {
+    message: "Registrasi berhasil",
+    accessToken,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    },
+  };
 };
+
 
 export const loginUser = async (_input: unknown) => {
   const parsed = loginSchema.safeParse(_input);
@@ -98,7 +155,47 @@ export const loginUser = async (_input: unknown) => {
     throw new AuthValidationError("Data login tidak valid");
   }
 
-  throw new AuthNotImplementedError(
-    "Login belum tersedia: penyimpanan akun belum dikonfigurasi"
+  const { email, password } = parsed.data;
+
+  // Cari user berdasarkan email
+  const result = await db
+    .select()
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+
+  const user = result[0];
+
+  // Pesan dibuat sama agar tidak membocorkan email yang terdaftar
+  if (!user) {
+    throw new AuthValidationError("Email atau password salah");
+  }
+
+  // Verifikasi password dengan hash di database
+  const isPasswordValid = await verifyPassword(
+    password,
+    user.passwordHash
   );
+
+  if (!isPasswordValid) {
+    throw new AuthValidationError("Email atau password salah");
+  }
+
+  const accessToken = createAccessToken({
+    id: user.id,
+    email: user.email,
+    role: user.role,
+  });
+
+  return {
+    message: "Login berhasil",
+    accessToken,
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+    },
+  };
 };
+
