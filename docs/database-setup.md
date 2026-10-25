@@ -96,11 +96,53 @@ Sebelum menerapkan perubahan, periksa file SQL dan pastikan database target suda
 - [x] Konfigurasi Drizzle dapat membaca schema.
 - [x] Pengecekan schema berhasil.
 - [x] Sebelas tabel diterapkan ke database lokal.
-- [ ] Validasi akhir desain schema bersama ketua tim.
-- [ ] Pengujian koneksi database dari aplikasi backend.
-- [ ] Pengujian integrasi database pada fitur autentikasi.
-- [ ] Penyelarasan migrasi untuk seluruh anggota tim.
+- [x] Validasi akhir desain schema bersama ketua tim.
+- [x] Pengujian koneksi database dari aplikasi backend.
+- [x] Pengujian integrasi database pada fitur autentikasi.
+- [x] Penyelarasan migrasi untuk seluruh anggota tim.
 
 ## 8. Catatan
 
 File `.env` bersifat lokal dan tidak boleh di-commit. Dokumentasi ini mencatat kondisi pengembangan saat ini; perubahan schema selanjutnya harus dikoordinasikan agar konsisten dengan repository dan database anggota tim.
+
+## Integrasi Database dan Autentikasi
+
+### Database MySQL
+Backend menggunakan MySQL dengan Drizzle ORM. Konfigurasi koneksi disimpan pada file `.env` lokal dan tidak boleh di-commit ke repository.
+
+Database yang digunakan pada lingkungan pengembangan adalah `aristotle`. Struktur database terdiri dari 11 tabel sesuai schema pada `backend/src/db/schema.ts`.
+
+### Registrasi
+Endpoint: `POST /api/v1/auth/register`
+
+Data yang diperlukan:
+- `name`
+- `email`
+- `password`
+
+Password di-hash sebelum disimpan ke database. Email yang sudah terdaftar ditolak dengan respons `400 Bad Request`. Jika berhasil, endpoint mengembalikan `201 Created` beserta data pengguna dan access token.
+
+### Login
+Endpoint: `POST /api/v1/auth/login`
+
+Data yang diperlukan:
+- `email`
+- `password`
+
+Backend memeriksa akun pada database dan memverifikasi password. Jika berhasil, endpoint mengembalikan `200 OK` beserta data pengguna dan access token. Kredensial yang salah menghasilkan `400 Bad Request`.
+
+### Autentikasi Token
+Endpoint yang membutuhkan autentikasi menerima token melalui header:
+
+`Authorization: Bearer <accessToken>`
+
+Middleware memverifikasi JWT, termasuk issuer dan audience. Token yang tidak ada, tidak valid, atau kedaluwarsa ditolak dengan `401 Unauthorized`.
+
+### Pengujian
+Pengujian manual menggunakan Thunder Client:
+- `GET /health` — memastikan server aktif.
+- `POST /api/v1/auth/register` — menguji registrasi pengguna.
+- `POST /api/v1/auth/login` — menguji login dan penerbitan token.
+- `GET /api/v1/auth/me` — menguji autentikasi token dan mengambil data pengguna.
+
+Pengujian register, login, dan endpoint `/me` telah dilakukan pada lingkungan pengembangan.
