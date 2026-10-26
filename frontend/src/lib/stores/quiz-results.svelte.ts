@@ -10,6 +10,8 @@ export interface QuizResult {
 	correct: number;
 	score: number;
 	passed: boolean;
+	/** Nilai minimum yang dipakai saat mengerjakan (untuk ditampilkan di halaman hasil). */
+	passScore?: number;
 	createdAt: string;
 }
 

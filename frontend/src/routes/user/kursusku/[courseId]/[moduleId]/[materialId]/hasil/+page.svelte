@@ -3,8 +3,7 @@
 	import { page } from '$app/state';
 	import { getCourseById } from '$lib/data/courses';
 	import { getQuizResult, type QuizResult } from '$lib/stores/quiz-results.svelte';
-
-	const PASS_SCORE = 70;
+	import { DEFAULT_PASS_SCORE, normalizePassScore } from '$lib/stores/quiz-drafts';
 
 	const courseId = $derived(Number(page.params.courseId));
 	const course = $derived(getCourseById(courseId));
@@ -112,6 +111,7 @@
 				</div>
 			{:else}
 				{@const passed = result.passed}
+				{@const effectivePass = normalizePassScore(result.passScore ?? DEFAULT_PASS_SCORE)}
 				<div
 					role="status"
 					aria-live="polite"
@@ -134,7 +134,7 @@
 							{result.score}
 						</p>
 						<p class="mt-2 text-sm font-bold text-slate-600">
-							Benar {result.correct} dari {result.total} soal · minimal {PASS_SCORE} untuk lolos
+							Benar {result.correct} dari {result.total} soal · minimal {effectivePass} untuk lolos
 						</p>
 						<p class="mx-auto mt-2 max-w-md text-xs leading-relaxed text-slate-500">
 							{passed

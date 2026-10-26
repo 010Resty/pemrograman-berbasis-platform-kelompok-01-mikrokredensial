@@ -4,7 +4,7 @@
 	import type { AssignmentSubmission, UploadMeta, UploadPhase } from '$lib/types/submission';
 	import { MAX_PDF_BYTES, formatBytes } from '$lib/types/submission';
 	import { uploadAssignmentPdf, fetchSubmissions } from '$lib/services/submission.service';
-	import { latestFor, pushSubmission, setHistory } from '$lib/stores/submissions.svelte';
+	import { latestFor, pushSubmission, setHistory, submissionsByMaterial } from '$lib/stores/submissions.svelte';
 
 	let {
 		assignment,
@@ -34,6 +34,9 @@
 	let revising = $state(false);
 
 	const history = $derived(materialId ? (latestFor(materialId) ?? null) : null);
+	/** Seluruh riwayat lokal (maks. 20, terbaru dulu). Tetap tampil walau backend offline. */
+	const historyList = $derived(materialId ? (submissionsByMaterial.get(materialId) ?? []) : []);
+	const previousSubmissions = $derived(historyList.slice(1));
 	const busy = $derived(phase.kind === 'uploading');
 	const selectedFile = $derived(
 		phase.kind === 'selected' || phase.kind === 'uploading' ? phase.file : null
@@ -241,12 +244,28 @@
 		<div class="flex items-start gap-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-5" role="status">
 			<i class="fa-solid fa-circle-check mt-0.5 text-xl text-emerald-600" aria-hidden="true"></i>
 			<div class="min-w-0 flex-1">
-				<p class="text-sm font-bold text-emerald-800">Sudah terkumpul — {history.fileName}</p>
+				<p class="flex flex-wrap items-center gap-2 text-sm font-bold text-emerald-800">
+					<span>Sudah terkumpul — {history.fileName}</span>
+					<span class="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-extrabold text-white uppercase">Terbaru</span>
+					<span class="rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-bold text-emerald-700">
+						{history.driveMode === 'drive' ? 'Tautan Drive' : 'Simulasi lokal'}
+					</span>
+				</p>
 				<p class="mt-0.5 text-xs text-emerald-700">
 					{new Date(history.createdAt).toLocaleString('id-ID')} ·
 					{history.driveMode === 'drive' ? 'tersimpan di Google Drive' : 'mode mock (isi kredensial Drive untuk produksi)'} ·
 					status: {history.status}{history.score !== null ? ` · nilai ${history.score}` : ''}
 				</p>
+				<p class="mt-1 text-[11px] text-emerald-700">
+					Terkumpul ≠ lulus — menunggu nilai instruktur. Tautan Drive bukan bukti verifikasi server.
+				</p>
+				{#if history.feedback?.trim()}
+					<p class="mt-1 text-xs text-emerald-800">
+						<i class="fa-solid fa-comment-dots mr-1" aria-hidden="true"></i>{history.feedback}
+					</p>
+				{:else}
+					<p class="mt-1 text-[11px] text-emerald-700">Belum ada umpan balik dari instruktur.</p>
+				{/if}
 				<div class="mt-2 flex flex-wrap gap-2">
 					<a
 						href={history.driveLink}
@@ -264,6 +283,24 @@
 						<i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Kumpulkan revisi (PDF baru)
 					</button>
 				</div>
+				{#if previousSubmissions.length > 0}
+					<div class="mt-3 border-t border-emerald-200 pt-3">
+						<p class="text-[11px] font-extrabold tracking-wide text-emerald-800 uppercase">
+							Riwayat sebelumnya ({previousSubmissions.length}) — tersimpan lokal, maks. 20
+						</p>
+						<ol class="mt-1.5 space-y-1.5">
+							{#each previousSubmissions as prev (prev.id)}
+								<li class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-emerald-700">
+									<i class="fa-solid fa-file-pdf text-red-500" aria-hidden="true"></i>
+									<span class="max-w-48 truncate font-bold">{prev.fileName}</span>
+									<span>{new Date(prev.createdAt).toLocaleString('id-ID')}</span>
+									<span>· {prev.driveMode === 'drive' ? 'Tautan Drive' : 'Simulasi lokal'}</span>
+									<span>· {prev.status}{prev.score !== null ? ` · nilai ${prev.score}` : ''}</span>
+								</li>
+							{/each}
+						</ol>
+					</div>
+				{/if}
 			</div>
 		</div>
 	{/if}
@@ -279,11 +316,18 @@
 			<div class="flex items-start gap-3">
 				<i class="fa-solid fa-circle-check mt-0.5 text-2xl text-emerald-600" aria-hidden="true"></i>
 				<div class="min-w-0 flex-1">
-					<p class="text-sm font-bold text-emerald-800">PDF terkirim ke aplikasi via Google Drive!</p>
+					<p class="text-sm font-bold text-emerald-800">
+						{s.driveMode === 'drive'
+							? 'PDF terkirim via tautan Drive (belum tentu terverifikasi server).'
+							: 'PDF tersimpan lokal (simulasi) — belum terkirim ke server.'}
+					</p>
 					<p class="mt-0.5 text-xs text-emerald-700">
 						{s.fileName} · {formatBytes(s.fileSize)} ·
 						{s.driveMode === 'drive' ? 'tersimpan di Drive' : 'mode MOCK'} ·
 						instruktur menilai maks. 3 hari kerja.
+					</p>
+					<p class="mt-1 text-[11px] text-emerald-700">
+						Terkumpul ≠ lulus — menunggu nilai instruktur. Tautan Drive bukan bukti verifikasi server.
 					</p>
 					<p class="mt-2 truncate text-xs text-emerald-700">
 						<i class="fa-solid fa-link mr-1" aria-hidden="true"></i>
@@ -334,8 +378,9 @@
 				{revising ? 'Revisi tugas (PDF baru → Google Drive)' : 'Kumpulkan tugas (PDF → Google Drive → aplikasi)'}
 			</h2>
 			<p class="mt-1 text-xs text-slate-500">
-				Format wajib <strong>PDF</strong>, maks. {formatBytes(MAX_PDF_BYTES)}. File diunggah ke Drive,
-				lalu tautannya dikirim otomatis ke aplikasi untuk dinilai instruktur.
+				Format wajib <strong>PDF</strong>, maks. {formatBytes(MAX_PDF_BYTES)}. File diunggah lalu
+				tautannya dicatat untuk dinilai instruktur
+				(simulasi bila backend offline — cek label mode MOCK pada hasil).
 				{#if courseTitle}<span class="font-semibold text-slate-600">· {courseTitle}</span>{/if}
 			</p>
 

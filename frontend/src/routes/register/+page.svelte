@@ -59,6 +59,11 @@
 	function handleSubmit(event: Event) {
 		event.preventDefault();
 		errorMessage = '';
+		if (role === 'teacher') {
+			errorMessage =
+				'Pendaftaran mandiri untuk Teacher belum tersedia. Akun instruktur hanya dapat dibuat melalui undangan admin.';
+			return;
+		}
 		if (!fullName.trim() || !email.trim()) {
 			errorMessage = 'Nama lengkap dan email wajib diisi.';
 			return;
@@ -262,6 +267,13 @@
 								</span>
 							</button>
 						</div>
+						{#if role === 'teacher'}
+							<p role="note" class="mt-1.5 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] leading-relaxed text-amber-800">
+								Akun Teacher memerlukan undangan admin. Minta admin mengirim undangan ke email
+								Anda, lalu buka tautan aktivasinya. Pendaftaran mandiri untuk Teacher belum
+								tersedia.
+							</p>
+						{/if}
 						<p class="mt-1.5 text-[11px] text-slate-500">
 							Akun Administrator hanya dibuat oleh admin melalui portal admin.
 						</p>

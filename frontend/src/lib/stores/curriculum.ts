@@ -1,4 +1,9 @@
-import { getCourseById, type CourseModule } from '$lib/data/courses';
+import {
+	getCourseById,
+	normalizeMaterialType,
+	type CourseModule,
+	type Material
+} from '$lib/data/courses';
 
 /**
  * Draf kurikulum sisi klien, dipakai bersama oleh halaman kelola:
@@ -20,13 +25,22 @@ function storageKey(courseId: number): string {
 export function normalizeModule(mod: CourseModule): CourseModule {
 	const subs =
 		mod.subModules?.length && mod.subModules.length > 0
-			? mod.subModules
+			? mod.subModules.map((s) => ({
+					...s,
+					materials: (s.materials ?? []).map((m: Material) => ({
+						...m,
+						type: normalizeMaterialType(String(m.type))
+					}))
+				}))
 			: [
 					{
 						id: `${mod.id}-sub1`,
 						title: 'Sub-modul 1',
 						description: mod.description,
-						materials: mod.materials
+						materials: (mod.materials ?? []).map((m: Material) => ({
+							...m,
+							type: normalizeMaterialType(String(m.type))
+						}))
 					}
 				];
 	return { ...mod, subModules: subs, materials: subs.flatMap((s) => s.materials) };
@@ -36,10 +50,28 @@ export function curriculumUid(prefix: string): string {
 	return `${prefix}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4)}`;
 }
 
+/** Salin nilai menjadi data polos yang aman disimpan/diperbandingkan.
+ *
+ * `structuredClone` langsung pada proxy `$state` Svelte 5 melempar DataCloneError
+ * (yang pernah meruntuhkan flush reaktif sehingga editor Tiptap gagal terpasang),
+ * jadi selalu sediakan jalur aman JSON. Tidak pernah melempar.
+ */
+export function clonePlain<T>(value: T): T {
+	try {
+		return structuredClone(value);
+	} catch {
+		try {
+			return JSON.parse(JSON.stringify(value)) as T;
+		} catch {
+			return value;
+		}
+	}
+}
+
 /** Muat draf (deep copy). Selalu kembalikan array baru agar aman disunting. */
 export function loadCurriculumDraft(courseId: number): CourseModule[] {
 	const key = String(courseId);
-	if (mem[key]) return structuredClone(mem[key]);
+	if (mem[key]) return clonePlain(mem[key]);
 	try {
 		if (typeof localStorage !== 'undefined') {
 			const raw = localStorage.getItem(storageKey(courseId));
@@ -47,7 +79,7 @@ export function loadCurriculumDraft(courseId: number): CourseModule[] {
 				const parsed = JSON.parse(raw) as CourseModule[];
 				if (Array.isArray(parsed)) {
 					mem[key] = parsed.map(normalizeModule);
-					return structuredClone(mem[key]);
+					return clonePlain(mem[key]);
 				}
 			}
 		}
@@ -55,18 +87,19 @@ export function loadCurriculumDraft(courseId: number): CourseModule[] {
 		// abaikan storage yang rusak / tidak tersedia
 	}
 	const course = getCourseById(courseId);
-	const seed = course ? structuredClone(course.modules).map(normalizeModule) : [];
+	const seed = course ? clonePlain(course.modules).map(normalizeModule) : [];
 	mem[key] = seed;
-	return structuredClone(seed);
+	return clonePlain(seed);
 }
 
-/** Simpan draf (deep copy) ke memori + localStorage. */
+/** Simpan draf (deep copy) ke memori + localStorage. Tidak pernah melempar. */
 export function saveCurriculumDraft(courseId: number, modules: CourseModule[]): void {
+	const plain = clonePlain(modules);
 	const key = String(courseId);
-	mem[key] = structuredClone(modules);
+	mem[key] = plain;
 	try {
 		if (typeof localStorage !== 'undefined') {
-			localStorage.setItem(storageKey(courseId), JSON.stringify(modules));
+			localStorage.setItem(storageKey(courseId), JSON.stringify(plain));
 		}
 	} catch {
 		// abaikan kegagalan storage

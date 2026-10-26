@@ -1,8 +1,9 @@
 <script lang="ts">
 	import type { JSONContent } from '@tiptap/core';
+	import { generateHTML } from '@tiptap/html';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { getCourseById } from '$lib/data/courses';
+	import { getCourseById, normalizeMaterialType } from '$lib/data/courses';
 	import type { CourseModule } from '$lib/data/courses';
 	import {
 		loadCurriculumDraft,
@@ -10,11 +11,33 @@
 		withSyncedFlat
 	} from '$lib/stores/curriculum';
 	import {
+		countDocWords,
 		loadMaterialDoc,
 		saveMaterialDoc
 	} from '$lib/stores/material-docs';
+	import { createEditorExtensions } from '$lib/tiptap/extensions';
+	import {
+		blankQuizDraft,
+		DEFAULT_PASS_SCORE,
+		loadQuizDraft,
+		normalizePassScore,
+		saveQuizDraft,
+		validateQuizDraft,
+		type QuizDraft
+	} from '$lib/stores/quiz-drafts';
+	import {
+		blankTaskDraft,
+		countTaskPoints,
+		loadTaskDraft,
+		saveTaskDraft,
+		validateTaskDraft,
+		type TaskDraft
+	} from '$lib/stores/task-drafts';
 	import MaterialEditor from '$lib/components/training/organisms/MaterialEditor.svelte';
 	import MaterialPreview from '$lib/components/training/organisms/MaterialPreview.svelte';
+	import QuizBuilder from '$lib/components/training/organisms/QuizBuilder.svelte';
+	import TaskBriefBuilder from '$lib/components/training/organisms/TaskBriefBuilder.svelte';
+	import TaskStepsList from '$lib/components/training/molecules/TaskStepsList.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 
 	const courseId = $derived(Number(page.params.courseId));
@@ -33,6 +56,14 @@
 	let dirty = $state(false);
 	let lastSavedLabel = $state('');
 	let showLeave = $state(false);
+	/** Draf kuis (tipe kuis): disunting via QuizBuilder. */
+	let latestQuiz = $state<QuizDraft | null>(null);
+	let quizCount = $state(0);
+	let storedQuiz = $state<QuizDraft | null>(null);
+	/** Draf tugas (tipe tugas): disunting via TaskBriefBuilder (3 bagian). */
+	let latestTask = $state<TaskDraft | null>(null);
+	let taskCount = $state(0);
+	let storedTask = $state<TaskDraft | null>(null);
 
 	const backHref = $derived(`/instruktur/kursusku/${courseId}/${moduleId}/${subId}`);
 
@@ -47,6 +78,12 @@
 		saveError = '';
 		latestJson = null;
 		latestWords = 0;
+		latestQuiz = null;
+		quizCount = 0;
+		storedQuiz = loadQuizDraft(courseId, moduleId, subId, materialId);
+		latestTask = null;
+		taskCount = 0;
+		storedTask = loadTaskDraft(courseId, moduleId, subId, materialId);
 		dirty = false;
 		lastSavedLabel = '';
 		initializedFor = initKey;
@@ -64,6 +101,11 @@
 	const sub = $derived(subIndex >= 0 ? mod?.subModules?.[subIndex] : undefined);
 	const matIndex = $derived((sub?.materials ?? []).findIndex((m) => m.id === materialId));
 	const material = $derived(matIndex >= 0 ? sub?.materials[matIndex] : undefined);
+	/** Model 3-tipe: materi (audio/video/teks) · tugas (3 bagian) · kuis. */
+	const kind = $derived(
+		material ? normalizeMaterialType(String(material.type)) : ('materi' as const)
+	);
+	const kindLabel = $derived(kind === 'kuis' ? 'Kuis' : kind === 'tugas' ? 'Tugas' : 'Materi');
 
 	/* Dokumen tersimpan (SSR-aman: null di server, isi draf di klien). */
 	const storedDoc = $derived(loadMaterialDoc(courseId, moduleId, subId, materialId));
@@ -75,13 +117,66 @@
 			''
 	);
 
-	const storedUpdatedAt = $derived(storedDoc?.updatedAt ?? '');
+	const storedUpdatedAt = $derived(
+		kind === 'kuis'
+			? (storedQuiz?.updatedAt ?? '')
+			: kind === 'tugas'
+				? (storedTask?.updatedAt ?? '')
+				: (storedDoc?.updatedAt ?? '')
+	);
 
 	function handleUpdate(info: { json: JSONContent; words: number }) {
 		latestJson = info.json;
 		latestWords = info.words;
 		dirty = true;
 	}
+
+	function handleQuizUpdate(info: { draft: QuizDraft; valid: boolean; count: number }) {
+		latestQuiz = info.draft;
+		quizCount = info.count;
+		dirty = true;
+	}
+
+	function handleTaskUpdate(info: { draft: TaskDraft; valid: boolean; count: number }) {
+		latestTask = info.draft;
+		taskCount = info.count;
+		dirty = true;
+	}
+
+	const quizInitial = $derived(storedQuiz ?? blankQuizDraft(material?.title ?? ''));
+	const quizPreview = $derived(latestQuiz ?? storedQuiz ?? null);
+	const quizPassScore = $derived(
+		normalizePassScore(quizPreview?.passScore ?? DEFAULT_PASS_SCORE)
+	);
+	const quizStatus = $derived(
+		latestQuiz ?? storedQuiz
+			? `${quizCount || storedQuiz?.questions.length || 0} soal · minimal ${quizPassScore}`
+			: ''
+	);
+
+	const taskInitial = $derived(storedTask ?? blankTaskDraft(material?.title ?? ''));
+	const taskPreview = $derived(latestTask ?? storedTask ?? null);
+	const taskStatus = $derived(
+		latestTask ?? storedTask
+			? `${taskCount || (storedTask ? countTaskPoints(storedTask) : 0)} poin`
+			: ''
+	);
+	/** HTML deskripsi tugas untuk pratinjau (SSR-aman: kosong di server). */
+	const taskBriefHtml = $derived.by(() => {
+		const content = taskPreview?.brief;
+		if (!content) return '';
+		try {
+			return generateHTML(content, createEditorExtensions(''));
+		} catch {
+			return '';
+		}
+	});
+	const taskBriefEmpty = $derived(
+		!taskPreview ||
+			(countDocWords(taskPreview.brief) === 0 &&
+				!taskPreview.objectives.some((o) => o.trim()) &&
+				!taskPreview.steps.some((s) => s.trim()))
+	);
 
 	/** Cegah keluar diam-diam saat ada perubahan belum disimpan. */
 	function handleBack(event: MouseEvent) {
@@ -109,8 +204,76 @@
 			saveError = 'Isi judul materi terlebih dahulu sebelum menyimpan draf.';
 			return;
 		}
-		const content = latestJson ?? storedDoc?.content ?? null;
 		const updatedAt = new Date().toISOString();
+		if (kind === 'tugas') {
+			const draft: TaskDraft = {
+				title,
+				brief: latestTask?.brief ?? storedTask?.brief ?? null,
+				objectives: latestTask?.objectives ?? storedTask?.objectives ?? [],
+				steps: latestTask?.steps ?? storedTask?.steps ?? [],
+				updatedAt
+			};
+			const err = validateTaskDraft(draft);
+			if (err) {
+				saveError = err;
+				return;
+			}
+			const okTask = saveTaskDraft(courseId, moduleId, subId, materialId, draft);
+			if (!okTask) {
+				saveError = 'Draf tugas gagal tersimpan: penyimpanan lokal penuh.';
+				return;
+			}
+			storedTask = draft;
+			latestTask = null;
+			touchModule();
+			saveCurriculumDraft(courseId, editableModules);
+			dirty = false;
+			lastSavedLabel = new Date(updatedAt).toLocaleString('id-ID', {
+				day: 'numeric',
+				month: 'short',
+				hour: '2-digit',
+				minute: '2-digit'
+			});
+			savedMessage = `Draf tugas tersimpan ${lastSavedLabel} (${countTaskPoints(draft)} poin).`;
+			goto(backHref);
+			return;
+		}
+		if (kind === 'kuis') {
+			const draft: QuizDraft = {
+				title,
+				intro: latestQuiz?.intro ?? storedQuiz?.intro ?? '',
+				passScore: normalizePassScore(
+					latestQuiz?.passScore ?? storedQuiz?.passScore ?? DEFAULT_PASS_SCORE
+				),
+				questions: latestQuiz?.questions ?? storedQuiz?.questions ?? [],
+				updatedAt
+			};
+			const err = validateQuizDraft({ ...draft, title: title || 'x' });
+			if (err) {
+				saveError = err;
+				return;
+			}
+			const ok = saveQuizDraft(courseId, moduleId, subId, materialId, draft);
+			if (!ok) {
+				saveError = 'Draf kuis gagal tersimpan: penyimpanan lokal penuh.';
+				return;
+			}
+			storedQuiz = draft;
+			latestQuiz = null;
+			touchModule();
+			saveCurriculumDraft(courseId, editableModules);
+			dirty = false;
+			lastSavedLabel = new Date(updatedAt).toLocaleString('id-ID', {
+				day: 'numeric',
+				month: 'short',
+				hour: '2-digit',
+				minute: '2-digit'
+			});
+			savedMessage = `Draf kuis tersimpan ${lastSavedLabel} (${draft.questions.length} soal, minimal ${draft.passScore}).`;
+			goto(backHref);
+			return;
+		}
+		const content = latestJson ?? storedDoc?.content ?? null;
 		const ok = saveMaterialDoc(courseId, moduleId, subId, materialId, {
 			title,
 			content,
@@ -131,6 +294,7 @@
 			minute: '2-digit'
 		});
 		savedMessage = `Draf tersimpan ${lastSavedLabel}. Judul materi ikut tersinkron ke daftar materi.`;
+		goto(backHref);
 	}
 </script>
 
@@ -141,8 +305,12 @@
 	<meta
 		name="description"
 		content={material
-			? `Susun dokumen materi ${material.title} dengan teks, gambar, video, kode, dan PDF`
-			: 'Editor dokumen materi'}
+			? kind === 'kuis'
+				? `Susun soal kuis ${material.title} dengan 4 opsi dan kunci jawaban`
+				: kind === 'tugas'
+					? `Susun penugasan ${material.title}: deskripsi, tujuan, dan langkah pengerjaan`
+					: `Susun materi ${material.title} dengan teks, audio, video, dan gambar`
+			: 'Editor materi'}
 	/>
 </svelte:head>
 
@@ -236,7 +404,7 @@
 
 		<!-- Kepala editor -->
 		<section aria-labelledby="editor-heading" class="mb-5 overflow-hidden rounded-3xl border border-slate-200/70 bg-white shadow-lg shadow-slate-900/5">
-			<div class="relative overflow-hidden bg-slate-900 p-5 sm:px-7 sm:py-6">
+			<div class="relative overflow-hidden bg-violet-900 p-5 sm:px-7 sm:py-6">
 				<div
 					class="pointer-events-none absolute -top-16 -right-10 h-48 w-48 rounded-full bg-blue-500/20 blur-2xl"
 					aria-hidden="true"
@@ -249,15 +417,22 @@
 					<p
 						class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[10px] font-extrabold tracking-[0.16em] text-white uppercase backdrop-blur"
 					>
-						<i class="fa-solid fa-pen-nib" aria-hidden="true"></i>
-						Editor dokumen materi
+						<i
+							class="fa-solid {kind === 'kuis'
+								? 'fa-circle-question'
+								: kind === 'tugas'
+									? 'fa-pen-to-square'
+									: 'fa-pen-nib'}"
+							aria-hidden="true"
+						></i>
+						Editor {kindLabel}
 					</p>
 					<h1 id="editor-heading" class="mt-2.5 text-xl font-extrabold text-white sm:text-2xl">
 						Modul {moduleIndex + 1} · Sub-modul {moduleIndex + 1}.{subIndex + 1}
 					</h1>
 					<p class="mt-1 flex flex-wrap gap-1.5 text-[11px] font-bold">
 						<span class="rounded-full bg-white/15 px-2.5 py-0.5 text-white backdrop-blur">
-							{material.type}
+							{kindLabel}
 						</span>
 						<span class="rounded-full bg-white/15 px-2.5 py-0.5 text-white backdrop-blur">
 							{material.duration}
@@ -303,9 +478,13 @@
 							aria-selected={mode === 'tulis'}
 							aria-controls="panel-tulis"
 							onclick={() => (mode = 'tulis')}
-							class="inline-flex min-h-10 items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all focus-visible:outline-2 focus-visible:outline-blue-600 {mode === 'tulis' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}"
+							class="inline-flex min-h-10 items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all focus-visible:outline-2 focus-visible:outline-blue-600 {mode === 'tulis' ? 'bg-violet-700 text-white shadow-lg shadow-violet-700/25' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}"
 						>
-							<i class="fa-solid fa-pen" aria-hidden="true"></i> Tulis
+							<i class="fa-solid fa-pen" aria-hidden="true"></i> {kind === 'kuis'
+							? 'Buat soal'
+							: kind === 'tugas'
+								? 'Buat tugas'
+								: 'Tulis'}
 						</button>
 						<button
 							type="button"
@@ -314,14 +493,20 @@
 							aria-selected={mode === 'pratinjau'}
 							aria-controls="panel-pratinjau"
 							onclick={() => (mode = 'pratinjau')}
-							class="inline-flex min-h-10 items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all focus-visible:outline-2 focus-visible:outline-blue-600 {mode === 'pratinjau' ? 'bg-slate-900 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}"
+							class="inline-flex min-h-10 items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition-all focus-visible:outline-2 focus-visible:outline-blue-600 {mode === 'pratinjau' ? 'bg-violet-700 text-white shadow-lg shadow-violet-700/25' : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800'}"
 						>
 							<i class="fa-solid fa-eye" aria-hidden="true"></i> Pratinjau
 						</button>
 					</div>
 					<div class="flex items-center gap-2">
 						<span class="text-[11px] font-semibold text-slate-400" aria-live="polite">
-							{latestWords > 0 ? `${latestWords} kata` : ''}
+							{#if kind === 'kuis'}
+								{quizStatus}
+							{:else if kind === 'tugas'}
+								{taskStatus}
+							{:else}
+								{latestWords > 0 ? `${latestWords} kata` : ''}
+							{/if}
 							{lastSavedLabel && !dirty ? ` · tersimpan ${lastSavedLabel}` : ''}
 						</span>
 						<button
@@ -329,7 +514,7 @@
 							onclick={handleSave}
 							class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-all hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
 						>
-							<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Simpan draft
+							<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Simpan
 						</button>
 					</div>
 				</div>
@@ -352,23 +537,177 @@
 			</div>
 		</section>
 
-		{#if mode === 'tulis'}
-			<div id="panel-tulis" role="tabpanel" aria-labelledby="tab-tulis">
-				<MaterialEditor docKey={docKey} initialContent={initialContent} onupdate={handleUpdate} />
+		<!-- Panel tulis: kuis, tugas, dan materi memakai pembuatnya masing-masing.
+			`hidden` menyembunyikan tanpa menghancurkan instance editor. -->
+		<div id="panel-tulis" role="tabpanel" aria-labelledby="tab-tulis" hidden={mode !== 'tulis'}>
+			{#if kind === 'kuis'}
+				<QuizBuilder draftKey={docKey} initial={quizInitial} onupdate={handleQuizUpdate} />
 				<p class="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-slate-500">
 					<i class="fa-solid fa-lightbulb mt-0.5 shrink-0 text-amber-500" aria-hidden="true"></i>
 					<span>
-						Letakkan kursor di antara paragraf lalu gunakan ikon gambar, video, atau PDF untuk
-						menyisipkan media tepat di posisi tersebut. Blok dapat dihapus dengan memilihnya lalu
-						menekan Backspace.
+						Setiap soal wajib punya 4 opsi dan satu kunci jawaban (radio kuning). Tambah,
+						hapus, atau susun ulang soal lalu tekan Simpan.
 					</span>
 				</p>
-			</div>
-		{:else}
-			<div id="panel-pratinjau" role="tabpanel" aria-labelledby="tab-pratinjau">
+			{:else if kind === 'tugas'}
+				<TaskBriefBuilder draftKey={docKey} initial={taskInitial} onupdate={handleTaskUpdate} />
+				<p class="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-slate-500">
+					<i class="fa-solid fa-lightbulb mt-0.5 shrink-0 text-amber-500" aria-hidden="true"></i>
+					<span>
+						Wajib isi ketiga bagian: deskripsi, minimal 1 tujuan, dan minimal 1 langkah.
+						Jumlah langkah bebas — boleh kurang atau lebih dari 4. Tekan Simpan bila selesai.
+					</span>
+				</p>
+			{:else}
+				<MaterialEditor
+					docKey={docKey}
+					initialContent={initialContent}
+					variant="full"
+					onupdate={handleUpdate}
+				/>
+				<p class="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-slate-500">
+					<i class="fa-solid fa-lightbulb mt-0.5 shrink-0 text-amber-500" aria-hidden="true"></i>
+					<span>
+						Materi dapat berupa teks, audio, video, maupun gambar: letakkan kursor di
+						antara paragraf lalu gunakan ikon gambar, video, audio, atau PDF untuk
+						menyisipkan media tepat di posisi tersebut.
+					</span>
+				</p>
+			{/if}
+		</div>
+		<div
+			id="panel-pratinjau"
+			role="tabpanel"
+			aria-labelledby="tab-pratinjau"
+			hidden={mode !== 'pratinjau'}
+		>
+			{#if kind === 'kuis'}
+				<article
+					aria-label="Pratinjau kuis bagi peserta"
+					class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white"
+				>
+					<div class="border-b border-slate-100 bg-slate-50/70 px-5 py-4 sm:px-7">
+						<div class="flex flex-wrap items-center gap-2">
+							<p class="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-3 py-1 text-[10px] font-extrabold tracking-widest text-amber-700 uppercase ring-1 ring-amber-200">
+								<i class="fa-solid fa-eye" aria-hidden="true"></i> Tampilan peserta
+							</p>
+							<p class="inline-flex items-center gap-1.5 rounded-full bg-violet-700 px-3 py-1 text-[10px] font-extrabold tracking-widest text-white uppercase">
+								<i class="fa-solid fa-award text-amber-300" aria-hidden="true"></i> Minimal {quizPassScore} untuk lolos
+							</p>
+						</div>
+						<h2 class="mt-2 text-lg leading-snug font-extrabold text-slate-900 sm:text-xl">
+							{previewTitle || '(belum berjudul)'}
+						</h2>
+						{#if quizPreview?.intro}
+							<p class="mt-1 text-xs text-slate-500">{quizPreview.intro}</p>
+						{/if}
+					</div>
+					<div class="space-y-3 px-5 py-5 sm:px-7 sm:py-6">
+						{#if !quizPreview || quizPreview.questions.length === 0}
+							<div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+								<i class="fa-solid fa-circle-question mb-2 text-xl text-slate-300" aria-hidden="true"></i>
+								<p class="text-sm font-bold text-slate-500">Belum ada soal</p>
+								<p class="mt-1 text-xs text-slate-400">
+									Beralih ke tab Buat soal untuk menyusun kuis.
+								</p>
+							</div>
+						{:else}
+							<ol class="space-y-3">
+								{#each quizPreview.questions as q, qi (qi)}
+									<li class="rounded-xl border border-slate-200 p-4">
+										<p class="text-sm font-bold text-slate-900">
+											<span class="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-lg bg-violet-600 text-[11px] font-extrabold text-white">{qi + 1}</span>
+											{q.question || '(pertanyaan kosong)'}
+										</p>
+										<ul class="mt-2 space-y-1.5">
+											{#each q.options as opt, oi (oi)}
+												<li
+													class="flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs {oi ===
+													q.answer
+														? 'border-emerald-300 bg-emerald-50 font-bold text-emerald-800'
+														: 'border-slate-200 text-slate-600'}"
+												>
+													<span class="font-extrabold">{String.fromCharCode(65 + oi)}.</span>
+													<span class="flex-1">{opt || '(kosong)'}</span>
+													{#if oi === q.answer}
+														<i class="fa-solid fa-circle-check text-emerald-600" aria-hidden="true"></i>
+													{/if}
+												</li>
+											{/each}
+										</ul>
+										{#if q.explanation}
+											<p class="mt-2 text-[11px] text-slate-500">
+												<i class="fa-solid fa-comment-dots mr-1" aria-hidden="true"></i>{q.explanation}
+											</p>
+										{/if}
+									</li>
+								{/each}
+							</ol>
+						{/if}
+					</div>
+				</article>
+			{:else if kind === 'tugas'}
+				<article
+					aria-label="Pratinjau tugas bagi peserta"
+					class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white"
+				>
+					<div class="border-b border-slate-100 bg-slate-50/70 px-5 py-4 sm:px-7">
+						<p class="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-3 py-1 text-[10px] font-extrabold tracking-widest text-violet-700 uppercase ring-1 ring-violet-200">
+							<i class="fa-solid fa-eye" aria-hidden="true"></i> Tampilan peserta
+						</p>
+						<h2 class="mt-2 text-lg leading-snug font-extrabold text-slate-900 sm:text-xl">
+							{previewTitle || '(belum berjudul)'}
+						</h2>
+					</div>
+					<div class="space-y-4 px-5 py-5 sm:px-7 sm:py-6">
+						{#if taskBriefEmpty}
+							<div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+								<i class="fa-solid fa-briefcase mb-2 text-xl text-slate-300" aria-hidden="true"></i>
+								<p class="text-sm font-bold text-slate-500">Belum ada isi tugas</p>
+								<p class="mt-1 text-xs text-slate-400">
+									Beralih ke tab Buat tugas untuk mengisi deskripsi, tujuan, dan langkah.
+								</p>
+							</div>
+						{:else if taskPreview}
+							<div>
+								<p class="mb-1.5 flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-slate-500 uppercase">
+									<span class="flex h-5 w-5 items-center justify-center rounded-md bg-violet-600 text-[10px] text-white">1</span>
+									Deskripsi Penugasan
+								</p>
+								{#if taskBriefHtml}
+									<div class="mdoc">{@html taskBriefHtml}</div>
+								{:else}
+									<p class="text-sm text-slate-400">(belum diisi)</p>
+								{/if}
+							</div>
+							<div>
+								<p class="mb-1.5 flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-slate-500 uppercase">
+									<span class="flex h-5 w-5 items-center justify-center rounded-md bg-violet-600 text-[10px] text-white">2</span>
+									Tujuan Penugasan
+								</p>
+								<ul class="space-y-1.5">
+									{#each taskPreview.objectives.filter((o) => o.trim()) as obj, oi (oi)}
+										<li class="flex items-start gap-2 text-sm text-slate-700">
+											<i class="fa-solid fa-circle-check mt-1 shrink-0 text-xs text-emerald-500" aria-hidden="true"></i>
+											<span>{obj}</span>
+										</li>
+									{/each}
+								</ul>
+							</div>
+							<div>
+								<p class="mb-1.5 flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-slate-500 uppercase">
+									<span class="flex h-5 w-5 items-center justify-center rounded-md bg-violet-600 text-[10px] text-white">3</span>
+									Langkah Pengerjaan
+								</p>
+								<TaskStepsList steps={taskPreview.steps.filter((s) => s.trim())} />
+							</div>
+						{/if}
+					</div>
+				</article>
+			{:else}
 				<MaterialPreview content={previewJson} title={previewTitle} />
-			</div>
-		{/if}
+			{/if}
+		</div>
 
 		<div class="mt-6">
 			<a

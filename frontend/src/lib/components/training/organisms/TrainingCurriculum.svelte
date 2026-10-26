@@ -65,7 +65,7 @@
 				<p class="mt-1 text-xs text-slate-500">Coba kata kunci modul, sub-modul, atau materi lain.</p>
 			</div>
 		{:else}
-			{#each visible as mod, i (mod.id)}
+			{#each visible as mod (mod.id)}
 				<div role="listitem">
 					<ModuleAccordion
 						module={mod}

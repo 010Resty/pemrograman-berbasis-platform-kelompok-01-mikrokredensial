@@ -1,41 +1,17 @@
 <script lang="ts">
-	import type { MaterialType } from '$lib/data/courses';
+	import { materialTypeIcon, materialTypeLabel } from '$lib/data/courses';
 
 	let {
 		type,
 		withLabel = false
 	}: {
-		type: MaterialType | string;
+		type: string;
 		withLabel?: boolean;
 	} = $props();
 
-	const iconClass = $derived(
-		type === 'video'
-			? 'fa-circle-play text-blue-600'
-			: type === 'audio'
-				? 'fa-headphones text-cyan-600'
-				: type === 'foto'
-					? 'fa-image text-slate-500'
-					: type === 'kuis'
-						? 'fa-circle-question text-amber-600'
-						: type === 'tugas'
-							? 'fa-pen-to-square text-violet-600'
-							: 'fa-book-open text-emerald-600'
-	);
+	const iconClass = $derived(materialTypeIcon(type));
 
-	const label = $derived(
-		type === 'video'
-			? 'Video'
-			: type === 'audio'
-				? 'Audio'
-				: type === 'foto'
-					? 'Foto'
-					: type === 'kuis'
-						? 'Kuis'
-						: type === 'tugas'
-							? 'Tugas'
-							: 'Bacaan'
-	);
+	const label = $derived(materialTypeLabel(type));
 </script>
 
 <span class="inline-flex items-center gap-1.5" aria-label={`Tipe materi: ${label}`}>

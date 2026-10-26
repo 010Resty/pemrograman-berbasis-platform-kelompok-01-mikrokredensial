@@ -42,7 +42,7 @@
 
 <svelte:head>
 	<title>Sertifikat — Aristoteles Platform</title>
-	<meta name="description" content="Daftar sertifikat mikrokredensial yang telah diperoleh pengguna." />
+	<meta name="description" content="Contoh tampilan daftar sertifikat mikrokredensial (data demo, belum diterbitkan)." />
 </svelte:head>
 
 <div class="p-4 sm:p-6 lg:p-8">
@@ -50,7 +50,7 @@
 		<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">Menu Utama · Sertifikat</p>
 		<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Sertifikat</h1>
 		<p class="mt-1 text-sm text-slate-500">
-			{certificates.length} sertifikat terverifikasi. Bagikan ID kredensial ke recruiter untuk validasi.
+			{certificates.length} contoh sertifikat (data demo untuk preview tampilan, bukan sertifikat nyata).
 		</p>
 	</div>
 
@@ -63,16 +63,17 @@
 				<i class="fa-solid fa-award text-xl" aria-hidden="true"></i>
 			</span>
 			<div>
-				<p class="text-lg font-bold">3 Sertifikat Terverifikasi</p>
-				<p class="text-sm text-amber-100">Semua tersimpan dengan enkripsi kriptografis & cap digital.</p>
+				<p class="text-lg font-bold">3 Contoh Sertifikat (Data Demo)</p>
+				<p class="text-sm text-amber-100">Preview tampilan — belum diterbitkan dan belum dapat diverifikasi.</p>
 			</div>
 		</div>
-		<a
-			href="/verify"
-			class="inline-flex items-center justify-center gap-2 rounded-xl bg-white px-5 py-2.5 text-xs font-bold text-amber-700 transition-colors hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-white"
+		<span
+			aria-disabled="true"
+			title="Verifikasi publik belum tersedia"
+			class="inline-flex cursor-not-allowed items-center justify-center gap-2 rounded-xl bg-white/60 px-5 py-2.5 text-xs font-bold text-amber-700/70"
 		>
-			<i class="fa-solid fa-shield-halved" aria-hidden="true"></i> Verifikasi Sertifikat
-		</a>
+			<i class="fa-solid fa-shield-halved" aria-hidden="true"></i> Verifikasi Belum Tersedia
+		</span>
 	</div>
 
 	<div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
@@ -81,7 +82,7 @@
 				class="flex flex-col overflow-hidden rounded-2xl border border-slate-200/70 bg-white transition-shadow hover:shadow-xl"
 			>
 				<!-- Certificate preview -->
-				<div class="relative bg-slate-900 p-6 text-center">
+				<div class="relative bg-blue-900 p-6 text-center">
 					<div
 						class="pointer-events-none absolute inset-0 bg-gradient-to-br from-blue-600/30 via-transparent to-amber-500/20"
 						aria-hidden="true"
@@ -90,8 +91,8 @@
 					<p class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Sertifikat Kelulusan</p>
 					<h2 class="mt-1 text-lg font-extrabold text-white">{cert.title}</h2>
 					<p class="mt-0.5 text-xs text-slate-300">Diberikan kepada <strong class="text-white">Ahmad Farizi</strong></p>
-					<div class="mt-3 inline-flex items-center gap-1 rounded-full bg-emerald-500/20 px-3 py-1 text-[11px] font-bold text-emerald-300">
-						<i class="fa-solid fa-circle-check" aria-hidden="true"></i> Terverifikasi
+					<div class="mt-3 inline-flex items-center gap-1 rounded-full bg-slate-500/20 px-3 py-1 text-[11px] font-bold text-slate-200">
+						<i class="fa-solid fa-circle-check" aria-hidden="true"></i> Contoh
 					</div>
 				</div>
 
@@ -118,17 +119,24 @@
 					<div class="mt-2 flex gap-2">
 						<button
 							type="button"
-							class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+							disabled
+							title="Unduh PDF belum tersedia — sertifikat ini data demo"
+							aria-disabled="true"
+							class="flex flex-1 cursor-not-allowed items-center justify-center gap-2 rounded-xl bg-slate-300 px-4 py-2.5 text-xs font-bold text-slate-500"
 						>
 							<i class="fa-solid fa-download" aria-hidden="true"></i> Unduh PDF
 						</button>
 						<button
 							type="button"
-							class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-200 focus-visible:outline-2 focus-visible:outline-slate-500"
+							disabled
+							title="Bagikan belum tersedia — sertifikat ini data demo"
+							aria-disabled="true"
+							class="flex flex-1 cursor-not-allowed items-center justify-center gap-2 rounded-xl bg-slate-100 px-4 py-2.5 text-xs font-bold text-slate-400"
 						>
 							<i class="fa-solid fa-share-nodes" aria-hidden="true"></i> Bagikan
 						</button>
 					</div>
+					<p class="text-[11px] text-slate-400">Data demo — unduh dan bagikan belum tersedia.</p>
 				</div>
 			</article>
 		{/each}
@@ -148,7 +156,7 @@
 			</div>
 			<a
 				href="/user/kursusku"
-				class="inline-flex items-center gap-2 rounded-xl bg-slate-900 px-5 py-2.5 text-xs font-bold text-white transition-colors hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-slate-900"
+				class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 			>
 				Kembali ke Kursusku <i class="fa-solid fa-arrow-right text-[10px]" aria-hidden="true"></i>
 			</a>

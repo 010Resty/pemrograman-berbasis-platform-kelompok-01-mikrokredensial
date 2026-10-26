@@ -130,7 +130,7 @@
 					<p class="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-white px-2.5 py-1.5 font-mono text-[11px] font-bold text-slate-800 ring-1 ring-amber-200">
 						<i class="fa-solid fa-fingerprint text-amber-500" aria-hidden="true"></i> {cred}
 					</p>
-					<a href="/login" class="mt-3 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2.5 text-xs font-bold text-white hover:bg-slate-700">
+					<a href="/login" class="mt-3 flex min-h-[44px] w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-blue-700">
 						<i class="fa-solid fa-arrow-right-to-bracket" aria-hidden="true"></i> Masuk untuk mengejar sertifikat
 					</a>
 				</aside>
@@ -201,7 +201,7 @@
 
 			<aside class="space-y-4 lg:sticky lg:top-24">
 				<div class="overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
-					<div class="bg-slate-900 px-5 py-4 text-white">
+					<div class="bg-blue-800 px-5 py-4 text-white">
 						<p class="text-[11px] font-extrabold tracking-widest text-blue-200 uppercase">Ringkasan modul</p>
 						<p class="mt-0.5 text-lg font-extrabold">Modul {moduleIndex + 1}</p>
 					</div>

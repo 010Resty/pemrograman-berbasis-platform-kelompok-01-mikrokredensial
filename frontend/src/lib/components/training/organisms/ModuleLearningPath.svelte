@@ -1,6 +1,6 @@
 <script lang="ts">
 	import type { Course } from '$lib/data/courses';
-	import { getModuleMaterials } from '$lib/data/courses';
+	import { getModuleMaterials, normalizeMaterialType } from '$lib/data/courses';
 	import { resolveSubModules } from '$lib/data/training';
 	import { courseCredentialId, moduleCredentialId, moduleHref } from '$lib/data/certificates';
 	import { subModuleHref } from '$lib/data/training';
@@ -8,17 +8,17 @@
 	let { course }: { course: Course } = $props();
 
 	function typeSummary(materials: { type: string }[]): string {
-		const order = ['video', 'bacaan', 'kuis', 'tugas', 'audio', 'foto'] as const;
+		const order = ['materi', 'kuis', 'tugas'] as const;
 		const labels: Record<string, string> = {
-			video: 'Video',
-			bacaan: 'Bacaan',
+			materi: 'Materi',
 			kuis: 'Kuis',
-			tugas: 'Tugas',
-			audio: 'Audio',
-			foto: 'Foto'
+			tugas: 'Tugas'
 		};
 		const counts = new Map<string, number>();
-		for (const m of materials) counts.set(m.type, (counts.get(m.type) ?? 0) + 1);
+		for (const m of materials) {
+			const n = normalizeMaterialType(m.type);
+			counts.set(n, (counts.get(n) ?? 0) + 1);
+		}
 		return order
 			.filter((t) => counts.has(t))
 			.map((t) => `${counts.get(t)} ${labels[t]}`)
@@ -30,7 +30,7 @@
 	aria-labelledby="learning-path-heading"
 	class="overflow-hidden rounded-3xl border border-slate-200/70 bg-white shadow-lg shadow-slate-900/5"
 >
-	<div class="relative overflow-hidden bg-slate-900 p-5 sm:px-7 sm:py-6">
+	<div class="relative overflow-hidden bg-violet-900 p-5 sm:px-7 sm:py-6">
 		<div
 			class="pointer-events-none absolute -top-16 -right-10 h-48 w-48 rounded-full bg-white/10 blur-2xl"
 			aria-hidden="true"
@@ -197,7 +197,7 @@
 							</p>
 							<a
 								href={moduleHref(course.id, mod.id) + '#sertifikat'}
-								class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-slate-900 px-4 py-2 text-[11px] font-bold text-white transition-colors hover:bg-slate-700 focus-visible:outline-2 focus-visible:outline-slate-900"
+								class="inline-flex shrink-0 items-center justify-center gap-1.5 rounded-xl bg-violet-600 px-4 py-2 text-[11px] font-bold text-white transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-violet-600"
 							>
 								<i class="fa-solid fa-eye text-[10px]" aria-hidden="true"></i> Lihat sertifikat
 							</a>

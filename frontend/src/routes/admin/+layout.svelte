@@ -31,14 +31,15 @@
 
 	let sidebarOpen = $state(false);
 	let isCollapsed = $state(false);
-	let searchQuery = $state('');
 	let showProfileMenu = $state(false);
 
 	const navItems: NavItem[] = [
-		{ label: 'Dashboard', icon: 'fa-house', href: '/admin' },
-		{ label: 'Users', icon: 'fa-users', href: '/admin/users', badge: '1.2k' },
-		{ label: 'Instrukturs', icon: 'fa-chalkboard-user', href: '/admin/instrukturs', badge: '48' },
-		{ label: 'Courses', icon: 'fa-layer-group', href: '/admin/courses', badge: '120' }
+		{ label: 'Dasbor', icon: 'fa-house', href: '/admin' },
+		{ label: 'Peserta', icon: 'fa-users', href: '/admin/peserta', badge: '1.2k' },
+		{ label: 'Undangan', icon: 'fa-envelope-open-text', href: '/admin/invitations' },
+		{ label: 'Instruktur', icon: 'fa-chalkboard-user', href: '/admin/instrukturs', badge: '48' },
+		{ label: 'Kursus', icon: 'fa-layer-group', href: '/admin/courses', badge: '120' },
+		{ label: 'Voucher', icon: 'fa-ticket', href: '/admin/vouchers' }
 	];
 
 	function toggleProfileMenu() {
@@ -72,7 +73,7 @@
 		onClose={() => (sidebarOpen = false)}
 		onLogout={handleLogout}
 		brandHref="/admin"
-		brandLabel="Aristoteles Platform - Dashboard admin"
+		brandLabel="Aristoteles Platform - Dasbor admin"
 		navAriaLabel="Navigasi admin"
 		profileName="ADMIN ARISTOTELES"
 		profileRole="Administrator"
@@ -106,32 +107,24 @@
 		>
 			<div class="flex items-center justify-between gap-4">
 				<div class="max-w-md flex-1">
-					<form role="search" aria-label="Pencarian admin" onsubmit={(e) => e.preventDefault()}>
+					<form role="search" aria-label="Pencarian admin (segera hadir)" onsubmit={(e) => e.preventDefault()}>
 						<div class="relative">
 							<div
 								class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400"
 							>
 								<i class="fa-solid fa-magnifying-glass text-sm" aria-hidden="true"></i>
 							</div>
-							<label for="admin-search" class="sr-only">Cari users, instruktur, atau course</label>
+							<label for="admin-search" class="sr-only">Cari peserta, instruktur atau course</label>
 							<input
 								id="admin-search"
 								type="search"
-								placeholder="Cari users, instruktur, course..."
-								bind:value={searchQuery}
+								placeholder="Pencarian global segera hadir" disabled title="Pencarian global belum tersedia. Gunakan kolom pencarian di halaman Peserta, Instruktur, atau Kursus." aria-describedby="admin-search-note"
 								autocomplete="off"
-								class="w-full rounded-xl border border-transparent bg-slate-100 py-2.5 pr-4 pl-10 text-sm text-slate-800 transition-all placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+								class="w-full cursor-not-allowed rounded-xl border border-transparent bg-slate-100 py-2.5 pr-4 pl-10 text-sm text-slate-400 placeholder:text-slate-400 focus:outline-none"
 							/>
-							{#if searchQuery}
-								<button
-									type="button"
-									class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 transition-colors hover:text-slate-600"
-									onclick={() => (searchQuery = '')}
-									aria-label="Hapus pencarian"
-								>
-									<i class="fa-solid fa-xmark text-sm" aria-hidden="true"></i>
-								</button>
-							{/if}
+							<p id="admin-search-note" class="sr-only">
+							Pencarian global belum berfungsi. Gunakan kolom pencarian di halaman Peserta, Instruktur, atau Kursus.
+						</p>
 						</div>
 					</form>
 				</div>
@@ -140,7 +133,7 @@
 					<span
 						class="hidden items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-[11px] font-bold text-blue-700 md:inline-flex"
 					>
-						<i class="fa-solid fa-shield-halved" aria-hidden="true"></i> ADMIN PANEL
+						<i class="fa-solid fa-shield-halved" aria-hidden="true"></i> PANEL ADMIN
 					</span>
 
 					<div class="relative">
@@ -178,12 +171,12 @@
 								<div class="p-1.5" role="none">
 									<a
 										role="menuitem"
-										href="/admin/users"
+										href="/admin/peserta"
 										class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
 										onclick={closeProfileMenu}
 									>
 										<i class="fa-solid fa-users w-4 text-center text-slate-400" aria-hidden="true"></i>
-										Kelola Users
+										Kelola Peserta
 									</a>
 									<a
 										role="menuitem"
@@ -192,7 +185,7 @@
 										onclick={closeProfileMenu}
 									>
 										<i class="fa-solid fa-layer-group w-4 text-center text-slate-400" aria-hidden="true"></i>
-										Kelola Courses
+										Kelola Kursus
 									</a>
 								</div>
 								<div class="border-t border-slate-100 p-1.5">

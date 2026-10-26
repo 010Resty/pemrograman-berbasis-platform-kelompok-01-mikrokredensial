@@ -5,49 +5,103 @@
 	import WarningModal from '$lib/components/WarningModal.svelte';
 
 	/**
-	 * LearningPathManager — kelola kurikulum sebagai jalur belajar (learning path).
-	 * Modul = patch besar di sumbu utama, Sub-modul = patch cabang.
-	 * Tambah / hapus / sisip / urutkan modul & sub-modul langsung dari visual path.
-	 * `subModules` adalah sumber kebenaran; `materials` flat selalu disinkronkan.
+	 * LearningPathManager — kelola daftar modul (nama + deskripsi).
+	 * Sub-modul TIDAK disunting di sini; gunakan halaman kelola sub-modul
+	 * masing-masing modul. `subModules` hanya dibaca untuk hitungan.
 	 */
 	let {
 		modules = $bindable([]),
-		onnotice = (_msg: string) => {},
-		moduleHref,
-		subHref
+		onnotice = () => {},
+		moduleHref
 	}: {
 		modules: CourseModule[];
 		onnotice?: (msg: string) => void;
 		/** Bila diisi, judul modul menjadi tautan ke halaman kelola sub-modulnya. */
 		moduleHref?: (mod: CourseModule, index: number) => string;
-		/** Bila diisi, judul sub-modul menjadi tautan ke halaman kelola materinya. */
-		subHref?: (mod: CourseModule, sub: SubModule, moduleIndex: number, subIndex: number) => string;
 	} = $props();
 
 	const uid = (prefix: string) =>
 		`${prefix}-${Date.now().toString(36)}-${Math.floor(Math.random() * 1e4)}`;
 
 	const subsOf = (mod: CourseModule): SubModule[] => resolveSubModules(mod);
-	const syncFlat = (mod: CourseModule): CourseModule => ({
-		...mod,
-		materials: subsOf(mod).flatMap((s) => s.materials)
-	});
 
-	/** Patch mana yang sedang dibuka detailnya (mode baca) vs edit inline. */
+	/** Patch mana yang sedang dibuka panel suntingnya (nama + deskripsi modul). */
 	let openPatches = new SvelteSet<string>();
+	/** Menu overflow (⋯) yang sedang terbuka — hanya satu per daftar. */
+	let menuFor = $state<string | null>(null);
+	/** Posisi viewport menu (fixed) agar tidak terpotong `overflow-hidden` kartu. */
+	let menuPos = $state<{ top: number; right: number } | null>(null);
+	/** Draf suntingan nama + deskripsi per modul. Diterapkan hanya saat Simpan ditekan. */
+	let editDrafts = $state<Record<string, { title: string; description: string }>>({});
+	let editErrors = $state<Record<string, string>>({});
 	/** Hapus yang menunggu konfirmasi modal (pengganti konfirmasi dua-tahap). */
 	let pendingDelete = $state<{
-		scope: 'module' | 'sub';
 		moduleId: string;
-		subId?: string;
 		title: string;
 		message: string;
 	} | null>(null);
 	let showDelete = $state(false);
 
-	function togglePatch(id: string) {
-		if (openPatches.has(id)) openPatches.delete(id);
-		else openPatches.add(id);
+	function snapshotDraft(mod: CourseModule) {
+		editDrafts[mod.id] = { title: mod.title, description: mod.description };
+		delete editErrors[mod.id];
+	}
+
+	function togglePatch(id: string | null) {
+		if (!id) return;
+		if (openPatches.has(id)) {
+			// Menutup = membuang perubahan yang belum disimpan.
+			openPatches.delete(id);
+			delete editDrafts[id];
+			delete editErrors[id];
+		} else {
+			const mod = modules.find((m) => m.id === id);
+			if (mod) snapshotDraft(mod);
+			openPatches.add(id);
+		}
+	}
+
+	/** Satu-satunya jalan menyimpan perubahan nama/deskripsi modul. */
+	function saveModuleDraft(id: string | null) {
+		if (!id) return;
+		const d = editDrafts[id];
+		const idx = modules.findIndex((m) => m.id === id);
+		if (!d || idx < 0) return;
+		if (!d.title.trim()) {
+			editErrors[id] = 'Isi nama modul terlebih dahulu.';
+			return;
+		}
+		delete editErrors[id];
+		modules = modules.map((m, i) =>
+			i === idx ? { ...m, title: d.title, description: d.description } : m
+		);
+		delete editDrafts[id];
+		openPatches.delete(id);
+		announce(`Modul ${idx + 1} tersimpan.`);
+	}
+
+	function toggleMenu(id: string, anchor?: HTMLElement | null) {
+		if (menuFor === id) {
+			closeMenu();
+			return;
+		}
+		if (anchor) {
+			const r = anchor.getBoundingClientRect();
+			const approxH = 264;
+			const top =
+				r.bottom + 6 + approxH > window.innerHeight
+					? Math.max(8, r.top - approxH - 6)
+					: r.bottom + 6;
+			menuPos = { top, right: Math.max(8, window.innerWidth - r.right) };
+		} else {
+			menuPos = null;
+		}
+		menuFor = id;
+	}
+
+	function closeMenu() {
+		menuFor = null;
+		menuPos = null;
 	}
 
 	function announce(msg: string) {
@@ -70,6 +124,7 @@
 			modules = [...modules.slice(0, atIndex), next, ...modules.slice(atIndex)];
 		}
 		openPatches.add(id);
+		editDrafts[id] = { title: next.title, description: next.description };
 		pendingDelete = null;
 		announce(
 			atIndex === undefined ? `Modul ${modules.length} ditambahkan ke ujung jalur.` : `Modul baru disisipkan di posisi ${atIndex + 1}.`
@@ -80,6 +135,8 @@
 		const idx = modules.findIndex((m) => m.id === id);
 		modules = modules.filter((m) => m.id !== id);
 		openPatches.delete(id);
+		delete editDrafts[id];
+		delete editErrors[id];
 		announce(idx >= 0 ? `Modul ${idx + 1} dihapus dari jalur.` : 'Modul dihapus dari jalur.');
 	}
 
@@ -87,7 +144,6 @@
 		const subs = subsOf(mod);
 		const mats = subs.reduce((n, s) => n + s.materials.length, 0);
 		pendingDelete = {
-			scope: 'module',
 			moduleId: mod.id,
 			title: `Hapus Modul ${mi + 1}?`,
 			message: `“${mod.title || '(belum berjudul)'}” beserta ${subs.length} sub-modul dan ${mats} materi di dalamnya akan dihapus dari draf. Tindakan ini tidak bisa dibatalkan.`
@@ -95,7 +151,8 @@
 		showDelete = true;
 	}
 
-	function moveModule(id: string, dir: -1 | 1) {
+	function moveModule(id: string | null, dir: -1 | 1) {
+		if (!id) return;
 		const idx = modules.findIndex((m) => m.id === id);
 		const target = idx + dir;
 		if (idx < 0 || target < 0 || target >= modules.length) return;
@@ -103,43 +160,6 @@
 		[next[idx], next[target]] = [next[target], next[idx]];
 		modules = next;
 		announce(`Modul dipindah ke posisi ${target + 1}.`);
-	}
-
-	function addSubModule(moduleId: string) {
-		modules = modules.map((m) => {
-			if (m.id !== moduleId) return m;
-			const subs = subsOf(m);
-			const sub: SubModule = {
-				id: uid('sub'),
-				title: `Sub-modul ${subs.length + 1}`,
-				description: '',
-				materials: []
-			};
-			return syncFlat({ ...m, subModules: [...subs, sub] });
-		});
-		announce('Sub-modul baru ditambahkan ke patch modul.');
-	}
-
-	function removeSubModule(moduleId: string, subId: string) {
-		modules = modules.map((m) => {
-			if (m.id !== moduleId) return m;
-			const subs = subsOf(m);
-			if (subs.length <= 1) return m;
-			return syncFlat({ ...m, subModules: subs.filter((s) => s.id !== subId) });
-		});
-		openPatches.delete(subId);
-		announce('Sub-modul dihapus dari jalur.');
-	}
-
-	function askDeleteSub(mod: CourseModule, sub: SubModule, mi: number, si: number) {
-		pendingDelete = {
-			scope: 'sub',
-			moduleId: mod.id,
-			subId: sub.id,
-			title: `Hapus Sub-modul ${mi + 1}.${si + 1}?`,
-			message: `“${sub.title || '(belum berjudul)'}” beserta ${sub.materials.length} materi di dalamnya akan dihapus dari draf. Tindakan ini tidak bisa dibatalkan.`
-		};
-		showDelete = true;
 	}
 
 	function cancelDelete() {
@@ -150,73 +170,50 @@
 		const target = pendingDelete;
 		pendingDelete = null;
 		showDelete = false;
+		closeMenu();
 		if (!target) return;
-		if (target.scope === 'module') removeModule(target.moduleId);
-		else if (target.subId) removeSubModule(target.moduleId, target.subId);
-	}
-
-	function duplicateSubModule(moduleId: string, subId: string) {
-		modules = modules.map((m) => {
-			if (m.id !== moduleId) return m;
-			const subs = subsOf(m);
-			const src = subs.find((s) => s.id === subId);
-			if (!src) return m;
-			const copy: SubModule = {
-				...structuredClone(src),
-				id: uid('sub'),
-				title: `${src.title} (salinan)`,
-				materials: []
-			};
-			const at = subs.findIndex((s) => s.id === subId) + 1;
-			return syncFlat({
-				...m,
-				subModules: [...subs.slice(0, at), copy, ...subs.slice(at)]
-			});
-		});
-		announce('Sub-modul diduplikasi (materi tidak ikut disalin).');
+		removeModule(target.moduleId);
 	}
 
 	const totalSubs = $derived(modules.reduce((n, m) => n + subsOf(m).length, 0));
 	const totalMats = $derived(modules.reduce((n, m) => n + subsOf(m).reduce((a, s) => a + s.materials.length, 0), 0));
+
+	/** Konteks pemilik menu global: modul yang menunya terbuka (menu dirender sekali di luar kartu). */
+	const menuModule = $derived(menuFor ? modules.find((m) => m.id === menuFor) : undefined);
+	const menuModuleIndex = $derived(menuFor ? modules.findIndex((m) => m.id === menuFor) : -1);
+	const menuOpen = $derived(menuFor ? openPatches.has(menuFor) : false);
+
+	/** Hapus modul pemilik menu (dicari ulang agar aman dari draf basi). */
+	function askDeleteMenuModule() {
+		const m = menuModule;
+		if (!m) return;
+		const mi = modules.findIndex((x) => x.id === m.id);
+		if (mi < 0) return;
+		askDeleteModule(m, mi);
+	}
 </script>
 
-<div class="overflow-hidden rounded-3xl border border-slate-200/70 bg-white shadow-lg shadow-slate-900/5">
-	<!-- Header jalur -->
-	<div class="relative overflow-hidden bg-slate-900 p-5 sm:px-7 sm:py-6">
-		<div
-			class="pointer-events-none absolute -top-16 -right-10 h-48 w-48 rounded-full bg-blue-500/20 blur-2xl"
-			aria-hidden="true"
-		></div>
-		<div
-			class="pointer-events-none absolute -bottom-20 left-1/3 h-48 w-64 rounded-full bg-cyan-400/20 blur-2xl"
-			aria-hidden="true"
-		></div>
-		<div
-			class="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-blue-600 via-cyan-400 to-blue-600"
-			aria-hidden="true"
-		></div>
-		<div class="relative flex flex-wrap items-end justify-between gap-3">
-			<div>
-				<p
-					class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[10px] font-extrabold tracking-[0.16em] text-white uppercase backdrop-blur"
-				>
-					<i class="fa-solid fa-route" aria-hidden="true"></i>
+<!-- Tutup menu ⋯ saat halaman digulir/diubah ukuran (posisinya fixed) -->
+<svelte:window onscroll={closeMenu} onresize={closeMenu} />
+
+<div class="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+	<!-- Kepala ringkas tanpa blok berwarna -->
+	<div class="border-b border-slate-100 px-4 py-4 sm:px-6">
+		<div class="flex flex-wrap items-start justify-between gap-3">
+			<div class="min-w-0">
+				<p class="text-[11px] font-extrabold tracking-widest text-slate-400 uppercase">
 					Learning path · kelola kurikulum
 				</p>
-				<h2 class="mt-2.5 text-xl font-extrabold text-white sm:text-2xl">Jalur Modul → Sub-modul</h2>
-				<p class="mt-1 max-w-xl text-xs leading-relaxed text-slate-300 sm:text-[13px]">
-					Tambah, sisip, urutkan, dan hapus <strong class="text-white">modul</strong> serta
-					<strong class="text-white">sub-modul</strong> langsung dari patch jalur. Klik judul modul untuk
-					membuka halaman sub-modulnya, klik judul sub-modul untuk membuka halaman materinya.
+				<h2 class="mt-1 text-lg font-extrabold text-slate-900">Jalur Modul</h2>
+				<p class="mt-1 max-w-xl text-xs leading-relaxed text-slate-500">
+					Susun urutan <strong class="text-slate-700">modul</strong> dan sunting nama serta
+					deskripsinya. Klik judul modul untuk mengatur sub-modulnya.
 				</p>
 			</div>
-			<div class="min-w-44 rounded-2xl bg-white/15 p-3 backdrop-blur">
-				<p class="flex items-center justify-between text-[10px] font-extrabold tracking-widest text-slate-300 uppercase">
-					<span>Kurikulum</span><span>{modules.length} modul</span>
-				</p>
-				<p class="mt-1.5 text-center text-[11px] font-bold text-white">
+			<div class="flex shrink-0 flex-wrap items-center gap-2">
+				<span class="inline-flex items-center gap-1.5 rounded-full bg-blue-50 px-3 py-1.5 text-[11px] font-bold text-blue-700 ring-1 ring-blue-100">
 					{modules.length} modul · {totalSubs} sub · {totalMats} materi
-				</p>
+				</span>
 			</div>
 		</div>
 	</div>
@@ -224,7 +221,7 @@
 	<div class="p-4 sm:p-6">
 		{#if modules.length === 0}
 			<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
-				<p class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-lg">
+				<p class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-600 text-white shadow-lg">
 					<i class="fa-solid fa-map" aria-hidden="true"></i>
 				</p>
 				<p class="mt-3 text-sm font-bold text-slate-900">Jalur masih kosong</p>
@@ -244,7 +241,7 @@
 			<ol aria-label="Jalur belajar: daftar modul dan sub-modul" class="relative space-y-3">
 				<!-- Node mulai -->
 				<li class="relative flex items-center gap-3 pl-1" aria-hidden="true">
-					<span class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-white shadow-lg shadow-emerald-500/30">
+					<span class="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-blue-600">
 						<i class="fa-solid fa-flag text-xs"></i>
 					</span>
 					<span class="text-[11px] font-extrabold tracking-widest text-slate-400 uppercase">Mulai jalur</span>
@@ -254,119 +251,57 @@
 					{@const subs = subsOf(mod)}
 					{@const open = openPatches.has(mod.id)}
 					{@const matCount = subs.reduce((n, s) => n + s.materials.length, 0)}
-					<li class="relative">
-						<!-- Garis sumbu vertikal -->
-						<span
-							class="pointer-events-none absolute top-0 bottom-0 left-[22px] w-0.5 bg-gradient-to-b from-blue-200 via-slate-200 to-blue-200"
-							aria-hidden="true"
-						></span>
-
-						<!-- Tombol sisip di antara modul -->
-						{#if mi > 0}
-							<div class="relative my-1 flex items-center gap-3 py-1 pl-1">
-								<button
-									type="button"
-									onclick={() => addModule(mi)}
-									aria-label={`Sisipkan modul baru sebelum modul ${mi + 1}`}
-									title={`Sisip modul sebelum M${mi + 1}`}
-									class="group flex min-h-8 items-center gap-2 rounded-full border border-dashed border-blue-300 bg-blue-50/70 py-1 pr-3 pl-1 text-[11px] font-bold text-blue-700 transition-all hover:border-blue-500 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600"
-								>
-									<span class="flex h-6 w-6 items-center justify-center rounded-full bg-blue-600 text-[10px] text-white transition-transform group-hover:scale-110">
-										<i class="fa-solid fa-plus" aria-hidden="true"></i>
-									</span>
-									Sisip modul di sini
-								</button>
-							</div>
-						{/if}
-
+					<li>
 						<!-- PATCH MODUL -->
 						<article
 							aria-labelledby={`lp-mod-title-${mod.id}`}
-							class="relative ml-12 overflow-hidden rounded-2xl border bg-white transition-all duration-300 {open
-								? 'border-blue-500 shadow-xl shadow-blue-600/10'
-								: 'border-slate-200/80 shadow-sm hover:border-blue-300 hover:shadow-lg'}"
+							class="rounded-2xl border border-slate-200 bg-white transition-all {open
+								? 'border-blue-500 shadow-md shadow-blue-600/10'
+								: 'shadow-sm hover:border-slate-300'}"
 						>
-							<!-- Badge nomor di sumbu -->
-							<span
-								class="absolute top-4 -left-12 flex h-11 w-11 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-sm font-extrabold text-white shadow-lg shadow-blue-600/30 ring-4 ring-white"
-								aria-hidden="true"
-							>
-								M{mi + 1}
-							</span>
-
 							<div class="flex w-full items-center gap-2 p-4">
 								<div class="flex min-w-0 flex-1 items-center gap-3">
 									<div class="min-w-0 flex-1">
-										{#if moduleHref}
-											<a
-												href={moduleHref(mod, mi)}
-												id={`lp-mod-title-${mod.id}`}
-												aria-label={`Kelola sub-modul Modul ${mi + 1}: ${mod.title || '(belum berjudul)'}`}
-												title="Buka halaman kelola sub-modul"
-												class="block truncate rounded-lg text-sm font-extrabold text-slate-900 underline-offset-4 hover:text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600 sm:text-[15px]"
-											>
-												Modul {mi + 1}: {mod.title || '(belum berjudul)'}
-												<i class="fa-solid fa-arrow-up-right-from-square ml-1 text-[11px] text-blue-500" aria-hidden="true"></i>
-											</a>
-										{:else}
-											<span
-												id={`lp-mod-title-${mod.id}`}
-												class="block truncate text-sm font-extrabold text-slate-900 sm:text-[15px]"
-											>
-												Modul {mi + 1}: {mod.title || '(belum berjudul)'}
-											</span>
-										{/if}
-										<span class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold text-slate-500">
-											<span class="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2 py-0.5 text-violet-700 ring-1 ring-violet-200">
-												<i class="fa-solid fa-puzzle-piece text-[10px]" aria-hidden="true"></i>
-												{subs.length} sub-modul
-											</span>
-											<span class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 ring-1 ring-blue-200">
-												<i class="fa-solid fa-book-open text-[10px]" aria-hidden="true"></i>
-												{matCount} materi
-											</span>
-										</span>
+									<span
+										id={`lp-mod-title-${mod.id}`}
+										class="block truncate text-sm font-extrabold text-slate-900 sm:text-[15px]"
+									>
+										Modul {mi + 1}: {mod.title || '(belum berjudul)'}
+									</span>
+										<p class="mt-1 text-[11px] font-semibold text-slate-500">
+											{subs.length} sub-modul · {matCount} materi
+										</p>
 									</div>
+									{#if moduleHref}
+										<a
+											href={moduleHref(mod, mi)}
+											aria-label={`Buka halaman kelola sub-modul Modul ${mi + 1}`}
+											class="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-[11px] font-bold text-white transition-all hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
+										>
+											<i class="fa-solid fa-puzzle-piece" aria-hidden="true"></i>
+											Kelola
+											<i class="fa-solid fa-arrow-right text-[10px] opacity-70" aria-hidden="true"></i>
+										</a>
+									{/if}
 									<button
 										type="button"
-										onclick={() => togglePatch(mod.id)}
-										aria-expanded={open}
-										aria-controls={`lp-mod-panel-${mod.id}`}
-										aria-label={open ? `Tutup editor cepat Modul ${mi + 1}` : `Buka editor cepat Modul ${mi + 1}`}
-										class="flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-									>
-										<i
-											class={`fa-solid fa-chevron-down text-sm transition-transform duration-300 ${open ? 'rotate-180' : ''}`}
-											aria-hidden="true"
-										></i>
-									</button>
+										onclick={(e) => toggleMenu(mod.id, e.currentTarget)}
+										aria-expanded={menuFor === mod.id}
+										aria-haspopup="menu"
+										aria-controls="lp-menu-open"
+										aria-label={`Opsi lain Modul ${mi + 1}`}
+										title="Opsi lain"
+										class="flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-all hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-blue-600"
+										>
+											<i class="fa-solid fa-ellipsis-vertical text-sm" aria-hidden="true"></i>
+										</button>
 								</div>
-								<span class="hidden shrink-0 items-center gap-1 sm:flex" role="group" aria-label={`Urutkan modul ${mi + 1}`}>
-									<button
-										type="button"
-										onclick={() => moveModule(mod.id, -1)}
-										disabled={mi === 0}
-										aria-label={`Pindah modul ${mi + 1} ke atas`}
-										title="Pindah ke atas"
-										class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-all hover:border-blue-300 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-35"
-									>
-										<i class="fa-solid fa-arrow-up text-[11px]" aria-hidden="true"></i>
-									</button>
-									<button
-										type="button"
-										onclick={() => moveModule(mod.id, 1)}
-										disabled={mi === modules.length - 1}
-										aria-label={`Pindah modul ${mi + 1} ke bawah`}
-										title="Pindah ke bawah"
-										class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-all hover:border-blue-300 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-35"
-									>
-										<i class="fa-solid fa-arrow-down text-[11px]" aria-hidden="true"></i>
-									</button>
-								</span>
 							</div>
 
 							{#if open}
-								<div id={`lp-mod-panel-${mod.id}`} class="space-y-3 border-t border-slate-100 bg-slate-50/60 p-4">
+								{@const draft = editDrafts[mod.id]}
+								{#if draft}
+								<div id={`lp-mod-panel-${mod.id}`} class="space-y-3 rounded-b-2xl border-t border-slate-100 bg-slate-50/60 p-4">
 									<div class="grid gap-3">
 										<div>
 											<label for={`lp-mod-t-${mod.id}`} class="mb-1 block text-xs font-bold text-slate-700">
@@ -375,7 +310,7 @@
 											<input
 												id={`lp-mod-t-${mod.id}`}
 												type="text"
-												bind:value={mod.title}
+												bind:value={draft.title}
 												placeholder="cth. CSS Modern & Layout Responsif"
 												class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-900 placeholder:font-normal placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 											/>
@@ -387,186 +322,64 @@
 											<input
 												id={`lp-mod-d-${mod.id}`}
 												type="text"
-												bind:value={mod.description}
+												bind:value={draft.description}
 												placeholder="Satu kalimat tujuan modul…"
 												class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-600 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 											/>
 										</div>
 									</div>
 
-									<div class="flex flex-wrap gap-2">
-										{#if moduleHref}
-											<a
-												href={moduleHref(mod, mi)}
-												aria-label={`Buka halaman kelola sub-modul Modul ${mi + 1}`}
-												class="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-[11px] font-bold text-white shadow-md shadow-blue-600/25 transition-all hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
-											>
-												<i class="fa-solid fa-puzzle-piece" aria-hidden="true"></i>
-												Kelola sub-modul
-												<i class="fa-solid fa-arrow-right text-[10px]" aria-hidden="true"></i>
-											</a>
-										{/if}
+
+									{#if editErrors[mod.id]}
+										<p role="alert" class="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+											<i class="fa-solid fa-circle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
+											{editErrors[mod.id]}
+										</p>
+									{/if}
+									<div>
 										<button
 											type="button"
-											onclick={() => addSubModule(mod.id)}
-											class="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2 text-[11px] font-bold text-white shadow-md shadow-violet-600/25 transition-all hover:bg-violet-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-violet-600"
+											onclick={() => saveModuleDraft(mod.id)}
+											aria-label={`Simpan perubahan Modul ${mi + 1}`}
+											class="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-[11px] font-bold text-white transition-all hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
 										>
-											<i class="fa-solid fa-plus" aria-hidden="true"></i>
-											Tambah sub-modul
+											<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+											Simpan
 										</button>
-										<button
-											type="button"
-											onclick={() => askDeleteModule(mod, mi)}
-											aria-label={`Hapus Modul ${mi + 1}`}
-											class="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2 text-[11px] font-bold text-red-600 transition-all hover:bg-red-100 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-red-500"
-										>
-											<i class="fa-solid fa-trash" aria-hidden="true"></i>
-											Hapus modul
-										</button>
+										<p class="mt-1.5 text-[11px] text-slate-400">
+											Perubahan baru tersimpan setelah Simpan ditekan — menutup panel membuang draf.
+										</p>
 									</div>
 
-									<!-- SUB PATCHES -->
-									<ol aria-label={`Sub-modul dalam modul ${mi + 1}`} class="space-y-2.5">
-										{#each subs as sub, si (sub.id)}
-											{@const subOpen = openPatches.has(sub.id)}
-											<li class="relative rounded-2xl border border-violet-200/70 bg-white p-3 shadow-sm">
-												<div class="flex items-center gap-2.5">
-													<span
-														class="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-violet-600 text-[11px] font-extrabold text-white shadow-md shadow-violet-600/25"
-														aria-hidden="true"
-													>
-														{mi + 1}.{si + 1}
-													</span>
-													<span class="min-w-0 flex-1">
-														{#if subHref}
-															<a
-																href={subHref(mod, sub, mi, si)}
-																aria-label={`Kelola materi Sub-modul ${mi + 1}.${si + 1}: ${sub.title || '(belum berjudul)'}`}
-																title="Buka halaman kelola materi"
-																class="block truncate rounded text-[13px] font-extrabold text-slate-900 underline-offset-4 hover:text-violet-700 hover:underline focus-visible:outline-2 focus-visible:outline-violet-600"
-															>
-																{sub.title || '(belum berjudul)'}
-																<i class="fa-solid fa-arrow-up-right-from-square ml-1 text-[10px] text-violet-500" aria-hidden="true"></i>
-															</a>
-														{:else}
-															<span class="block truncate text-[13px] font-extrabold text-slate-900">
-																{sub.title || '(belum berjudul)'}
-															</span>
-														{/if}
-														<span class="mt-0.5 block truncate text-[11px] font-semibold text-slate-500">
-															{sub.materials.length} materi
-															{#if sub.description}
-																<span class="text-slate-400"> · {sub.description}</span>
-															{/if}
-														</span>
-													</span>
-													<span class="flex shrink-0 items-center gap-1" role="group" aria-label={`Aksi sub-modul ${mi + 1}.${si + 1}`}>
-														<button
-															type="button"
-															onclick={() => duplicateSubModule(mod.id, sub.id)}
-															aria-label={`Duplikasi sub-modul ${sub.title || si + 1}`}
-															title="Duplikasi (tanpa materi)"
-															class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition-all hover:border-violet-300 hover:text-violet-600 focus-visible:outline-2 focus-visible:outline-violet-600"
-														>
-															<i class="fa-solid fa-copy text-[11px]" aria-hidden="true"></i>
-														</button>
-														<button
-															type="button"
-															onclick={() => askDeleteSub(mod, sub, mi, si)}
-															disabled={subs.length <= 1}
-															title={subs.length <= 1
-																? 'Setiap modul wajib punya minimal 1 sub-modul'
-																: `Hapus sub-modul ${mi + 1}.${si + 1}`}
-															aria-label={`Hapus sub-modul ${sub.title || `${mi + 1}.${si + 1}`}`}
-															class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition-all hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-35"
-														>
-															<i class="fa-solid fa-trash text-[11px]" aria-hidden="true"></i>
-														</button>
-														<button
-															type="button"
-															onclick={() => togglePatch(sub.id)}
-															aria-label={subOpen ? `Tutup detail sub-modul ${si + 1}` : `Buka detail sub-modul ${si + 1}`}
-															aria-expanded={subOpen}
-															class="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-violet-50 hover:text-violet-600 focus-visible:outline-2 focus-visible:outline-violet-600"
-														>
-															<i class="fa-solid fa-chevron-down text-xs transition-transform duration-300 {subOpen ? 'rotate-180' : ''}" aria-hidden="true"></i>
-														</button>
-													</span>
-												</div>
-
-												{#if subOpen}
-													<div id={`lp-sub-panel-${sub.id}`} class="mt-2.5 grid gap-2 border-t border-dashed border-violet-200 pt-2.5">
-														<div>
-															<label for={`lp-sub-t-${sub.id}`} class="mb-1 block text-[11px] font-bold text-slate-600">
-																Judul sub-modul {mi + 1}.{si + 1}
-															</label>
-															<input
-																id={`lp-sub-t-${sub.id}`}
-																type="text"
-																bind:value={sub.title}
-																placeholder={`cth. Layout Inti ${mi + 1}.${si + 1}`}
-																class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-[13px] font-bold text-slate-900 placeholder:font-normal placeholder:text-slate-400 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
-															/>
-														</div>
-														<div>
-															<label for={`lp-sub-d-${sub.id}`} class="mb-1 block text-[11px] font-bold text-slate-600">
-																Deskripsi sub-modul (opsional)
-															</label>
-															<input
-																id={`lp-sub-d-${sub.id}`}
-																type="text"
-																bind:value={sub.description}
-																placeholder="Satu kalimat tujuan sub-modul…"
-																class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 placeholder:text-slate-400 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
-															/>
-														</div>
-														{#if subHref}
-															<div>
-																<a
-																	href={subHref(mod, sub, mi, si)}
-																	aria-label={`Buka halaman kelola materi Sub-modul ${mi + 1}.${si + 1}`}
-																	class="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-violet-600 px-3.5 py-2 text-[11px] font-bold text-white shadow-md shadow-violet-600/25 transition-all hover:bg-violet-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-violet-600"
-																>
-																	<i class="fa-solid fa-book-open" aria-hidden="true"></i>
-																	Kelola materi
-																	<i class="fa-solid fa-arrow-right text-[10px]" aria-hidden="true"></i>
-																</a>
-															</div>
-														{/if}
-													</div>
-												{/if}
-											</li>
-										{/each}
-									</ol>
+									<p class="rounded-xl bg-slate-50 px-3.5 py-3 text-xs font-semibold text-slate-500">
+										{subs.length} sub-modul · {matCount} materi
+									</p>
 								</div>
+								{/if}
 							{/if}
 						</article>
 					</li>
 				{/each}
 
 				<!-- Tambah modul di ujung -->
-				<li class="relative">
-					<span
-						class="pointer-events-none absolute top-0 bottom-1/2 left-[22px] w-0.5 bg-gradient-to-b from-blue-200 to-transparent"
-						aria-hidden="true"
-					></span>
+				<li>
 					<button
 						type="button"
 						onclick={() => addModule()}
-						class="relative ml-12 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-blue-300 bg-blue-50/60 px-4 py-3 text-xs font-bold text-blue-700 transition-all hover:border-blue-500 hover:bg-blue-50 active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-blue-600"
+						class="flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600 transition-all hover:border-slate-900 hover:bg-white hover:text-slate-900 active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-slate-900"
 					>
 						<i class="fa-solid fa-plus" aria-hidden="true"></i>
-						Tambah Modul {modules.length + 1} di ujung jalur
+						Tambah Modul {modules.length + 1}
 					</button>
 				</li>
 
 				<!-- Node selesai -->
 				<li class="relative flex items-center gap-3 pl-1">
-					<span class="flex h-9 w-9 items-center justify-center rounded-full bg-slate-900 text-white shadow-lg">
-						<i class="fa-solid fa-trophy text-xs" aria-hidden="true"></i>
+					<span class="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-100 text-emerald-600">
+						<i class="fa-solid fa-check text-xs" aria-hidden="true"></i>
 					</span>
 					<span class="text-[11px] font-extrabold tracking-widest text-slate-400 uppercase">
-						Finish · {modules.length} modul · {totalSubs} sub
+						Selesai · {modules.length} modul · {totalSubs} sub
 					</span>
 				</li>
 			</ol>
@@ -577,12 +390,82 @@
 		<p class="flex items-start gap-2 text-[11px] leading-relaxed text-slate-500">
 			<i class="fa-solid fa-lightbulb mt-0.5 shrink-0 text-amber-500" aria-hidden="true"></i>
 			<span>
-				<strong class="text-slate-700">Tips jalur:</strong> gunakan tombol panah untuk mengurutkan modul
-				tanpa drag, tombol <strong class="text-slate-700">“Sisip modul di sini”</strong> untuk menyela di tengah
-				jalur. Penghapusan selalu meminta konfirmasi modal terlebih dahulu.
+				<strong class="text-slate-700">Cara susun:</strong> tombol panah di menu ⋯ mengurutkan
+				modul. Perubahan nama/deskripsi wajib disimpan lewat tombol Simpan di panel.
+				Setiap penghapusan meminta konfirmasi dulu.
 			</span>
 		</p>
 	</div>
+
+	<!-- Menu overflow modul: fixed agar tidak terpotong overflow-hidden kartu -->
+	{#if menuModule}
+		<button
+			type="button"
+			tabindex={-1}
+			aria-hidden="true"
+			aria-label="Tutup menu"
+			onclick={closeMenu}
+			class="fixed inset-0 z-40 cursor-default bg-transparent"
+		></button>
+		<span
+			id="lp-menu-open"
+			role="menu"
+			tabindex={-1}
+			aria-label={`Opsi Modul ${menuModuleIndex + 1}`}
+			onkeydown={(e) => {
+				if (e.key === 'Escape') closeMenu();
+			}}
+			style:top={`${menuPos?.top ?? 0}px`}
+			style:right={`${menuPos?.right ?? 8}px`}
+			class="fixed z-50 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl shadow-slate-900/10"
+		>
+		<button
+			type="button"
+			role="menuitem"
+			aria-expanded={menuOpen}
+			aria-controls={`lp-mod-panel-${menuFor}`}
+			onclick={() => { togglePatch(menuFor); closeMenu(); }}
+			class="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none"
+		>
+			<i class="fa-solid fa-sliders w-4 shrink-0 text-center text-slate-400" aria-hidden="true"></i>
+			Edit nama & deskripsi
+			<span class="ml-auto text-[10px] font-normal text-slate-400"
+				>{menuOpen ? 'tutup · buang draf' : 'nama · deskripsi'}</span
+			>
+		</button>
+		<span class="mx-3 my-1 block border-t border-slate-100" aria-hidden="true"></span>
+		<button
+			type="button"
+			role="menuitem"
+			onclick={() => { moveModule(menuFor, -1); closeMenu(); }}
+			disabled={menuModuleIndex === 0}
+			class="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+		>
+			<i class="fa-solid fa-arrow-up w-4 shrink-0 text-center text-slate-400" aria-hidden="true"></i>
+			Pindah ke atas
+		</button>
+		<button
+			type="button"
+			role="menuitem"
+			onclick={() => { moveModule(menuFor, 1); closeMenu(); }}
+			disabled={menuModuleIndex === modules.length - 1}
+			class="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+		>
+			<i class="fa-solid fa-arrow-down w-4 shrink-0 text-center text-slate-400" aria-hidden="true"></i>
+			Pindah ke bawah
+		</button>
+		<span class="mx-3 my-1 block border-t border-slate-100" aria-hidden="true"></span>
+		<button
+			type="button"
+			role="menuitem"
+			onclick={() => { askDeleteMenuModule(); closeMenu(); }}
+			class="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 focus-visible:bg-red-50 focus-visible:outline-none"
+		>
+			<i class="fa-solid fa-trash w-4 shrink-0 text-center" aria-hidden="true"></i>
+			Hapus modul
+		</button>
+		</span>
+	{/if}
 
 	{#if pendingDelete}
 		<WarningModal

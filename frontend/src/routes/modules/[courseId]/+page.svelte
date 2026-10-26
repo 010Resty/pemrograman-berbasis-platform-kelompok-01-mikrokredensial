@@ -172,7 +172,7 @@
 					<ol class="mt-4 grid gap-3 sm:grid-cols-2">
 						{#each moduleCerts as cert (cert.moduleId)}
 							<li class="flex items-start gap-3 rounded-xl border border-amber-200/80 bg-white p-3.5">
-								<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-amber-400" aria-hidden="true">
+								<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-800 text-amber-400" aria-hidden="true">
 									<i class="fa-solid fa-medal" aria-hidden="true"></i>
 								</span>
 								<span class="min-w-0">

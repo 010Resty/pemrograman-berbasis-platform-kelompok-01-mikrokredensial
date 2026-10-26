@@ -5,7 +5,6 @@
 		getCourseById,
 		getModuleMaterials,
 		isMaterialLocked,
-		isModuleLocked,
 		isSubModuleLocked
 	} from '$lib/data/courses';
 	import { resolveSubModules } from '$lib/data/training';
@@ -47,12 +46,8 @@
 		matIndex >= 0 && matIndex < flat.length - 1 ? flat[matIndex + 1] : undefined
 	);
 
-	/** Modul saat ini terkunci bila ada materi di modul sebelumnya yang belum selesai */
-	const moduleLocked = $derived(
-		!course || moduleIndex < 0
-			? false
-			: isModuleLocked(course.modules, moduleIndex, (id) => doneMaterials.has(id))
-	);
+	/** K-07: modul independen — tidak ada kunci antar-modul di sini. */
+	const moduleLocked = $derived(false);
 
 	const subLocked = $derived(
 		!course || !module || currentSubInfo.subIndex < 0
@@ -181,30 +176,21 @@
 	);
 
 	function typeBadge(type: string): string {
-		if (type === 'video') return 'bg-blue-600 text-white';
-		if (type === 'audio') return 'bg-cyan-600 text-white';
-		if (type === 'foto') return 'bg-slate-700 text-white';
 		if (type === 'kuis') return 'bg-amber-500 text-white';
 		if (type === 'tugas') return 'bg-violet-600 text-white';
 		return 'bg-emerald-600 text-white';
 	}
 
 	function typeIcon(type: string): string {
-		if (type === 'video') return 'fa-circle-play';
-		if (type === 'audio') return 'fa-headphones';
-		if (type === 'foto') return 'fa-image';
 		if (type === 'kuis') return 'fa-circle-question';
 		if (type === 'tugas') return 'fa-pen-to-square';
 		return 'fa-book-open';
 	}
 
 	function typeLabel(type: string): string {
-		if (type === 'video') return 'Video';
-		if (type === 'audio') return 'Audio';
-		if (type === 'foto') return 'Foto';
 		if (type === 'kuis') return 'Kuis';
 		if (type === 'tugas') return 'Penugasan';
-		return 'Bacaan';
+		return 'Materi';
 	}
 </script>
 
@@ -241,7 +227,7 @@
 			<div
 				class="overflow-hidden rounded-2xl border border-slate-200 bg-white text-center shadow-xl"
 			>
-				<div class="bg-slate-900 px-6 py-8 text-white">
+				<div class="bg-blue-800 px-6 py-8 text-white">
 					<span
 						class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10"
 						aria-hidden="true"
@@ -277,7 +263,7 @@
 			<div
 				class="overflow-hidden rounded-2xl border border-slate-200 bg-white text-center shadow-xl"
 			>
-				<div class="bg-slate-900 px-6 py-8 text-white">
+				<div class="bg-blue-800 px-6 py-8 text-white">
 					<span
 						class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10"
 						aria-hidden="true"
@@ -437,9 +423,7 @@
 							>
 								{#each course.modules as mod, mi (mod.id)}
 									{@const isCurrentModule = mod.id === module.id}
-									{@const modLocked =
-										!isCurrentModule &&
-										isModuleLocked(course.modules, mi, (id) => doneMaterials.has(id))}
+									{@const modLocked = false}
 									{@const modFlat = getModuleMaterials(mod)}
 									{@const modSubs = resolveSubModules(mod)}
 									{@const modOpen = sidebarOpenModules.has(mod.id)}
@@ -635,20 +619,7 @@
 									<i class="fa-solid fa-lock text-2xl text-slate-400"></i>
 								</span>
 								<h2 class="text-lg font-extrabold text-slate-900">Materi Terkunci</h2>
-								{#if moduleLocked}
-									<p class="mx-auto mt-1 max-w-md text-sm text-slate-500">
-										Selesaikan <strong class="text-slate-700">Modul {moduleIndex}</strong> terlebih dahulu
-										untuk membuka modul ini.
-									</p>
-									<a
-										href={`/user/kursusku/${course.id}`}
-										class="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-									>
-										<i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-										Kembali ke Daftar Modul
-									</a>
-								{:else}
-									<p class="mx-auto mt-1 max-w-md text-sm text-slate-500">
+								<p class="mx-auto mt-1 max-w-md text-sm text-slate-500">
 										Selesaikan materi sebelumnya dalam
 										{#if currentSubInfo.sub}
 											sub-modul <strong class="text-slate-700">“{currentSubInfo.sub.title}”</strong>
@@ -667,7 +638,6 @@
 											Kerjakan: {firstUnfinished.title}
 										</a>
 									{/if}
-								{/if}
 							</div>
 						{:else}
 							{#key material.id}

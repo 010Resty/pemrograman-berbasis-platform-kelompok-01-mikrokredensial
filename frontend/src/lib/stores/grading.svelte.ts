@@ -99,6 +99,7 @@ export function ensureGradingLoaded(): void {
 export async function submitReviewScore(id: string, value: number): Promise<string> {
 	const target = reviewMap.get(id);
 	if (!target) return 'Data tidak ditemukan.';
+	let savedRemote = false;
 	if (target.submissionId) {
 		try {
 			const res = await fetch(`/api/assignments/grade/${encodeURIComponent(target.submissionId)}`, {
@@ -107,10 +108,12 @@ export async function submitReviewScore(id: string, value: number): Promise<stri
 				body: JSON.stringify({ score: value })
 			});
 			if (!res.ok) throw new Error('backend offline');
+			savedRemote = true;
 		} catch {
 			/* fallback: simpan lokal saja */
 		}
 	}
 	reviewMap.set(id, { ...target, score: value, status: 'Dinilai' });
-	return `Nilai ${value} tersimpan untuk ${target.student}.`;
+	if (savedRemote) return `Nilai ${value} tersimpan untuk ${target.student}.`;
+	return `Nilai ${value} tercatat lokal (simulasi) untuk ${target.student} — belum terkirim ke server.`;
 }

@@ -74,7 +74,7 @@
 			<article
 				class="flex flex-col overflow-hidden rounded-2xl border border-slate-200/70 bg-white transition-all duration-300 ease-smooth hover:-translate-y-1 hover:shadow-xl"
 			>
-				<div class="relative bg-slate-900 p-6 text-center">
+				<div class="relative bg-violet-900 p-6 text-center">
 					<div
 						class="pointer-events-none absolute inset-0 bg-gradient-to-br from-blue-600/30 via-transparent to-amber-500/20"
 						aria-hidden="true"

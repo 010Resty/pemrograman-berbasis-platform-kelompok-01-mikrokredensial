@@ -57,6 +57,7 @@ export function flattenTrainingMaterials(course: Course): Material[] {
 export function getTrainingStats(course: Course): TrainingStats {
 	const materials = flattenTrainingMaterials(course);
 	const byType: TrainingStats['byType'] = {
+		materi: 0,
 		video: 0,
 		bacaan: 0,
 		audio: 0,
@@ -64,7 +65,11 @@ export function getTrainingStats(course: Course): TrainingStats {
 		kuis: 0,
 		tugas: 0
 	};
-	for (const m of materials) byType[m.type] += 1;
+	for (const m of materials) {
+		const k = m.type as keyof typeof byType;
+		if (k in byType) byType[k] += 1;
+		else byType.materi += 1;
+	}
 	return {
 		moduleCount: course.modules.length,
 		subModuleCount: course.modules.reduce((n, m) => n + resolveSubModules(m).length, 0),

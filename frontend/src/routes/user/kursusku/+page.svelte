@@ -42,7 +42,7 @@
 		}
 		redeemedCodes.add(code);
 		voucherStatus = 'success';
-		voucherMessage = `Berhasil! Kursus "${courseName}" sudah ditambahkan ke daftar belajarmu.`;
+		voucherMessage = `Tercatat lokal (simulasi): "${courseName}". Akses kursus belum dibuka — masih perlu validasi server.`;
 		voucherCode = '';
 	}
 
@@ -167,7 +167,8 @@
 					</button>
 				</div>
 				<p id="voucher-help" class="mt-1.5 text-[11px] text-blue-200">
-					Kode demo: ARISTOTELES-2026 · BELAJAR-GRATIS · UNIRA-MKM01 · FULLSTACK-2026
+					Kode demo: ARISTOTELES-2026 · BELAJAR-GRATIS · UNIRA-MKM01 · FULLSTACK-2026 ·
+					simulasi lokal, belum validasi server.
 				</p>
 				{#if voucherStatus !== 'idle'}
 					<p

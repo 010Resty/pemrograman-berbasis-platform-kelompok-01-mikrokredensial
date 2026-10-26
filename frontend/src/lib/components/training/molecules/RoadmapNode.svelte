@@ -17,7 +17,7 @@
 
 	const toneClass = $derived(
 		tone === 'dark'
-			? 'border-transparent bg-slate-900 font-bold text-white'
+			? 'border-transparent bg-violet-700 font-bold text-white'
 			: tone === 'primary'
 				? 'border-transparent bg-blue-600 font-bold text-white'
 				: 'border-slate-200 bg-white font-semibold text-slate-800'

@@ -223,6 +223,20 @@
 	font-weight: 600;
 }
 
+.mdoc .tiptap-audio {
+	margin: 0 0 0.875rem;
+	padding: 0.875rem 1rem;
+	border-radius: 0.875rem;
+	border: 1px solid #e2e8f0;
+	background: #f8fafc;
+}
+
+.mdoc .tiptap-audio-el {
+	display: block;
+	width: 100%;
+	outline: none;
+}
+
 /* Status khusus editor */
 .mdoc-edit .tiptap {
 	min-height: 22rem;

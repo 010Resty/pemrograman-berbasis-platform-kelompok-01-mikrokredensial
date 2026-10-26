@@ -339,12 +339,15 @@
 				</h1>
 				<p class="mt-1 max-w-xl text-sm text-slate-500">
 					{#if stage === 'success'}
-						Akses penuh {course.title} sudah aktif. Simpan kwitansi di bawah.
+						Akses penuh {course.title} sudah aktif (simulasi lokal). Kwitansi di bawah hanya tersimpan di browser.
 					{:else if stage === 'instruction'}
 						Ikuti instruksi {methodLabel(method, channel)} sebelum batas waktu habis.
 					{:else}
 						Satu langkah lagi menuju akses penuh: pilih metode, cek rincian, bayar.
 					{/if}
+				</p>
+				<p class="mt-2 max-w-xl text-[11px] font-semibold text-amber-700">
+					Simulasi lokal — belum terhubung ke bank/gateway, belum verifikasi server.
 				</p>
 			</div>
 			<ol aria-label="Langkah pembayaran" class="flex items-center gap-1.5 text-[11px] font-bold">
@@ -419,7 +422,7 @@
 							onclick={() => window.print()}
 							class="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 text-sm font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 						>
-							<i class="fa-solid fa-receipt" aria-hidden="true"></i> Unduh Kwitansi
+							<i class="fa-solid fa-receipt" aria-hidden="true"></i> Cetak Kwitansi Lokal
 						</button>
 					</div>
 				</section>
@@ -452,7 +455,7 @@
 						<h2 id="instruksi-judul" class="text-lg font-extrabold text-slate-900">
 							Bayar via {methodLabel(method, channel)}
 						</h2>
-						<p role="timer" aria-label={`Batas pembayaran ${countdown}`} title={`Batas pembayaran ${countdown}`} class="inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-3 py-1.5 font-mono text-xs font-bold text-white">
+						<p role="timer" aria-label={`Batas pembayaran ${countdown}`} title={`Batas pembayaran ${countdown}`} class="inline-flex items-center gap-1.5 rounded-full bg-blue-800 px-3 py-1.5 font-mono text-xs font-bold text-white">
 							<i class="fa-regular fa-clock" aria-hidden="true"></i> {countdown}
 						</p>
 					</div>
@@ -460,6 +463,7 @@
 					{#if method === 'qris'}
 						<div class="mt-5 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6">
 							<div role="img" aria-label={`Kode QRIS sebesar ${formatIDR(total)} untuk ${course.title}`} class="grid h-44 w-44 grid-cols-11 gap-[2px] rounded-xl bg-white p-3 shadow-inner">
+								<!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
 								{#each Array(121) as _, i (i)}
 									<span class="aspect-square rounded-[1px] {(i * 7919 + courseId * 131) % 3 === 0 ? 'bg-slate-900' : 'bg-slate-200'}" aria-hidden="true"></span>
 								{/each}
@@ -509,7 +513,7 @@
 					{#if stage === 'verifying'}
 						<p role="status" class="mt-5 flex items-center justify-center gap-2.5 rounded-xl bg-amber-50 px-4 py-4 text-sm font-bold text-amber-800">
 							<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
-							Memverifikasi pembayaran ke bank… jangan tutup halaman.
+							Simulasi verifikasi lokal… belum cek ke bank/server.
 						</p>
 					{:else}
 						<div class="mt-5 flex flex-col gap-2.5 sm:flex-row">
@@ -655,7 +659,7 @@
 											type="button"
 											onclick={() => (channel = ch.id)}
 											aria-pressed={channel === ch.id}
-											class="inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 text-xs font-bold transition-all active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 {channel === ch.id ? 'bg-slate-900 text-white shadow' : 'border border-slate-200 bg-white text-slate-600 hover:bg-white'}"
+											class="inline-flex min-h-[44px] items-center gap-2 rounded-xl px-4 text-xs font-bold transition-all active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 {channel === ch.id ? 'bg-blue-700 text-white shadow shadow-blue-700/25' : 'border border-slate-200 bg-white text-slate-600 hover:bg-white'}"
 										>
 											<i class="fa-solid {ch.icon} text-[11px]" aria-hidden="true"></i>
 											{ch.label}
@@ -789,7 +793,7 @@
 								/>
 								<button
 									type="submit"
-									class="inline-flex min-h-[44px] shrink-0 items-center rounded-xl bg-slate-900 px-5 text-xs font-bold text-white hover:bg-slate-800 focus-visible:outline-2 focus-visible:outline-slate-900"
+									class="inline-flex min-h-[44px] shrink-0 items-center rounded-xl bg-blue-600 px-5 text-xs font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 								>
 									Pakai
 								</button>
@@ -908,7 +912,7 @@
 						</dl>
 						<p class="flex items-center justify-center gap-2 text-[11px] font-semibold text-slate-500">
 							<i class="fa-solid fa-shield-halved text-emerald-600" aria-hidden="true"></i>
-							Pembayaran terenkripsi · Didukung Midtrans-style gateway
+							Simulasi — tanpa transaksi bank sungguhan.
 						</p>
 					</div>
 				</aside>

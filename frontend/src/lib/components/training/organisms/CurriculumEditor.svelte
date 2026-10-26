@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { CourseModule, Material, MaterialType, SubModule } from '$lib/data/courses';
+	import {
+		INSTRUCTOR_MATERIAL_TYPES,
+		materialTypeIcon,
+		materialTypeLabel
+	} from '$lib/data/courses';
 	import { resolveSubModules } from '$lib/data/training';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 
@@ -15,7 +20,7 @@
 		errors = {},
 		blankMaterial = { title: 'Materi baru', duration: '10 mnt' },
 		minMaterialsPerModule = 0,
-		onnotice = (_msg: string) => {}
+		onnotice = () => {}
 	}: {
 		modules: CourseModule[];
 		/** Pesan validasi per id: `mod-*`, `sub-*`, `mat-*`, `matdur-*`. */
@@ -28,7 +33,7 @@
 		onnotice?: (msg: string) => void;
 	} = $props();
 
-	const MATERIAL_TYPES: MaterialType[] = ['video', 'bacaan', 'audio', 'foto', 'kuis', 'tugas'];
+	const MATERIAL_TYPES: MaterialType[] = [...INSTRUCTOR_MATERIAL_TYPES];
 
 	let openModules = new SvelteSet<string>();
 
@@ -189,12 +194,11 @@
 	}
 
 	function typeIcon(type: string) {
-		if (type === 'video') return 'fa-circle-play text-blue-600';
-		if (type === 'audio') return 'fa-headphones text-cyan-600';
-		if (type === 'foto') return 'fa-image text-slate-500';
-		if (type === 'kuis') return 'fa-circle-question text-amber-600';
-		if (type === 'tugas') return 'fa-pen-to-square text-violet-600';
-		return 'fa-book-open text-emerald-600';
+		return materialTypeIcon(type);
+	}
+
+	function typeLabel(type: string) {
+		return materialTypeLabel(type);
 	}
 </script>
 
@@ -380,7 +384,7 @@
 														class="w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none"
 													>
 														{#each MATERIAL_TYPES as t (t)}
-															<option value={t}>{t}</option>
+															<option value={t}>{typeLabel(t)}</option>
 														{/each}
 													</select>
 												</div>

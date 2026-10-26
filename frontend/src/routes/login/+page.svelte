@@ -26,7 +26,7 @@
 			icon: 'fa-chalkboard-user'
 		},
 		admin: {
-			active: 'bg-slate-900 text-white shadow-lg shadow-slate-900/25',
+			active: 'bg-blue-800 text-white shadow-lg shadow-blue-800/25',
 			soft: 'bg-slate-100 text-slate-700 border-slate-200',
 			text: 'text-slate-800',
 			icon: 'fa-shield-halved'

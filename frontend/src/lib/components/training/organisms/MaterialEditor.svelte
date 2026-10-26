@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { untrack } from 'svelte';
 	import { Editor } from '@tiptap/core';
 	import type { JSONContent } from '@tiptap/core';
 	import '$lib/tiptap/content.css';
@@ -10,18 +11,26 @@
 	 * Editor dokumen materi (Tiptap, gaya Word/Docs): heading, paragraf,
 	 * bold/italic/underline, daftar, tautan, gambar, video, blok kode, lampiran PDF.
 	 * Murni permukaan sunting — penyimpanan ditangani halaman via `onupdate`.
+	 *
+	 * Editor dipasang lewat action `mountEditor` + blok `{#key editorKey}` supaya
+	 * siklus hidupnya deterministik: dibuat tepat sekali saat kanvas muncul dan
+	 * hanya dibuat ulang saat dokumen berganti (docKey) atau pengguna menekan
+	 * "Muat ulang editor". Penekanan tombol (onUpdate) tidak pernah memicu
+	 * pembuatan ulang sehingga fokus dan ketikan tidak hilang.
 	 */
 	let {
 		docKey,
 		initialContent = null,
-		onupdate = (_info: { json: JSONContent; words: number }) => {}
+		variant = 'full',
+		onupdate = () => {}
 	}: {
 		docKey: string;
 		initialContent?: JSONContent | null;
+		/** full = teks + audio/video/gambar/PDF (tipe materi). text-only = hanya teks (tipe tugas). */
+		variant?: 'full' | 'text-only';
 		onupdate?: (info: { json: JSONContent; words: number }) => void;
 	} = $props();
 
-	let element = $state<HTMLDivElement>();
 	let editor = $state<Editor | null>(null);
 	/** Bila true, Tiptap gagal diinisialisasi — tampilkan pemulihan, bukan toolbar mati. */
 	let editorFailed = $state(false);
@@ -31,7 +40,10 @@
 	let tick = $state(0);
 	let words = $state(0);
 
-	type DialogKind = 'link' | 'image' | 'video' | 'pdf';
+	/** Kunci remount: ganti dokumen atau retry → kanvas + editor dibuat ulang. */
+	const editorKey = $derived(`${docKey}::${retryCount}`);
+
+	type DialogKind = 'link' | 'image' | 'video' | 'audio' | 'pdf';
 	let dialog = $state<DialogKind | null>(null);
 	let urlValue = $state('');
 	let dialogError = $state('');
@@ -61,22 +73,29 @@
 		onupdate({ json: e.getJSON(), words });
 	}
 
-	$effect(() => {
-		// Dibuat ulang setiap ganti dokumen (navigasi antar materi).
-		const key = docKey;
-		const content = initialContent;
-		// eslint-disable-next-line @typescript-eslint/no-unused-expressions
-		void retryCount;
-		void key;
-		if (!browser || !element) return;
+	/**
+	 * Action pemasang editor: berjalan tepat saat kanvas `<div>` dipasang ke DOM
+	 * (hanya di klien, karena cabang `{#if browser}`), sehingga tidak ada lagi
+	 * balapan antara `bind:this` dan `$effect`. `destroy` merapikan ProseMirror.
+	 */
+	function mountEditor(node: HTMLDivElement) {
+		// Jepret konten awal tanpa berlangganan reaktivitas — pembaruan ketikan
+		// (onupdate → state parent) tidak boleh membuat ulang editor.
+		const snapshot = untrack(() => initialContent);
 		let ed: Editor | null = null;
 		try {
 			ed = new Editor({
-				element,
+				element: node,
 				extensions: createEditorExtensions(
-					'Tulis isi materi di sini — heading, daftar, kutipan, kode…'
+					variant === 'text-only'
+						? 'Tulis instruksi tugas di sini — heading, daftar, dan format teks…'
+						: 'Tulis isi materi di sini — teks, audio, video, gambar…'
 				),
-				content: content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
+				content: snapshot ?? { type: 'doc', content: [{ type: 'paragraph' }] },
+				editable: true,
+				// Langsung siap ketik saat halaman editor dibuka: kursor ditempatkan
+				// di awal dokumen begitu editor terpasang.
+				autofocus: true,
 				editorProps: {
 					attributes: {
 						class: 'mdoc',
@@ -89,20 +108,26 @@
 				},
 				onSelectionUpdate: () => {
 					tick++;
+				},
+				onContentError: ({ error }) => {
+					console.warn('[MaterialEditor] Konten draf tidak valid, memakai dokumen kosong:', error);
 				}
 			});
-		} catch {
+		} catch (err) {
+			console.error('[MaterialEditor] Gagal membuat editor Tiptap:', err);
 			editorFailed = true;
 			return;
 		}
 		editorFailed = false;
 		editor = ed;
 		emit(ed);
-		return () => {
-			ed.destroy();
-			if (editor === ed) editor = null;
+		return {
+			destroy() {
+				ed.destroy();
+				if (editor === ed) editor = null;
+			}
 		};
-	});
+	}
 
 	function isActive(name: string | Record<string, unknown>, attrs: Record<string, unknown> = {}): boolean {
 		void tick;
@@ -123,7 +148,7 @@
 		'flex min-h-10 min-w-10 items-center justify-center rounded-lg px-2 text-sm transition-all focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-35';
 	const btnTone = (on: boolean) =>
 		on
-			? 'bg-slate-900 text-white shadow-md'
+			? 'bg-violet-700 text-white shadow-md shadow-violet-700/25'
 			: 'text-slate-600 hover:bg-slate-100 hover:text-slate-900';
 
 	function openDialog(kind: DialogKind) {
@@ -185,6 +210,41 @@
 		closeDialog();
 	}
 
+	function applyAudioUrl() {
+		if (!editor) return;
+		const value = urlValue.trim();
+		if (!validHttpUrl(value) && !value.startsWith('data:audio/')) {
+			dialogError = 'URL audio harus diawali http:// atau https:// (MP3/OGG/WAV).';
+			return;
+		}
+		editor.chain().focus().insertAudio({ src: value }).run();
+		tick++;
+		closeDialog();
+	}
+
+	async function handleAudioFile(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		if (!file || !editor) return;
+		if (!file.type.startsWith('audio/')) {
+			dialogError = 'Berkas harus berupa audio (MP3/OGG/WAV).';
+			return;
+		}
+		if (file.size > 8 * 1024 * 1024) {
+			dialogError = 'Ukuran audio maksimal 8 MB agar draf lokal tetap tersimpan.';
+			return;
+		}
+		try {
+			const dataUrl = await readFileAsDataUrl(file);
+			editor.chain().focus().insertAudio({ src: dataUrl, title: file.name }).run();
+			tick++;
+			closeDialog();
+		} catch {
+			dialogError = 'Gagal membaca berkas audio.';
+		}
+	}
+
 	async function handleImageFile(event: Event) {
 		const input = event.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
@@ -239,11 +299,12 @@
 		if (event.key === 'Escape') {
 			event.preventDefault();
 			closeDialog();
-		} else if (event.key === 'Enter' && dialog !== 'pdf') {
+		} else if (event.key === 'Enter' && dialog !== 'pdf' && dialog !== 'audio') {
 			event.preventDefault();
 			if (dialog === 'link') applyLink();
 			else if (dialog === 'image') applyImageUrl();
 			else if (dialog === 'video') applyVideoUrl();
+			else if (dialog === 'audio') applyAudioUrl();
 		}
 	}
 
@@ -488,36 +549,48 @@
 			>
 				<i class="fa-solid fa-link" aria-hidden="true"></i>
 			</button>
-			<button
-				type="button"
-				title="Sisipkan gambar"
-				aria-label="Sisipkan gambar"
-				disabled={!editor}
-				onclick={() => openDialog('image')}
-				class="{btnBase} {btnTone(false)}"
-			>
-				<i class="fa-solid fa-image" aria-hidden="true"></i>
-			</button>
-			<button
-				type="button"
-				title="Sisipkan video (YouTube / Vimeo / MP4)"
-				aria-label="Sisipkan video"
-				disabled={!editor}
-				onclick={() => openDialog('video')}
-				class="{btnBase} {btnTone(false)}"
-			>
-				<i class="fa-solid fa-circle-play" aria-hidden="true"></i>
-			</button>
-			<button
-				type="button"
-				title="Lampirkan PDF"
-				aria-label="Lampirkan PDF"
-				disabled={!editor}
-				onclick={() => openDialog('pdf')}
-				class="{btnBase} {btnTone(false)}"
-			>
-				<i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
-			</button>
+			{#if variant === 'full'}
+				<button
+					type="button"
+					title="Sisipkan gambar"
+					aria-label="Sisipkan gambar"
+					disabled={!editor}
+					onclick={() => openDialog('image')}
+					class="{btnBase} {btnTone(false)}"
+				>
+					<i class="fa-solid fa-image" aria-hidden="true"></i>
+				</button>
+				<button
+					type="button"
+					title="Sisipkan video (YouTube / Vimeo / MP4)"
+					aria-label="Sisipkan video"
+					disabled={!editor}
+					onclick={() => openDialog('video')}
+					class="{btnBase} {btnTone(false)}"
+				>
+					<i class="fa-solid fa-circle-play" aria-hidden="true"></i>
+				</button>
+				<button
+					type="button"
+					title="Sisipkan audio (MP3 / OGG / WAV)"
+					aria-label="Sisipkan audio"
+					disabled={!editor}
+					onclick={() => openDialog('audio')}
+					class="{btnBase} {btnTone(false)}"
+				>
+					<i class="fa-solid fa-headphones" aria-hidden="true"></i>
+				</button>
+				<button
+					type="button"
+					title="Lampirkan PDF"
+					aria-label="Lampirkan PDF"
+					disabled={!editor}
+					onclick={() => openDialog('pdf')}
+					class="{btnBase} {btnTone(false)}"
+				>
+					<i class="fa-solid fa-file-pdf" aria-hidden="true"></i>
+				</button>
+			{/if}
 			<button
 				type="button"
 				title="Garis pembatas"
@@ -577,7 +650,9 @@
 				</button>
 			</div>
 		{:else if browser}
-			<div bind:this={element}></div>
+			{#key editorKey}
+				<div use:mountEditor></div>
+			{/key}
 		{:else}
 			<p class="p-6 text-sm text-slate-400">Memuat editor…</p>
 		{/if}
@@ -596,7 +671,9 @@
 						? 'Sisipkan gambar'
 						: dialog === 'video'
 							? 'Sisipkan video'
-							: 'Lampirkan PDF'}
+							: dialog === 'audio'
+								? 'Sisipkan audio'
+								: 'Lampirkan PDF'}
 				onkeydown={dialogKeydown}
 				class="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
 			>
@@ -608,6 +685,8 @@
 							<i class="fa-solid fa-image mr-1.5 text-blue-600" aria-hidden="true"></i>Gambar
 						{:else if dialog === 'video'}
 							<i class="fa-solid fa-circle-play mr-1.5 text-blue-600" aria-hidden="true"></i>Video
+						{:else if dialog === 'audio'}
+							<i class="fa-solid fa-headphones mr-1.5 text-cyan-600" aria-hidden="true"></i>Audio
 						{:else}
 							<i class="fa-solid fa-file-pdf mr-1.5 text-red-600" aria-hidden="true"></i>Lampiran PDF
 						{/if}
@@ -688,6 +767,44 @@
 								class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 							/>
 						</div>
+					{:else if dialog === 'audio'}
+						<div>
+							<span id="dlg-aud-up" class="mb-1 block text-xs font-bold text-slate-700"
+								>Unggah dari perangkat</span
+							>
+							<label
+								for="dlg-aud-file"
+								class="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-cyan-300 bg-cyan-50/60 px-4 py-2.5 text-xs font-bold text-cyan-700 transition-colors hover:bg-cyan-50 focus-visible:outline-2 focus-visible:outline-cyan-600"
+							>
+								<i class="fa-solid fa-upload" aria-hidden="true"></i> Pilih audio (maks 8 MB)
+							</label>
+							<input
+								id="dlg-aud-file"
+								type="file"
+								accept="audio/*"
+								aria-labelledby="dlg-aud-up"
+								onchange={handleAudioFile}
+								class="sr-only"
+							/>
+						</div>
+						<div class="relative flex items-center">
+							<div class="grow border-t border-slate-200"></div>
+							<span class="mx-3 shrink text-[11px] font-bold tracking-wider text-slate-400 uppercase"
+								>atau</span
+							>
+							<div class="grow border-t border-slate-200"></div>
+						</div>
+						<div>
+							<label for="dlg-url" class="mb-1 block text-xs font-bold text-slate-700">URL audio</label>
+							<input
+								id="dlg-url"
+								type="url"
+								bind:this={dialogInput}
+								bind:value={urlValue}
+								placeholder="https://…/audio.mp3"
+								class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+							/>
+						</div>
 					{:else}
 						<p class="text-xs text-slate-500">
 							PDF tersisip sebagai kartu unduhan di posisi kursor (maks 8 MB, tersimpan lokal).
@@ -751,6 +868,14 @@
 							class="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 						>
 							<i class="fa-solid fa-check" aria-hidden="true"></i> Sisipkan video
+						</button>
+					{:else if dialog === 'audio'}
+						<button
+							type="button"
+							onclick={applyAudioUrl}
+							class="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-cyan-700 focus-visible:outline-2 focus-visible:outline-cyan-600"
+						>
+							<i class="fa-solid fa-check" aria-hidden="true"></i> Sisipkan audio
 						</button>
 					{/if}
 				</div>

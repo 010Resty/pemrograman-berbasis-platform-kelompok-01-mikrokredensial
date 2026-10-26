@@ -616,6 +616,7 @@
 								>Yang akan dipelajari</span
 							>
 							<ol class="space-y-2" aria-labelledby="lg-out">
+								<!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
 								{#each outcomes as out, i (i)}
 									<li class="flex gap-2">
 										<label for={`out-${i}`} class="sr-only">Hasil belajar {i + 1}</label>
@@ -651,6 +652,7 @@
 								>Alat yang harus dipersiapkan</span
 							>
 							<ol class="space-y-2" aria-labelledby="lg-tools">
+								<!-- eslint-disable-next-line @typescript-eslint/no-unused-vars -->
 								{#each tools as tool, i (i)}
 									<li class="flex gap-2">
 										<label for={`tool-${i}`} class="sr-only">Alat {i + 1}</label>

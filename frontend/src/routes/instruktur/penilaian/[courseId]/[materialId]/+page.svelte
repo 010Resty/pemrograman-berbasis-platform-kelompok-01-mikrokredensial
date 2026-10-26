@@ -1,7 +1,14 @@
 <script lang="ts">
 	import { page } from '$app/state';
+	import { generateHTML } from '@tiptap/html';
 	import { getCourseById } from '$lib/data/courses';
 	import { getTaskInfo, resolveTaskKey } from '$lib/data/grading';
+	import { resolveSubModules } from '$lib/data/training';
+	import { countDocWords } from '$lib/stores/material-docs';
+	import { loadTaskDraft } from '$lib/stores/task-drafts';
+	import { createEditorExtensions } from '$lib/tiptap/extensions';
+	import '$lib/tiptap/content.css';
+	import TaskStepsList from '$lib/components/training/molecules/TaskStepsList.svelte';
 	import {
 		allReviews,
 		ensureGradingLoaded,
@@ -18,6 +25,43 @@
 	const course = $derived(getCourseById(courseId));
 	const info = $derived(
 		course && materialId ? getTaskInfo(course.id, materialId) : undefined
+	);
+
+	/** Lokasi materi di kurikulum (untuk memuat draf tugas instruktur). */
+	const taskLoc = $derived.by(() => {
+		if (!course) return null;
+		for (const m of course.modules) {
+			for (const s of resolveSubModules(m)) {
+				if (s.materials.some((x) => x.id === materialId)) return { moduleId: m.id, subId: s.id };
+			}
+		}
+		return null;
+	});
+
+	/** Draf 3 bagian (deskripsi/tujuan/langkah) buatan instruktur, bila ada. */
+	const taskDraft = $derived(
+		taskLoc && materialId
+			? loadTaskDraft(courseId, taskLoc.moduleId, taskLoc.subId, materialId)
+			: null
+	);
+
+	/** HTML deskripsi kaya (gambar/video/file) dari draf — kosong bila tak ada. */
+	const briefHtml = $derived.by(() => {
+		const content = taskDraft?.brief;
+		if (!content || countDocWords(content) === 0) return '';
+		try {
+			return generateHTML(content, createEditorExtensions(''));
+		} catch {
+			return '';
+		}
+	});
+
+	const filledObjectives = $derived(taskDraft?.objectives.filter((o) => o.trim()) ?? []);
+	const filledSteps = $derived(taskDraft?.steps.filter((s) => s.trim()) ?? []);
+	const objectives = $derived(filledObjectives.length > 0 ? filledObjectives : (info?.objectives ?? []));
+	const steps = $derived(filledSteps.length > 0 ? filledSteps : (info?.steps ?? []));
+	const hasContent = $derived(
+		briefHtml !== '' || (info?.brief?.trim() ?? '') !== '' || objectives.length > 0 || steps.length > 0
 	);
 
 	type Filter = 'all' | 'Menunggu' | 'Dinilai';
@@ -67,7 +111,7 @@
 	</title>
 	<meta
 		name="description"
-		content={info ? `Informasi soal dan jawaban peserta untuk ${info.title}.` : 'Detail penugasan'}
+		content={info ? `Deskripsi, tujuan, dan langkah penugasan ${info.title} beserta jawaban peserta.` : 'Detail penugasan'}
 	/>
 </svelte:head>
 
@@ -105,7 +149,7 @@
 			<span aria-current="page" class="max-w-64 truncate font-medium text-slate-700">{info.title}</span>
 		</nav>
 
-		<!-- Informasi soal -->
+		<!-- Informasi tugas: 3 bagian sesuai konsep penugasan -->
 		<section
 			aria-labelledby="heading-soal"
 			class="mb-6 overflow-hidden rounded-2xl border border-slate-200/60 bg-white"
@@ -114,6 +158,11 @@
 				<p class="flex items-center gap-1.5 text-[11px] font-extrabold tracking-widest text-blue-700 uppercase">
 					<i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
 					Informasi tugas
+					{#if taskDraft}
+						<span class="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-700 normal-case tracking-normal">
+							Draf Anda
+						</span>
+					{/if}
 				</p>
 				<h1 id="heading-soal" class="mt-1 text-xl font-extrabold tracking-tight text-slate-900 sm:text-2xl">
 					{info.title}
@@ -123,44 +172,52 @@
 					{info.duration}
 				</p>
 			</div>
-			<div class="px-5 py-4 sm:px-6">
-				<p class="text-sm leading-relaxed text-slate-700">{info.brief}</p>
-				{#if info.objectives?.length}
-					<h2 class="mt-4 mb-2 text-sm font-bold text-slate-900">Tujuan penugasan</h2>
-					<ul class="grid gap-2 sm:grid-cols-2">
-						{#each info.objectives as obj (obj)}
-							<li class="flex items-start gap-2 text-sm text-slate-600">
-								<i class="fa-solid fa-circle-check mt-0.5 shrink-0 text-emerald-500" aria-hidden="true"></i>
-								<span>{obj}</span>
-							</li>
-						{/each}
-					</ul>
-				{/if}
-				<dl class="mt-4 flex flex-wrap gap-2 text-xs">
-					{#if info.deliverable}
-						<div class="inline-flex items-center gap-1.5 rounded-xl bg-slate-50 px-3 py-2 font-semibold text-slate-600 ring-1 ring-slate-200">
-							<dt class="sr-only">Hasil yang dikumpulkan</dt>
-							<i class="fa-solid fa-box-open text-violet-500" aria-hidden="true"></i>
-							<dd>{info.deliverable}</dd>
+			<div class="space-y-5 px-5 py-5 sm:px-6">
+				{#if !hasContent}
+					<div class="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+						<i class="fa-solid fa-briefcase mb-2 text-xl text-slate-300" aria-hidden="true"></i>
+						<p class="text-sm font-bold text-slate-500">Belum ada isi penugasan</p>
+						<p class="mt-1 text-xs text-slate-400">
+							Susun deskripsi, tujuan, dan langkah di editor tugas terlebih dahulu.
+						</p>
+					</div>
+				{:else}
+					<div>
+						<p class="mb-1.5 flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-slate-500 uppercase">
+							<span class="flex h-5 w-5 items-center justify-center rounded-md bg-violet-600 text-[10px] text-white">1</span>
+							Deskripsi Penugasan
+						</p>
+						{#if briefHtml}
+							<div class="mdoc">{@html briefHtml}</div>
+						{:else}
+							<p class="text-sm leading-relaxed text-slate-700">{info.brief ?? '(belum diisi)'}</p>
+						{/if}
+					</div>
+					{#if objectives.length > 0}
+						<div>
+							<p class="mb-1.5 flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-slate-500 uppercase">
+								<span class="flex h-5 w-5 items-center justify-center rounded-md bg-violet-600 text-[10px] text-white">2</span>
+								Tujuan Penugasan
+							</p>
+							<ul class="space-y-1.5">
+								{#each objectives as obj (obj)}
+									<li class="flex items-start gap-2 text-sm text-slate-700">
+										<i class="fa-solid fa-circle-check mt-1 shrink-0 text-xs text-emerald-500" aria-hidden="true"></i>
+										<span>{obj}</span>
+									</li>
+								{/each}
+							</ul>
 						</div>
 					{/if}
-					{#if info.deadline}
-						<div class="inline-flex items-center gap-1.5 rounded-xl bg-slate-50 px-3 py-2 font-semibold text-slate-600 ring-1 ring-slate-200">
-							<dt class="sr-only">Tenggat</dt>
-							<i class="fa-solid fa-calendar-days text-amber-500" aria-hidden="true"></i>
-							<dd>{info.deadline}</dd>
+					{#if steps.length > 0}
+						<div>
+							<p class="mb-1.5 flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-slate-500 uppercase">
+								<span class="flex h-5 w-5 items-center justify-center rounded-md bg-violet-600 text-[10px] text-white">3</span>
+								Langkah Pengerjaan ({steps.length})
+							</p>
+							<TaskStepsList {steps} />
 						</div>
 					{/if}
-				</dl>
-				{#if info.steps?.length}
-					<h2 class="mt-4 mb-2 text-sm font-bold text-slate-900">
-						Langkah pengerjaan ({info.steps.length})
-					</h2>
-					<ol class="list-decimal space-y-1.5 rounded-xl bg-slate-50 py-3 pr-4 pl-9 text-sm leading-relaxed text-slate-600 ring-1 ring-slate-200">
-						{#each info.steps as step (step)}
-							<li>{step}</li>
-						{/each}
-					</ol>
 				{/if}
 			</div>
 		</section>
@@ -175,6 +232,13 @@
 					{pendingHere} menunggu dinilai
 				</p>
 			</div>
+			<p class="mb-4 flex items-start gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-[11px] leading-relaxed font-semibold text-slate-600">
+				<i class="fa-solid fa-circle-info mt-0.5 shrink-0 text-slate-400" aria-hidden="true"></i>
+				<span>
+					Sumber data: contoh berlabel Contoh + kiriman lokal (simulasi).
+					Nilai lokal belum sinkron ke riwayat peserta lintas sesi atau browser.
+				</span>
+			</p>
 
 			{#if message}
 				<p role="status" class="mb-4 flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">
@@ -220,7 +284,7 @@
 
 			{#if loading}
 				<p role="status" class="mb-4 flex items-center gap-2 text-xs font-semibold text-slate-500">
-					<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat berkas PDF dari Drive…
+					<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat daftar penilaian (contoh + lokal)…
 				</p>
 			{/if}
 
@@ -247,7 +311,14 @@
 								{#each items as r (r.id)}
 									<tr class="transition-colors duration-200 ease-smooth hover:bg-slate-50/50">
 										<td class="px-5 py-4">
-											<div class="font-semibold text-slate-900">{r.student}</div>
+											<div class="flex flex-wrap items-center gap-2 font-semibold text-slate-900">
+												<span>{r.student}</span>
+												{#if !r.submissionId}
+													<span class="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500 uppercase">Contoh</span>
+												{:else}
+													<span class="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700 uppercase">Lokal (simulasi)</span>
+												{/if}
+											</div>
 											<div class="mt-0.5 text-xs text-slate-500">{r.nim} · {r.date}</div>
 										</td>
 										<td class="px-5 py-4">

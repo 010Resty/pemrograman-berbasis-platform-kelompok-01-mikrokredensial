@@ -104,7 +104,7 @@
 				aria-pressed={activePeriod === pf.value}
 				class={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200 ease-smooth active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 ${
 					activePeriod === pf.value
-						? 'bg-slate-900 text-white shadow-lg'
+						? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
 						: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
 				}`}
 			>

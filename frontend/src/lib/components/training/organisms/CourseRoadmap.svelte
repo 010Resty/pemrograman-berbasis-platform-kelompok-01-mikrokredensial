@@ -178,7 +178,7 @@
 			class="flex items-start gap-2.5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800"
 		>
 			<i class="fa-solid fa-lock mt-0.5 shrink-0" aria-hidden="true"></i>
-			<span>Selesaikan modul dan materi sebelumnya untuk membuka bagian ini.</span>
+			<span>Selesaikan sub-modul dan materi sebelumnya dalam modul ini untuk membuka bagian ini.</span>
 		</p>
 		{#if fallback}
 			<a

@@ -6,8 +6,9 @@
 		getCourseById,
 		getModuleMaterials,
 		isMaterialLocked,
-		isModuleLocked,
 		isSubModuleLocked,
+		normalizeMaterialType,
+		type CourseModule,
 		type MaterialType
 	} from '$lib/data/courses';
 	import {
@@ -19,10 +20,59 @@
 		subModuleProgress
 	} from '$lib/data/training';
 	import { doneMaterials, ensureSeeded } from '$lib/stores/progress.svelte';
+	import { getQuizResult } from '$lib/stores/quiz-results.svelte';
+	import { latestFor } from '$lib/stores/submissions.svelte';
 	import { getCourseMeta } from '$lib/data/course-meta';
 	import { moduleCredentialId } from '$lib/data/certificates';
 	import { canAccessCourse, isPeriodLocked } from '$lib/stores/enrollment.svelte';
 	import { resolve } from '$app/paths';
+	import CourseRoadmap from '$lib/components/training/organisms/CourseRoadmap.svelte';
+
+	/** Warna pastel badge nomor — sama seperti halaman instruktur. */
+	const MODULE_BADGES = [
+		'bg-blue-100 text-blue-700',
+		'bg-violet-100 text-violet-700',
+		'bg-emerald-100 text-emerald-700',
+		'bg-amber-100 text-amber-700'
+	] as const;
+
+	function badgeClass(mi: number): string {
+		return MODULE_BADGES[((mi % MODULE_BADGES.length) + MODULE_BADGES.length) % MODULE_BADGES.length];
+	}
+
+	/**
+	 * Tahap 2a — baca-saja. Status kuis per modul dari hasil tersimpan di browser.
+	 * Hanya percobaan terakhir yang tersedia, bukan nilai terbaik (K-02).
+	 */
+	function quizStatsFor(mod: CourseModule): { total: number; passed: number } {
+		const qs = getModuleMaterials(mod).filter((m) => normalizeMaterialType(m.type) === 'kuis');
+		let passed = 0;
+		for (const q of qs) if (getQuizResult(q.id)?.passed) passed++;
+		return { total: qs.length, passed };
+	}
+
+	/**
+	 * Tahap 2a — baca-saja. Status tugas per modul dari riwayat lokal peserta.
+	 * Nilai instruktur tersimpan di antrean terpisah dan belum tentu tersinkron ke sini,
+	 * jadi `graded` hanya yang benar-benar terbaca di sisi peserta.
+	 */
+	function taskStatsFor(mod: CourseModule): {
+		total: number;
+		submitted: number;
+		graded: number;
+	} {
+		const ts = getModuleMaterials(mod).filter((m) => normalizeMaterialType(m.type) === 'tugas');
+		let submitted = 0;
+		let graded = 0;
+		for (const t of ts) {
+			const s = latestFor(t.id);
+			if (s) {
+				submitted++;
+				if (s.score !== null && s.score !== undefined) graded++;
+			}
+		}
+		return { total: ts.length, submitted, graded };
+	}
 
 	const courseId = $derived(Number(page.params.courseId));
 	const course = $derived(getCourseById(courseId));
@@ -92,7 +142,7 @@
 							);
 						}
 						if (typeFilter !== 'all') {
-							mats = mats.filter((m) => m.type === typeFilter);
+							mats = mats.filter((m) => normalizeMaterialType(String(m.type)) === typeFilter);
 						}
 						if (hideDone) {
 							mats = mats.filter((m) => !doneMaterials.has(m.id));
@@ -150,30 +200,21 @@
 	}
 
 	function typeIcon(type: string) {
-		if (type === 'video') return 'fa-circle-play text-blue-600';
-		if (type === 'audio') return 'fa-headphones text-cyan-600';
-		if (type === 'foto') return 'fa-image text-slate-500';
 		if (type === 'kuis') return 'fa-circle-question text-amber-600';
 		if (type === 'tugas') return 'fa-pen-to-square text-violet-600';
 		return 'fa-book-open text-emerald-600';
 	}
 
 	function typeLabel(type: string) {
-		if (type === 'video') return 'Video';
-		if (type === 'audio') return 'Audio';
-		if (type === 'foto') return 'Foto';
 		if (type === 'kuis') return 'Kuis';
 		if (type === 'tugas') return 'Tugas';
-		return 'Bacaan';
+		return 'Materi';
 	}
 
 	function actionLabel(type: string) {
-		if (type === 'video') return 'Putar';
-		if (type === 'audio') return 'Dengar';
-		if (type === 'foto') return 'Lihat';
 		if (type === 'kuis') return 'Kerjakan';
 		if (type === 'tugas') return 'Kumpulkan';
-		return 'Baca';
+		return 'Pelajari';
 	}
 </script>
 
@@ -215,7 +256,7 @@
 		<div
 			class="mx-auto max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white text-center shadow-xl"
 		>
-			<div class="bg-slate-900 px-6 py-8 text-white">
+			<div class="bg-blue-800 px-6 py-8 text-white">
 				<span
 					class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10"
 					aria-hidden="true"
@@ -267,7 +308,7 @@
 		<div
 			class="mx-auto max-w-lg overflow-hidden rounded-2xl border border-slate-200 bg-white text-center shadow-xl"
 		>
-			<div class="bg-slate-900 px-6 py-8 text-white">
+			<div class="bg-blue-800 px-6 py-8 text-white">
 				<span
 					class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10"
 					aria-hidden="true"
@@ -320,7 +361,7 @@
 			<span aria-current="page" class="truncate font-medium text-slate-700">{course.title}</span>
 		</nav>
 
-		<!-- Header kursus: Pelatihan → Modul → Sub-modul → Materi -->
+		<!-- Header kursus: sama seperti halaman instruktur, aksi = mengikuti pelatihan -->
 		<header class="mb-6 overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
 			<div class="relative flex min-h-48 flex-col justify-end overflow-hidden sm:min-h-56">
 				<img
@@ -333,44 +374,20 @@
 					class="absolute inset-0 bg-gradient-to-t from-slate-900/85 via-slate-900/40 to-slate-900/10"
 					aria-hidden="true"
 				></div>
-				<div class="relative p-4 pt-14 sm:p-6 sm:pt-16">
-					<p
-						class="flex flex-wrap items-center gap-2 text-[11px] font-bold tracking-widest text-blue-300 uppercase"
-					>
-						<span>{course.category} · {course.level}</span>
-						<span class="rounded-md bg-white/15 px-2 py-0.5 text-white normal-case tracking-normal">
-							Pelatihan → {stats.moduleCount} modul → {stats.subModuleCount} sub-modul → {stats.materialCount}
-							materi
-						</span>
+				<div class="relative flex flex-wrap gap-2 p-4 pb-2 sm:px-6">
+					<span class="rounded-full bg-blue-600 px-3 py-1 text-[11px] font-bold text-white uppercase">{course.category}</span>
+					<span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-bold text-white uppercase backdrop-blur">{course.level}</span>
+					<span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[11px] font-bold text-white uppercase backdrop-blur">
+						<i class="fa-solid fa-circle-play" aria-hidden="true"></i>
+						{prog.percent}% selesai
+					</span>
+				</div>
+				<div class="relative p-4 pt-1 sm:px-6 sm:pb-5">
+					<h1 class="text-xl leading-snug font-extrabold text-white sm:text-2xl">{course.title}</h1>
+					<p class="mt-1 text-xs text-slate-200 sm:text-sm">Oleh {course.instructor} · {course.duration}</p>
+					<p class="mt-1 text-[11px] font-semibold tracking-wide text-blue-200 uppercase">
+						Ikuti · {stats.moduleCount} modul · {stats.subModuleCount} sub-modul · {stats.materialCount} materi
 					</p>
-					<h1 class="mt-1.5 text-xl leading-snug font-extrabold text-white sm:text-2xl">
-						{course.title}
-					</h1>
-					<p
-						class="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-slate-200 sm:text-sm"
-					>
-						<span>Oleh {course.instructor}</span>
-						<span aria-hidden="true" class="text-slate-400">·</span>
-						<span>{course.duration}</span>
-						<span aria-hidden="true" class="text-slate-400">·</span>
-						<span>{stats.moduleCount} modul</span>
-						<span aria-hidden="true" class="text-slate-400">·</span>
-						<span>{stats.subModuleCount} sub-modul</span>
-						<span aria-hidden="true" class="text-slate-400">·</span>
-						<span>{stats.materialCount} materi</span>
-					</p>
-					<div class="mt-3 flex flex-wrap gap-1.5" aria-label="Distribusi tipe materi">
-						{#each Object.entries(stats.byType) as [t, n] (t)}
-							{#if n > 0}
-								<span
-									class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-2.5 py-1 text-[11px] font-bold text-white"
-								>
-									<i class={`fa-solid ${typeIcon(t)} !text-white`} aria-hidden="true"></i>
-									{typeLabel(t)} · {n}
-								</span>
-							{/if}
-						{/each}
-					</div>
 				</div>
 			</div>
 			<div class="flex flex-col gap-4 p-4 sm:p-6 lg:flex-row lg:items-center">
@@ -448,10 +465,7 @@
 						class="min-h-11 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-700 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 					>
 						<option value="all">Semua tipe</option>
-						<option value="video">Video</option>
-						<option value="bacaan">Bacaan</option>
-						<option value="audio">Audio</option>
-						<option value="foto">Foto</option>
+						<option value="materi">Materi</option>
 						<option value="kuis">Kuis</option>
 						<option value="tugas">Tugas</option>
 					</select>
@@ -491,11 +505,11 @@
 		</div>
 
 		<!-- Daftar hierarki -->
-		<div class="mb-4 flex items-center justify-between">
+		<div class="mb-4">
 			<h2 class="text-lg font-bold text-slate-900">
-				Kurikulum Lengkap ({stats.moduleCount} Modul · {stats.subModuleCount} Sub-modul)
+				Kurikulum ({stats.moduleCount} Modul · {stats.subModuleCount} Sub-modul)
 			</h2>
-			<p class="text-xs text-slate-500">{prog.done}/{prog.total} materi selesai</p>
+			<p class="text-xs text-slate-500">Ikuti modul berurutan — {prog.done}/{prog.total} materi selesai ({prog.percent}%).</p>
 		</div>
 
 		{#if view.length === 0}
@@ -523,42 +537,19 @@
 					{@const mProg = moduleProgress(mod, (id) => doneMaterials.has(id))}
 					{@const modOpen = searching ? true : openModules.has(mod.id)}
 					{@const modComplete = mProg.done === mProg.total && mProg.total > 0}
-					{@const modLocked = isModuleLocked(course.modules, moduleIndex, (id) =>
-						doneMaterials.has(id)
-					)}
+					{@const qStat = quizStatsFor(mod)}
+					{@const tStat = taskStatsFor(mod)}
+					{@const missingMateri = mProg.total - mProg.done}
+					{@const missingKuis = qStat.total - qStat.passed}
+					{@const missingTugas = tStat.total - tStat.submitted}
+					{@const ungradedTugas = tStat.submitted - tStat.graded}
+					{@const knownUnmet =
+						missingMateri > 0 || missingKuis > 0 || missingTugas > 0 || ungradedTugas > 0}
 					<section
 						aria-labelledby={`mod-title-${mod.id}`}
-						class={`overflow-hidden rounded-2xl border bg-white transition-shadow ${modComplete ? 'border-emerald-200' : modLocked ? 'border-slate-200 bg-slate-50/50' : 'border-slate-200/70'} ${modOpen && !modLocked ? 'shadow-lg' : ''}`}
+						class={`overflow-hidden rounded-2xl border bg-white transition-shadow ${modComplete ? 'border-emerald-200' : 'border-slate-200/70'} ${modOpen ? 'shadow-lg' : ''}`}
 					>
-						{#if modLocked && !searching}
-							<div
-								class="flex w-full cursor-not-allowed items-center gap-4 p-4 opacity-70 sm:p-5"
-								title={`Selesaikan Modul ${moduleIndex} terlebih dahulu untuk membuka modul ini`}
-								aria-label={`Terkunci: Modul ${moduleIndex + 1}: ${mod.title}. Selesaikan modul sebelumnya terlebih dahulu.`}
-							>
-								<span
-									class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-200 text-sm font-extrabold text-slate-400"
-									aria-hidden="true"
-								>
-									<i class="fa-solid fa-lock"></i>
-								</span>
-								<span class="min-w-0 flex-1">
-									<span
-										id={`mod-title-${mod.id}`}
-										class="block truncate text-sm font-bold text-slate-400 sm:text-base"
-									>
-										Modul {moduleIndex + 1}: {mod.title}
-									</span>
-									<span class="mt-0.5 block truncate text-xs text-slate-400">{mod.description}</span
-									>
-									<span class="mt-1.5 block text-[11px] font-semibold text-slate-400">
-										Terkunci · {mProg.done}/{mProg.total} materi · {subs.length} sub-modul · Selesaikan
-										Modul {moduleIndex} dulu
-									</span>
-								</span>
-							</div>
-						{:else}
-							<button
+						<button
 								type="button"
 								onclick={() => toggleModule(mod.id)}
 								aria-expanded={modOpen}
@@ -566,7 +557,7 @@
 								class="flex w-full items-center gap-4 p-4 text-left transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600 sm:p-5"
 							>
 								<span
-									class={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-extrabold ${modComplete ? 'bg-emerald-600 text-white' : 'bg-blue-600 text-white'}`}
+									class={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-sm font-extrabold ring-4 ring-white ${modComplete ? 'bg-emerald-100 text-emerald-700' : badgeClass(moduleIndex)}`}
 									aria-hidden="true"
 								>
 									{#if modComplete}
@@ -614,9 +605,8 @@
 									aria-hidden="true"
 								></i>
 							</button>
-						{/if}
 
-						{#if modOpen && (!modLocked || searching)}
+						{#if modOpen}
 							<div
 								id={`mod-panel-${mod.id}`}
 								class="border-t border-slate-100 bg-slate-50/50 p-3 sm:p-4"
@@ -655,6 +645,54 @@
 										</span>
 									{/if}
 								</div>
+								<div
+									class="mb-2.5 rounded-xl border border-slate-200 bg-white px-3.5 py-3"
+									aria-label={`Status persyaratan sertifikat Modul ${moduleIndex + 1}`}
+								>
+									<p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] font-extrabold text-slate-900">
+										Status persyaratan
+										<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">
+											data lokal, bukan bukti resmi
+										</span>
+									</p>
+									<ul class="mt-1.5 space-y-1 text-[12px] text-slate-600">
+										<li>
+											Materi: {mProg.done}/{mProg.total} ditandai selesai (progres lokal di browser ini).
+										</li>
+										{#if qStat.total > 0}
+											<li>
+												Kuis: {qStat.passed}/{qStat.total} lulus (acuan percobaan terakhir, bukan
+												nilai terbaik).
+											</li>
+										{:else}
+											<li>Tidak ada kuis di modul ini.</li>
+										{/if}
+										{#if tStat.total > 0}
+											<li>
+												Tugas: {tStat.submitted}/{tStat.total} terkumpul · {tStat.graded} ada nilai
+												yang terbaca di sisi peserta. Terkumpul ≠ lulus; nilai instruktur belum
+												tentu tersinkron ke perangkat ini.
+											</li>
+										{:else}
+											<li>Tidak ada tugas di modul ini.</li>
+										{/if}
+									</ul>
+									{#if knownUnmet}
+										<p class="mt-1.5 text-[12px] font-bold text-amber-700">
+											Belum memenuhi berdasarkan data tersedia:
+											{#if missingMateri > 0}<span>{missingMateri} materi belum selesai.</span>{/if}
+											{#if missingKuis > 0}<span>{missingKuis} kuis belum lulus.</span>{/if}
+											{#if missingTugas > 0}<span>{missingTugas} tugas belum terkumpul.</span>{/if}
+											{#if ungradedTugas > 0}<span>{ungradedTugas} tugas menunggu nilai.</span>{/if}
+										</p>
+									{:else}
+										<p class="mt-1.5 text-[12px] font-bold text-slate-600">
+											Belum dapat diverifikasi. Data lokal tampak lengkap, tetapi penerbitan resmi
+											membutuhkan validasi server, nilai terbaik kuis, dan status kelulusan tugas
+											yang belum tersedia di sini.
+										</p>
+									{/if}
+								</div>
 								<div class="space-y-2.5">
 									{#each subs as { sub, subIndex, mats } (sub.id)}
 										{@const sProg = subModuleProgress(sub, (id) => doneMaterials.has(id))}
@@ -667,7 +705,7 @@
 											(id) => doneMaterials.has(id)
 										)}
 										{@const flat = getModuleMaterials(mod)}
-										<div class="overflow-hidden rounded-xl border border-violet-100 bg-white">
+										<div class="overflow-hidden rounded-xl border border-slate-200 bg-white">
 											{#if subLocked && !searching}
 												<div
 													class="flex w-full cursor-not-allowed items-center gap-3 p-3 opacity-70 sm:px-4"
@@ -764,7 +802,6 @@
 																{@const locked =
 																	!searching &&
 																	(subLocked ||
-																		modLocked ||
 																		(flatIndex >= 0 &&
 																			isMaterialLocked(flat, flatIndex, (id) =>
 																				doneMaterials.has(id)
@@ -871,9 +908,21 @@
 			</div>
 		{/if}
 
+		<!-- Pratinjau alur belajar dengan progresmu -->
+		<section aria-labelledby="roadmap-preview-heading" class="mt-6">
+			<div class="mb-3">
+				<h2 id="roadmap-preview-heading" class="text-lg font-bold text-slate-900">Pratinjau Alur Belajar</h2>
+				<p class="text-xs text-slate-500">
+					Jalur Modul → Sub-modul dengan progresmu. Klik node untuk info.
+					{#if stats} ({stats.estimatedLabel}){/if}
+				</p>
+			</div>
+			<CourseRoadmap modules={course.modules} courseId={course.id} />
+		</section>
+
 		<!-- CTA bawah -->
 		<div
-			class="mt-6 flex flex-col gap-3 rounded-2xl border border-blue-100 bg-blue-50/60 p-5 sm:flex-row sm:items-center sm:justify-between"
+			class="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between"
 		>
 			<div>
 				<p class="text-sm font-bold text-slate-900">

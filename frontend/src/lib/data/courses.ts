@@ -1,6 +1,49 @@
 export type CourseStatus = 'in-progress' | 'completed' | 'not-started';
 
-export type MaterialType = 'video' | 'bacaan' | 'audio' | 'foto' | 'kuis' | 'tugas';
+export type MaterialType =
+	| 'materi'
+	| 'tugas'
+	| 'kuis'
+	| 'video'
+	| 'bacaan'
+	| 'audio'
+	| 'foto';
+
+/** Tipe yang ditawarkan ke instruktur saat membuat materi baru. */
+export const INSTRUCTOR_MATERIAL_TYPES = ['materi', 'tugas', 'kuis'] as const;
+export type InstructorMaterialType = (typeof INSTRUCTOR_MATERIAL_TYPES)[number];
+
+/**
+ * Normalisasi tipe lama (video/bacaan/audio/foto) ke model 3-tipe:
+ * - kuis → kuis, tugas → tugas
+ * - selain itu (video/bacaan/audio/foto/materi) → materi
+ */
+export function normalizeMaterialType(t: string): InstructorMaterialType {
+	if (t === 'kuis') return 'kuis';
+	if (t === 'tugas') return 'tugas';
+	return 'materi';
+}
+
+export function materialTypeLabel(t: string): string {
+	const n = normalizeMaterialType(t);
+	if (n === 'kuis') return 'Kuis';
+	if (n === 'tugas') return 'Tugas';
+	return 'Materi';
+}
+
+export function materialTypeIcon(t: string): string {
+	const n = normalizeMaterialType(t);
+	if (n === 'kuis') return 'fa-circle-question text-amber-600';
+	if (n === 'tugas') return 'fa-pen-to-square text-violet-600';
+	return 'fa-book-open text-emerald-600';
+}
+
+export function materialActionLabel(t: string): string {
+	const n = normalizeMaterialType(t);
+	if (n === 'kuis') return 'Kerjakan';
+	if (n === 'tugas') return 'Kumpulkan';
+	return 'Pelajari';
+}
 
 export interface Material {
 	id: string;
@@ -1758,20 +1801,21 @@ export function isMaterialLocked(
 }
 
 /**
- * Modul index ke-i terkunci bila ada materi di modul-modul sebelumnya
- * yang belum selesai. Modul pertama selalu terbuka.
+ * K-07: modul bersifat independen. Peserta yang memiliki akses kursus boleh
+ * membuka modul mana pun tanpa menyelesaikan modul sebelumnya.
+ * Fungsi dipertahankan agar pemanggil lama tidak rusak, selalu false.
+ * Penguncian berurutan tetap berlaku di dalam modul via
+ * `isSubModuleLocked` / `isMaterialLocked`. Akses bayar/periode tetap
+ * ditangani `paidLocked` / `periodLocked`, bukan di sini.
  */
 export function isModuleLocked(
 	modules: CourseModule[],
 	index: number,
 	isDone: (id: string) => boolean
 ): boolean {
-	if (index <= 0) return false;
-	for (let i = 0; i < index; i++) {
-		for (const mat of modules[i].materials) {
-			if (!isDone(mat.id)) return true;
-		}
-	}
+	void modules;
+	void index;
+	void isDone;
 	return false;
 }
 
@@ -1781,14 +1825,13 @@ export function getModuleMaterials(module: CourseModule): Material[] {
 	return module.materials;
 }
 
-/** Sub-modul index ke-i terkunci bila sub-modul/modul sebelumnya belum tuntas. */
+/** Sub-modul index ke-i terkunci bila sub-modul sebelumnya dalam modul yang sama belum tuntas. */
 export function isSubModuleLocked(
 	modules: CourseModule[],
 	moduleIndex: number,
 	subIndex: number,
 	isDone: (id: string) => boolean
 ): boolean {
-	if (isModuleLocked(modules, moduleIndex, isDone)) return true;
 	if (subIndex <= 0) return false;
 	const subs = modules[moduleIndex]?.subModules ?? [];
 	for (let i = 0; i < subIndex; i++) {

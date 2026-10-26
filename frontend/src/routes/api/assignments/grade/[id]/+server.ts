@@ -14,6 +14,13 @@ export const PATCH: RequestHandler = async ({ params, request, fetch }) => {
 	} catch {
 		return json({ status: false, message: 'Body JSON tidak valid.', data: null }, { status: 400 });
 	}
+	const score = (body as { score?: unknown } | null)?.score;
+	if (score !== undefined) {
+		const val = Number(score);
+		if (!Number.isFinite(val) || val < 0 || val > 100) {
+			return json({ status: false, message: 'Skor harus angka 0–100.', data: null }, { status: 400 });
+		}
+	}
 	try {
 		const upstream = await fetch(`${backendBase()}/api/v1/submissions/${encodeURIComponent(params.id)}/grade`, {
 			method: 'PATCH',

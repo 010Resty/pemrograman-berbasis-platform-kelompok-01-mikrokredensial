@@ -599,7 +599,7 @@
 						<div class="relative">
 							<div
 								class="flex items-center justify-center rounded-2xl font-black {isFirst
-									? 'h-16 w-16 sm:h-20 sm:w-20 text-xl bg-slate-900 text-amber-300 ring-4 ring-amber-400 shadow-xl shadow-slate-900/20'
+									? 'h-16 w-16 sm:h-20 sm:w-20 text-xl bg-blue-800 text-amber-300 ring-4 ring-amber-400 shadow-xl shadow-blue-800/30'
 									: isSecond
 										? 'h-14 w-14 sm:h-16 sm:w-16 text-lg bg-white text-slate-700 ring-2 ring-slate-300 shadow-lg'
 										: 'h-14 w-14 sm:h-16 sm:w-16 text-lg bg-white text-orange-700 ring-2 ring-orange-300 shadow-lg'}"
@@ -659,7 +659,7 @@
 						<!-- Balok podium bertingkat -->
 						<div
 							class="mt-3 flex w-full flex-col items-center justify-start rounded-t-2xl border-x border-t px-2 pt-3 text-white {isFirst
-								? 'h-40 sm:h-48 bg-slate-900 border-slate-900 shadow-[0_-8px_30px_-10px_rgba(245,158,11,0.5)]'
+								? 'h-40 sm:h-48 bg-blue-800 border-blue-800 shadow-[0_-8px_30px_-10px_rgba(245,158,11,0.5)]'
 								: isSecond
 									? 'h-28 sm:h-32 bg-white border-slate-200 text-slate-700'
 									: 'h-24 sm:h-28 bg-white border-slate-200 text-slate-700'}"
@@ -707,7 +707,7 @@
 				<div class="overflow-x-auto">
 					<table class="w-full text-sm">
 						<caption class="sr-only">Tabel peringkat pelatihan posisi 4 sampai 10</caption>
-						<thead class="bg-slate-900 text-white">
+						<thead class="bg-blue-800 text-white">
 							<tr>
 								<th class="px-6 py-4 text-left font-bold text-xs uppercase tracking-wider"
 									>Peringkat</th

@@ -1,6 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { getCourseById } from '$lib/data/courses';
+	import {
+		getCourseById,
+		INSTRUCTOR_MATERIAL_TYPES,
+		materialTypeLabel,
+		normalizeMaterialType
+	} from '$lib/data/courses';
 	import type { CourseModule, Material, MaterialType } from '$lib/data/courses';
 	import {
 		curriculumUid,
@@ -10,8 +15,11 @@
 	} from '$lib/stores/curriculum';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 	import { getMaterialDocMeta } from '$lib/stores/material-docs';
+	import { loadQuizDraft, validateQuizDraft } from '$lib/stores/quiz-drafts';
+	import { countTaskPoints, loadTaskDraft, validateTaskDraft } from '$lib/stores/task-drafts';
 
-	const MATERIAL_TYPES: MaterialType[] = ['video', 'bacaan', 'audio', 'foto', 'kuis', 'tugas'];
+	/** Hanya 3 tipe: materi (audio/video/teks), tugas (teks), kuis. */
+	const MATERIAL_TYPES: MaterialType[] = [...INSTRUCTOR_MATERIAL_TYPES];
 
 	const courseId = $derived(Number(page.params.courseId));
 	const moduleId = $derived(page.params.moduleId ?? '');
@@ -24,8 +32,40 @@
 	/** Hapus materi yang menunggu konfirmasi modal bahaya. */
 	let pendingDelete = $state<{ matId: string; title: string; detail: string } | null>(null);
 	let showDelete = $state(false);
-	/** Kartu materi yang dibuka panel sunting cepatnya. */
+	/** Kartu materi yang dibuka panel suntingnya. */
 	let openMats = $state<string[]>([]);
+	/** Draf suntingan tiap materi. Diterapkan hanya saat Simpan ditekan. */
+	let matDrafts = $state<Record<string, { title: string; type: MaterialType; duration: string }>>(
+		{}
+	);
+	let matErrors = $state<Record<string, string>>({});
+	/** Warna pastel badge nomor — sama seperti halaman modul. */
+	const MODULE_BADGES = [
+		'bg-blue-100 text-blue-700',
+		'bg-violet-100 text-violet-700',
+		'bg-emerald-100 text-emerald-700',
+		'bg-amber-100 text-amber-700'
+	] as const;
+
+	function badgeClass(mi: number): string {
+		return MODULE_BADGES[((mi % MODULE_BADGES.length) + MODULE_BADGES.length) % MODULE_BADGES.length];
+	}
+
+	/** Aksen warna header menurut nomor modul. */
+	const MODULE_TINTS = [
+		{ bar: 'bg-blue-600', ghost: 'text-blue-100', chip: 'bg-blue-50 text-blue-700 ring-1 ring-blue-100' },
+		{ bar: 'bg-violet-600', ghost: 'text-violet-100', chip: 'bg-violet-50 text-violet-700 ring-1 ring-violet-100' },
+		{ bar: 'bg-emerald-600', ghost: 'text-emerald-100', chip: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100' },
+		{ bar: 'bg-amber-500', ghost: 'text-amber-100', chip: 'bg-amber-50 text-amber-700 ring-1 ring-amber-100' }
+	] as const;
+
+	function tintFor(mi: number): (typeof MODULE_TINTS)[number] {
+		return MODULE_TINTS[((mi % MODULE_TINTS.length) + MODULE_TINTS.length) % MODULE_TINTS.length];
+	}
+	/** Menu overflow (⋯) yang sedang terbuka — hanya satu per daftar. */
+	let menuFor = $state<string | null>(null);
+	/** Posisi viewport menu (fixed) agar tidak terpotong `overflow-hidden` kartu. */
+	let menuPos = $state<{ top: number; right: number } | null>(null);
 	/** Status draf dokumen per materi — dihitung di klien agar SSR tetap konsisten. */
 	let docMeta = $state<Record<string, { exists: boolean; words: number; updatedAt: string }>>({});
 
@@ -37,19 +77,103 @@
 		editableModules = loadCurriculumDraft(courseId).map(withSyncedFlat);
 		savedMessage = '';
 		pendingDelete = null;
+		menuFor = null;
+		menuPos = null;
+		openMats = [];
+		matDrafts = {};
+		matErrors = {};
 		initializedFor = initKey;
 	});
+
+	function toggleMenu(id: string, anchor?: HTMLElement | null) {
+		if (menuFor === id) {
+			closeMenu();
+			return;
+		}
+		if (anchor) {
+			const r = anchor.getBoundingClientRect();
+			const approxH = 216;
+			const top =
+				r.bottom + 6 + approxH > window.innerHeight
+					? Math.max(8, r.top - approxH - 6)
+					: r.bottom + 6;
+			menuPos = { top, right: Math.max(8, window.innerWidth - r.right) };
+		} else {
+			menuPos = null;
+		}
+		menuFor = id;
+	}
+
+	function closeMenu() {
+		menuFor = null;
+		menuPos = null;
+	}
 
 	function refreshDocMeta() {
 		const next: Record<string, { exists: boolean; words: number; updatedAt: string }> = {};
 		for (const m of materials) {
-			next[m.id] = getMaterialDocMeta(courseId, moduleId, subId, m.id);
+			const kind = normalizeMaterialType(String(m.type));
+			if (kind === 'kuis') {
+				const q = loadQuizDraft(courseId, moduleId, subId, m.id);
+				next[m.id] =
+					q && q.questions.length > 0 && validateQuizDraft({ ...q, title: 'x' }) === null
+						? { exists: true, words: q.questions.length, updatedAt: q.updatedAt }
+						: { exists: false, words: q?.questions.length ?? 0, updatedAt: q?.updatedAt ?? '' };
+			} else if (kind === 'tugas') {
+				const t = loadTaskDraft(courseId, moduleId, subId, m.id);
+				const points = t ? countTaskPoints(t) : 0;
+				next[m.id] =
+					t && validateTaskDraft(t) === null
+						? { exists: true, words: points, updatedAt: t.updatedAt }
+						: { exists: false, words: points, updatedAt: t?.updatedAt ?? '' };
+			} else {
+				next[m.id] = getMaterialDocMeta(courseId, moduleId, subId, m.id);
+			}
 		}
 		docMeta = next;
 	}
 
-	function toggleMat(id: string) {
-		openMats = openMats.includes(id) ? openMats.filter((x) => x !== id) : [...openMats, id];
+	function snapshotMat(mat: Material) {
+		matDrafts[mat.id] = { title: mat.title, type: mat.type, duration: mat.duration };
+		delete matErrors[mat.id];
+	}
+
+	function toggleMat(id: string | null) {
+		if (!id) return;
+		if (openMats.includes(id)) {
+			// Menutup = membuang perubahan yang belum disimpan.
+			openMats = openMats.filter((x) => x !== id);
+			delete matDrafts[id];
+			delete matErrors[id];
+		} else {
+			const mat = materials.find((m) => m.id === id);
+			if (mat) snapshotMat(mat);
+			openMats = [...openMats, id];
+		}
+	}
+
+	/** Satu-satunya jalan menyimpan perubahan judul/tipe/durasi materi. */
+	function saveMatDraft(id: string | null) {
+		if (!id || moduleIndex < 0 || subIndex < 0) return;
+		const d = matDrafts[id];
+		const m = editableModules[moduleIndex];
+		const mi = (m.subModules?.[subIndex].materials ?? []).findIndex((x) => x.id === id);
+		if (!d || mi < 0) return;
+		if (!d.title.trim()) {
+			matErrors[id] = 'Isi judul materi terlebih dahulu.';
+			return;
+		}
+		delete matErrors[id];
+		const current = [...(m.subModules ?? [])];
+		const mats = [...current[subIndex].materials];
+		mats[mi] = { ...mats[mi], title: d.title, type: d.type, duration: d.duration };
+		current[subIndex] = { ...current[subIndex], materials: mats };
+		editableModules[moduleIndex] = withSyncedFlat({ ...m, subModules: current });
+		saveCurriculumDraft(courseId, editableModules);
+		refreshDocMeta();
+		delete matDrafts[id];
+		openMats = openMats.filter((x) => x !== id);
+		markSaved(`Materi ${mi + 1} tersimpan.`);
 	}
 
 	/* Simpan setiap perubahan kembali ke draf bersama + segarkan status dokumen. */
@@ -64,14 +188,14 @@
 	const subIndex = $derived((mod?.subModules ?? []).findIndex((s) => s.id === subId));
 	const sub = $derived(subIndex >= 0 ? mod?.subModules?.[subIndex] : undefined);
 	const materials = $derived<Material[]>(sub?.materials ?? []);
+	/** Materi + indeks pemilik menu yang terbuka (menu dirender sekali di luar kartu). */
+	const menuMat = $derived(menuFor ? materials.find((m) => m.id === menuFor) : undefined);
+	const menuIndex = $derived(menuFor ? materials.findIndex((m) => m.id === menuFor) : -1);
+	const menuOpen = $derived(menuFor ? openMats.includes(menuFor) : false);
+	const tint = $derived(tintFor(moduleIndex));
 
 	function markSaved(msg: string) {
 		savedMessage = msg;
-	}
-
-	function touchModule() {
-		if (moduleIndex < 0) return;
-		editableModules[moduleIndex] = withSyncedFlat(editableModules[moduleIndex]);
 	}
 
 	function cancelDelete() {
@@ -82,6 +206,8 @@
 		const target = pendingDelete;
 		pendingDelete = null;
 		showDelete = false;
+		menuFor = null;
+		menuPos = null;
 		if (!target || moduleIndex < 0 || subIndex < 0) return;
 		const m = editableModules[moduleIndex];
 		const current = [...(m.subModules ?? [])];
@@ -90,6 +216,9 @@
 			materials: current[subIndex].materials.filter((x) => x.id !== target.matId)
 		};
 		editableModules[moduleIndex] = withSyncedFlat({ ...m, subModules: current });
+		openMats = openMats.filter((x) => x !== target.matId);
+		delete matDrafts[target.matId];
+		delete matErrors[target.matId];
 		markSaved('Materi dihapus.');
 	}
 
@@ -101,7 +230,7 @@
 		target.materials.push({
 			id: curriculumUid('mat'),
 			title: 'Materi baru',
-			type: 'video' as MaterialType,
+			type: 'materi' as MaterialType,
 			duration: '10 mnt',
 			completed: false
 		});
@@ -111,8 +240,8 @@
 		markSaved('Materi baru ditambahkan.');
 	}
 
-	function removeMaterial(matId: string) {
-		if (moduleIndex < 0 || subIndex < 0) return;
+	function removeMaterial(matId: string | null) {
+		if (!matId || moduleIndex < 0 || subIndex < 0) return;
 		const mat = (editableModules[moduleIndex].subModules?.[subIndex].materials ?? []).find(
 			(x) => x.id === matId
 		);
@@ -124,8 +253,8 @@
 		showDelete = true;
 	}
 
-	function moveMaterial(matId: string, dir: -1 | 1) {
-		if (moduleIndex < 0 || subIndex < 0) return;
+	function moveMaterial(matId: string | null, dir: -1 | 1) {
+		if (!matId || moduleIndex < 0 || subIndex < 0) return;
 		const m = editableModules[moduleIndex];
 		const current = [...(m.subModules ?? [])];
 		const mats = [...current[subIndex].materials];
@@ -138,22 +267,22 @@
 		markSaved(`Materi dipindah ke posisi ${target + 1}.`);
 	}
 
-	function typeIcon(type: string): string {
-		if (type === 'video') return 'fa-circle-play text-blue-600';
-		if (type === 'audio') return 'fa-headphones text-cyan-600';
-		if (type === 'foto') return 'fa-image text-slate-500';
-		if (type === 'kuis') return 'fa-circle-question text-amber-600';
-		if (type === 'tugas') return 'fa-pen-to-square text-violet-600';
-		return 'fa-book-open text-emerald-600';
+	function typeLabel(type: string): string {
+		return materialTypeLabel(type);
 	}
 
-	function typeLabel(type: string): string {
-		if (type === 'video') return 'Video';
-		if (type === 'audio') return 'Audio';
-		if (type === 'foto') return 'Gambar';
-		if (type === 'kuis') return 'Kuis';
-		if (type === 'tugas') return 'Tugas';
-		return 'Bacaan';
+	function typeHint(type: string): string {
+		const n = normalizeMaterialType(type);
+		if (n === 'kuis') return 'Buat soal pilihan ganda';
+		if (n === 'tugas') return 'Instruksi tugas (teks)';
+		return 'Audio, video, atau teks';
+	}
+
+	function editLabel(type: string, exists = false): string {
+		const n = normalizeMaterialType(type);
+		if (n === 'kuis') return exists ? 'Edit kuis' : 'Buat kuis';
+		if (n === 'tugas') return exists ? 'Edit tugas' : 'Buat tugas';
+		return exists ? 'Edit materi' : 'Buat materi';
 	}
 
 	function editorHref(matId: string): string {
@@ -170,6 +299,9 @@
 		content={sub ? `Kelola materi ${sub.title}` : 'Kelola materi sub-modul'}
 	/>
 </svelte:head>
+
+<!-- Tutup menu ⋯ saat halaman digulir/diubah ukuran (posisinya fixed) -->
+<svelte:window onscroll={closeMenu} onresize={closeMenu} />
 
 <div class="p-4 sm:p-6 lg:p-8">
 	{#if !course}
@@ -243,73 +375,37 @@
 		<!-- Header sub-modul -->
 		<section
 			aria-labelledby="sub-heading"
-			class="mb-6 overflow-hidden rounded-3xl border border-slate-200/70 bg-white shadow-lg shadow-slate-900/5"
+			class="mb-6 overflow-hidden rounded-2xl border border-slate-200 bg-white"
 		>
-			<div class="relative overflow-hidden bg-violet-700 p-5 sm:px-7 sm:py-6">
-				<div
-					class="pointer-events-none absolute -top-16 -right-10 h-48 w-48 rounded-full bg-white/10 blur-2xl"
+			<div class={`h-1.5 ${tint.bar}`} aria-hidden="true"></div>
+			<div class="relative px-4 py-4 sm:px-6">
+				<span
+					class={`pointer-events-none absolute top-1 right-3 text-[76px] leading-none font-black tracking-tighter select-none sm:text-[96px] ${tint.ghost}`}
 					aria-hidden="true"
-				></div>
-				<div
-					class="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-gradient-to-r from-violet-400 via-fuchsia-300 to-violet-400"
-					aria-hidden="true"
-				></div>
-				<div class="relative flex flex-wrap items-center justify-between gap-3">
-					<div class="flex min-w-0 items-center gap-3">
-						<span
-							class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white/20 text-xs font-extrabold text-white shadow-lg ring-4 ring-white/20 backdrop-blur"
-							aria-hidden="true"
-						>
-							{moduleIndex + 1}.{subIndex + 1}
-						</span>
-						<div class="min-w-0">
-							<p
-								class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-[10px] font-extrabold tracking-[0.16em] text-white uppercase backdrop-blur"
-							>
-								<i class="fa-solid fa-book-open" aria-hidden="true"></i>
-								Kelola materi
-							</p>
-							<h1
-								id="sub-heading"
-								class="mt-1.5 truncate text-xl font-extrabold text-white sm:text-2xl"
-							>
-								{sub.title || '(belum berjudul)'}
-							</h1>
-						</div>
+				>
+					{moduleIndex + 1}.{subIndex + 1}
+				</span>
+				<div class="relative flex flex-wrap items-start justify-between gap-3">
+					<div class="min-w-0">
+						<p class={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-extrabold tracking-[0.16em] uppercase ${tint.chip}`}>
+							<i class="fa-solid fa-book-open" aria-hidden="true"></i>
+							Kelola materi
+						</p>
+						<h1 id="sub-heading" class="mt-2 text-xl font-extrabold text-slate-900 sm:text-2xl">
+							{sub.title || '(belum berjudul)'}
+						</h1>
+						{#if sub.description}
+							<p class="mt-1.5 max-w-xl text-xs leading-relaxed text-slate-500 sm:text-[13px]">{sub.description}</p>
+						{/if}
 					</div>
-					<div class="rounded-2xl bg-white/15 p-3 text-center backdrop-blur">
-						<p class="text-[11px] font-bold text-white">{materials.length} materi</p>
+					<div class="flex shrink-0 flex-wrap items-center gap-2 self-end">
+						<span class="inline-flex items-center gap-1.5 rounded-full bg-violet-700 px-3 py-1.5 text-[11px] font-bold text-white">
+							{materials.length} materi
+						</span>
 					</div>
 				</div>
 			</div>
 
-			<div class="grid gap-3 p-4 sm:p-6">
-				<div>
-					<label for="sub-title" class="mb-1 block text-xs font-bold text-slate-700">
-						Judul sub-modul {moduleIndex + 1}.{subIndex + 1}
-					</label>
-					<input
-						id="sub-title"
-						type="text"
-						bind:value={editableModules[moduleIndex].subModules![subIndex].title}
-						oninput={touchModule}
-						class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm font-bold text-slate-900 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
-					/>
-				</div>
-				<div>
-					<label for="sub-desc" class="mb-1 block text-xs font-bold text-slate-700">
-						Deskripsi sub-modul (opsional)
-					</label>
-					<input
-						id="sub-desc"
-						type="text"
-						bind:value={editableModules[moduleIndex].subModules![subIndex].description}
-						oninput={touchModule}
-						placeholder="Satu kalimat tujuan sub-modul…"
-						class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-600 placeholder:text-slate-400 focus:border-violet-500 focus:ring-4 focus:ring-violet-500/10 focus:outline-none"
-					/>
-				</div>
-			</div>
 			{#if savedMessage}
 				<p
 					role="status"
@@ -324,21 +420,20 @@
 		<div class="mb-4">
 			<h2 class="text-lg font-bold text-slate-900">Materi ({materials.length})</h2>
 			<p class="text-xs text-slate-500">
-				Klik judul materi untuk membuka editor dokumennya — gabungkan teks, gambar, video, kode,
-				dan PDF dalam satu dokumen.
+				Tekan <strong>Buat</strong> untuk mengisi tiap materi (teks, audio, video, atau kuis). Perubahan nama/tipe/durasi wajib disimpan lewat tombol Simpan.
 			</p>
 		</div>
 
 		{#if materials.length === 0}
 			<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-10 text-center">
 				<p
-					class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-slate-900 text-white shadow-lg"
+					class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-violet-600 text-white shadow-lg"
 				>
 					<i class="fa-solid fa-book-open" aria-hidden="true"></i>
 				</p>
 				<p class="mt-3 text-sm font-bold text-slate-900">Belum ada materi</p>
 				<p class="mx-auto mt-1 max-w-sm text-xs text-slate-500">
-					Tambah materi pertama — video, bacaan, kuis, atau tugas.
+					Tambah materi pertama — materi, tugas, atau kuis.
 				</p>
 			</div>
 		{:else}
@@ -347,42 +442,37 @@
 					{@const open = openMats.includes(mat.id)}
 					{@const meta = docMeta[mat.id]}
 					<li
-						class="overflow-hidden rounded-2xl border bg-white transition-all {open
-							? 'border-blue-500 shadow-xl shadow-blue-600/10'
-							: 'border-slate-200/80 shadow-sm hover:border-blue-300 hover:shadow-lg'}"
+						class="rounded-2xl border border-slate-200 bg-white transition-all {open
+							? 'border-blue-500 shadow-md shadow-blue-600/10'
+							: 'shadow-sm hover:border-slate-300'}"
 					>
-						<!-- Baris utama: judul (tautan editor) + status + aksi -->
+						<!-- Baris utama: judul + status + aksi -->
 						<div class="flex items-center gap-3 p-3 sm:p-4">
 							<span
-								class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-xs font-extrabold text-white shadow-md"
+								class={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-xs font-extrabold ring-4 ring-white ${badgeClass(mi)}`}
 								aria-hidden="true"
 							>
 								{mi + 1}
 							</span>
-							<span
-								class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-100"
-								aria-hidden="true"
-							>
-								<i class={`fa-solid ${typeIcon(mat.type)}`} aria-hidden="true"></i>
-							</span>
 							<span class="min-w-0 flex-1">
-								<a
-									href={editorHref(mat.id)}
-									aria-label={`Buka editor dokumen materi ${mi + 1}: ${mat.title || '(belum berjudul)'}`}
-									title="Buka editor dokumen materi"
-									class="block truncate rounded text-sm font-extrabold text-slate-900 underline-offset-4 hover:text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600"
-								>
+								<span class="block truncate text-sm font-extrabold text-slate-900">
 									{mat.title || '(belum berjudul)'}
-									<i class="fa-solid fa-arrow-up-right-from-square ml-1 text-[11px] text-blue-500" aria-hidden="true"></i>
-								</a>
+								</span>
 								<span class="mt-1 flex flex-wrap items-center gap-1.5 text-[11px] font-semibold">
 									<span class="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-blue-700 ring-1 ring-blue-200">
 										{typeLabel(mat.type)} · {mat.duration}
 									</span>
+									<span class="hidden text-slate-400 sm:inline">{typeHint(mat.type)}</span>
 									{#if meta?.exists}
 										<span class="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-emerald-700 ring-1 ring-emerald-200">
 											<i class="fa-solid fa-circle-check text-[10px]" aria-hidden="true"></i>
-											Ada draf{meta.words > 0 ? ` · ${meta.words} kata` : ''}
+											Ada draf{meta.words > 0
+												? normalizeMaterialType(String(mat.type)) === 'kuis'
+													? ` · ${meta.words} soal`
+													: normalizeMaterialType(String(mat.type)) === 'tugas'
+														? ` · ${meta.words} poin`
+														: ` · ${meta.words} kata`
+												: ''}
 										</span>
 									{:else}
 										<span class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-slate-500 ring-1 ring-slate-200">
@@ -392,111 +482,105 @@
 									{/if}
 								</span>
 							</span>
-							<span
-								class="flex shrink-0 flex-wrap items-center justify-end gap-1"
-								role="group"
-								aria-label={`Aksi materi ${mi + 1}`}
-							>
+							<span class="flex shrink-0 items-center gap-1.5" role="group" aria-label={`Aksi materi ${mi + 1}`}>
 								<a
 									href={editorHref(mat.id)}
-									aria-label={`Edit konten materi ${mi + 1}: ${mat.title || '(belum berjudul)'}`}
-									title="Buka editor dokumen materi"
+									aria-label={`${editLabel(mat.type, meta?.exists)} ${mi + 1}: ${mat.title || '(belum berjudul)'}`}
+									title={editLabel(mat.type, meta?.exists)}
 									class="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-blue-600 px-3.5 py-2 text-[11px] font-bold text-white shadow-md shadow-blue-600/25 transition-all hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
 								>
 									<i class="fa-solid fa-pen-nib" aria-hidden="true"></i>
-									Edit konten
+									{editLabel(mat.type, meta?.exists)}
+									<i class="fa-solid fa-arrow-right text-[10px] opacity-70" aria-hidden="true"></i>
 								</a>
 								<button
 									type="button"
-									onclick={() => toggleMat(mat.id)}
-									aria-expanded={open}
-									aria-controls={`mat-panel-${mat.id}`}
-									aria-label={open
-										? `Tutup sunting cepat materi ${mi + 1}`
-										: `Buka sunting cepat materi ${mi + 1}`}
-									title="Sunting cepat judul, tipe, durasi"
-									class="flex min-h-10 min-w-10 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+									onclick={(e) => toggleMenu(mat.id, e.currentTarget)}
+									aria-expanded={menuFor === mat.id}
+									aria-haspopup="menu"
+									aria-controls="mat-menu-open"
+									aria-label={`Opsi lain materi ${mi + 1}`}
+									title="Opsi lain"
+									class="flex min-h-10 min-w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-all hover:border-slate-300 hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-blue-600"
 								>
-									<i class="fa-solid fa-chevron-down text-sm transition-transform duration-300 {open ? 'rotate-180' : ''}" aria-hidden="true"></i>
-								</button>
-								<button
-									type="button"
-									onclick={() => moveMaterial(mat.id, -1)}
-									disabled={mi === 0}
-									aria-label={`Pindah materi ${mi + 1} ke atas`}
-									title="Pindah ke atas"
-									class="hidden min-h-10 min-w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-all hover:border-blue-300 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-35 sm:flex"
-								>
-									<i class="fa-solid fa-arrow-up text-[11px]" aria-hidden="true"></i>
-								</button>
-								<button
-									type="button"
-									onclick={() => moveMaterial(mat.id, 1)}
-									disabled={mi === materials.length - 1}
-									aria-label={`Pindah materi ${mi + 1} ke bawah`}
-									title="Pindah ke bawah"
-									class="hidden min-h-10 min-w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-500 transition-all hover:border-blue-300 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-35 sm:flex"
-								>
-									<i class="fa-solid fa-arrow-down text-[11px]" aria-hidden="true"></i>
-								</button>
-								<button
-									type="button"
-									onclick={() => removeMaterial(mat.id)}
-									aria-label={`Hapus materi ${mat.title || mi + 1}`}
-									class="flex min-h-10 min-w-10 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-400 transition-all hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500"
-								>
-									<i class="fa-solid fa-trash text-[11px]" aria-hidden="true"></i>
+									<i class="fa-solid fa-ellipsis-vertical text-sm" aria-hidden="true"></i>
 								</button>
 							</span>
 						</div>
 
 						{#if open}
+							{@const draft = matDrafts[mat.id]}
+							{#if draft}
 							<div
 								id={`mat-panel-${mat.id}`}
-								class="grid gap-2 border-t border-slate-100 bg-slate-50/60 p-3 sm:grid-cols-[minmax(0,1fr)_140px_110px] sm:p-4"
+								class="space-y-3 rounded-b-2xl border-t border-slate-100 bg-slate-50/60 p-3 sm:p-4"
 							>
-								<div>
-									<label for={`mat-t-${mat.id}`} class="mb-1 block text-[11px] font-bold text-slate-600">
-										Materi {mi + 1} — judul
-									</label>
-									<input
-										id={`mat-t-${mat.id}`}
-										type="text"
-										bind:value={editableModules[moduleIndex].subModules![subIndex].materials[mi].title}
-										oninput={touchModule}
-										placeholder="Judul materi…"
-										class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 placeholder:font-normal placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
-									/>
+								<div class="grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_110px]">
+									<div>
+										<label for={`mat-t-${mat.id}`} class="mb-1 block text-[11px] font-bold text-slate-600">
+											Materi {mi + 1} — judul
+										</label>
+										<input
+											id={`mat-t-${mat.id}`}
+											type="text"
+											bind:value={draft.title}
+											placeholder="Judul materi…"
+											class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 placeholder:font-normal placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+										/>
+									</div>
+									<div>
+										<label for={`mat-ty-${mat.id}`} class="mb-1 block text-[11px] font-bold text-slate-600">
+											Tipe
+										</label>
+										<select
+											id={`mat-ty-${mat.id}`}
+											bind:value={draft.type}
+											class="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none"
+										>
+											{#each MATERIAL_TYPES as t (t)}
+												<option value={t}>{typeLabel(t)}</option>
+											{/each}
+										</select>
+										<p class="mt-1 text-[10px] leading-snug text-slate-400">{typeHint(draft.type)}</p>
+									</div>
+									<div>
+										<label for={`mat-du-${mat.id}`} class="mb-1 block text-[11px] font-bold text-slate-600">
+											Durasi
+										</label>
+										<input
+											id={`mat-du-${mat.id}`}
+											type="text"
+											bind:value={draft.duration}
+											placeholder="10 mnt"
+											class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 focus:border-blue-500 focus:outline-none"
+										/>
+									</div>
 								</div>
+								{#if matErrors[mat.id]}
+									<p role="alert" class="flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">
+										<i class="fa-solid fa-circle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
+										{matErrors[mat.id]}
+									</p>
+								{/if}
 								<div>
-									<label for={`mat-ty-${mat.id}`} class="mb-1 block text-[11px] font-bold text-slate-600">
-										Tipe
-									</label>
-									<select
-										id={`mat-ty-${mat.id}`}
-										bind:value={editableModules[moduleIndex].subModules![subIndex].materials[mi].type}
-										onchange={touchModule}
-										class="w-full rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none"
+									<button
+										type="button"
+										onclick={() => saveMatDraft(mat.id)}
+										aria-label={`Simpan materi ${mi + 1}`}
+										class="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-[11px] font-bold text-white transition-all hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
 									>
-										{#each MATERIAL_TYPES as t (t)}
-											<option value={t}>{t}</option>
-										{/each}
-									</select>
+										<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i>
+										Simpan
+									</button>
+									<p class="mt-1.5 text-[11px] text-slate-400">
+										Perubahan baru tersimpan setelah Simpan ditekan — menutup panel membuang draf.
+									</p>
 								</div>
-								<div>
-									<label for={`mat-du-${mat.id}`} class="mb-1 block text-[11px] font-bold text-slate-600">
-										Durasi
-									</label>
-									<input
-										id={`mat-du-${mat.id}`}
-										type="text"
-										bind:value={editableModules[moduleIndex].subModules![subIndex].materials[mi].duration}
-										oninput={touchModule}
-										placeholder="10 mnt"
-										class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 focus:border-blue-500 focus:outline-none"
-									/>
-								</div>
+								<p class="rounded-xl bg-slate-50 px-3.5 py-3 text-xs font-semibold text-slate-500">
+									{typeLabel(draft.type)} · {draft.duration}
+								</p>
 							</div>
+							{/if}
 						{/if}
 					</li>
 				{/each}
@@ -506,7 +590,7 @@
 		<button
 			type="button"
 			onclick={addMaterial}
-			class="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-blue-300 bg-blue-50/60 px-4 py-3 text-xs font-bold text-blue-700 transition-all hover:border-blue-500 hover:bg-blue-50 active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-blue-600"
+			class="mt-3 flex min-h-11 w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600 transition-all hover:border-slate-900 hover:bg-white hover:text-slate-900 active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-slate-900"
 		>
 			<i class="fa-solid fa-plus" aria-hidden="true"></i>
 			Tambah Materi {materials.length + 1}
@@ -520,6 +604,88 @@
 				<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Daftar sub-modul
 			</a>
 		</div>
+
+		<!-- Menu overflow global: fixed agar tidak terpotong overflow-hidden kartu -->
+		{#if menuFor && menuMat}
+			<button
+				type="button"
+				tabindex={-1}
+				aria-hidden="true"
+				aria-label="Tutup menu"
+				onclick={closeMenu}
+				class="fixed inset-0 z-40 cursor-default bg-transparent"
+			></button>
+			<span
+				id="mat-menu-open"
+				role="menu"
+				tabindex={-1}
+				aria-label={`Opsi materi ${menuIndex + 1}`}
+				onkeydown={(e) => {
+					if (e.key === 'Escape') closeMenu();
+				}}
+				style:top={`${menuPos?.top ?? 0}px`}
+				style:right={`${menuPos?.right ?? 8}px`}
+				class="fixed z-50 w-56 overflow-hidden rounded-xl border border-slate-200 bg-white py-1 shadow-xl shadow-slate-900/10"
+			>
+				<button
+					type="button"
+					role="menuitem"
+					aria-expanded={menuOpen}
+					aria-controls={`mat-panel-${menuFor}`}
+					onclick={() => {
+						toggleMat(menuFor);
+						closeMenu();
+					}}
+					class="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none"
+				>
+					<i class="fa-solid fa-sliders w-4 shrink-0 text-center text-slate-400" aria-hidden="true"></i>
+					Edit
+					<span class="ml-auto text-[10px] font-normal text-slate-400"
+						>{menuOpen ? 'tutup · buang draf' : 'judul · tipe'}</span
+					>
+				</button>
+				<span class="mx-3 my-1 block border-t border-slate-100" aria-hidden="true"></span>
+				<button
+					type="button"
+					role="menuitem"
+					onclick={() => {
+						moveMaterial(menuFor, -1);
+						closeMenu();
+					}}
+					disabled={menuIndex === 0}
+					class="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+				>
+					<i class="fa-solid fa-arrow-up w-4 shrink-0 text-center text-slate-400" aria-hidden="true"></i>
+					Pindah ke atas
+				</button>
+				<button
+					type="button"
+					role="menuitem"
+					onclick={() => {
+						moveMaterial(menuFor, 1);
+						closeMenu();
+					}}
+					disabled={menuIndex === materials.length - 1}
+					class="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:bg-slate-50 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-40"
+				>
+					<i class="fa-solid fa-arrow-down w-4 shrink-0 text-center text-slate-400" aria-hidden="true"></i>
+					Pindah ke bawah
+				</button>
+				<span class="mx-3 my-1 block border-t border-slate-100" aria-hidden="true"></span>
+				<button
+					type="button"
+					role="menuitem"
+					onclick={() => {
+						removeMaterial(menuFor);
+						closeMenu();
+					}}
+					class="flex w-full items-center gap-2.5 px-3.5 py-2.5 text-left text-xs font-semibold text-red-600 transition-colors hover:bg-red-50 focus-visible:bg-red-50 focus-visible:outline-none"
+				>
+					<i class="fa-solid fa-trash w-4 shrink-0 text-center" aria-hidden="true"></i>
+					Hapus materi
+				</button>
+			</span>
+		{/if}
 
 		{#if pendingDelete}
 			<WarningModal

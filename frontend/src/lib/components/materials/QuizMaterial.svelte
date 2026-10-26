@@ -2,6 +2,7 @@
 	import { goto } from '$app/navigation';
 	import type { QuizQuestion } from '$lib/data/material-details';
 	import { saveQuizResult } from '$lib/stores/quiz-results.svelte';
+	import { DEFAULT_PASS_SCORE, normalizePassScore } from '$lib/stores/quiz-drafts';
 
 	let {
 		questions,
@@ -9,6 +10,7 @@
 		materialId = '',
 		courseId = '',
 		moduleId = '',
+		passScore = DEFAULT_PASS_SCORE,
 		onPass
 	}: {
 		questions: QuizQuestion[];
@@ -16,10 +18,11 @@
 		materialId?: string;
 		courseId?: string;
 		moduleId?: string;
+		passScore?: number;
 		onPass?: () => void;
 	} = $props();
 
-	const PASS_SCORE = 70;
+	const effectivePass = $derived(normalizePassScore(passScore));
 
 	let answers = $state<Array<number | null>>([]);
 	let sending = $state(false);
@@ -47,7 +50,7 @@
 		const correct = questions.filter((q, i) => answers[i] === q.answer).length;
 		const score =
 			questions.length === 0 ? 0 : Math.round((correct / questions.length) * 100);
-		const passed = score >= PASS_SCORE;
+		const passed = score >= effectivePass;
 		saveQuizResult({
 			materialId,
 			courseId,
@@ -57,6 +60,7 @@
 			correct,
 			score,
 			passed,
+			passScore: effectivePass,
 			createdAt: new Date().toISOString()
 		});
 		if (passed) onPass?.();
@@ -65,6 +69,13 @@
 </script>
 
 <div class="space-y-5">
+	<p
+		role="status"
+		class="flex items-center justify-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-bold text-amber-800"
+	>
+		<i class="fa-solid fa-award" aria-hidden="true"></i>
+		Nilai minimal {effectivePass} untuk lolos
+	</p>
 	{#if intro}
 		<p class="text-sm leading-relaxed text-slate-600 sm:text-[15px]">{intro}</p>
 	{/if}
@@ -75,7 +86,7 @@
 				<fieldset>
 					<legend class="contents">
 						<span class="mb-3 block text-sm font-bold text-slate-900">
-							<span class="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-lg bg-slate-900 text-[11px] font-extrabold text-white" aria-hidden="true">
+							<span class="mr-2 inline-flex h-6 w-6 items-center justify-center rounded-lg bg-blue-600 text-[11px] font-extrabold text-white" aria-hidden="true">
 								{qi + 1}
 							</span>
 							{q.question}
@@ -129,6 +140,6 @@
 		{/if}
 	</button>
 	<p class="text-center text-[11px] text-slate-500">
-		Nilai minimal {PASS_SCORE} untuk lolos. Hasil hanya berupa nilai — tanpa pembahasan jawaban.
+		Nilai minimal {effectivePass} untuk lolos. Hasil hanya berupa nilai — tanpa pembahasan jawaban.
 	</p>
 </div>
