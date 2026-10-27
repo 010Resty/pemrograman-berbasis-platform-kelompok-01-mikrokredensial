@@ -45,36 +45,30 @@
 			ctaLabel: 'Kelola Undangan',
 			href: '/admin/invitations',
 			ctaClass: 'bg-violet-600 hover:bg-violet-700 focus-visible:outline-violet-600 shadow-violet-600/25',
-			note: 'Pengiriman email dan penerbitan akun sungguhan membutuhkan backend; saat ini undangan, tautan, dan kata sandi hanya simulasi lokal.',
 			steps: [
 				{
 					title: 'Admin membuat undangan',
-					detail: 'Isi nama dan email calon instruktur di halaman Undangan.',
+					detail: 'Isi nama, email, dan catatan calon instruktur di halaman Undangan; status awal Menunggu.',
 					color: 'bg-violet-600 ring-violet-200'
 				},
 				{
-					title: 'Tautan demo tersimpan',
-					detail: 'Undangan + tautan /invite/[token] tercatat lokal; email tidak dikirim.',
+					title: 'Tautan dikirim via email',
+					detail: 'Tautan aktivasi /invite/[token] dikirim otomatis ke email calon instruktur.',
 					color: 'bg-indigo-600 ring-indigo-200'
 				},
 				{
-					title: 'Admin membagikan tautan',
-					detail: 'Salin tautan undangan lalu kirim manual ke calon instruktur.',
+					title: 'Instruktur membuka tautan',
+					detail: 'Calon instruktur membuka halaman aktivasi dan membuat kata sandi baru.',
 					color: 'bg-blue-600 ring-blue-200'
 				},
 				{
-					title: 'Instruktur membuka tautan',
-					detail: 'Calon instruktur membuka halaman aktivasi dan membuat kata sandi.',
+					title: 'Token ditandai terpakai',
+					detail: 'Setiap undangan hanya berlaku satu kali; status berubah menjadi Diterima.',
 					color: 'bg-cyan-600 ring-cyan-200'
 				},
 				{
-					title: 'Token ditandai terpakai',
-					detail: 'Status jadi Diterima; akun belum aktif dan kata sandi tidak disimpan.',
-					color: 'bg-teal-600 ring-teal-200'
-				},
-				{
-					title: 'Aktivasi nyata (backend)',
-					detail: 'Backend menerbitkan akun agar instruktur bisa masuk dan mengajar.',
+					title: 'Admin memantau & mengelola',
+					detail: 'Kirim ulang undangan yang Menunggu, atau batalkan undangan yang salah alamat.',
 					color: 'bg-emerald-600 ring-emerald-200'
 				}
 			]
@@ -87,36 +81,35 @@
 			ctaLabel: 'Kelola Voucher',
 			href: '/admin/vouchers',
 			ctaClass: 'bg-orange-600 hover:bg-orange-700 focus-visible:outline-orange-600 shadow-orange-600/25',
-			note: 'Kode dan riwayat masih tersimpan lokal (demo); validasi hak, batas anti-race, dan pembukaan akses membutuhkan backend.',
 			steps: [
 				{
 					title: 'Admin membuat voucher',
-					detail: 'Pilih Personal/Umum, kursus tujuan, batas pakai, dan kedaluwarsa.',
+					detail: 'Pilih Personal/Umum, kursus tujuan, batas pakai, dan kedaluwarsa; kode ARISTO-… terbit dengan status Aktif.',
 					color: 'bg-amber-600 ring-amber-200'
 				},
 				{
-					title: 'Kode tersimpan lokal',
-					detail: 'Kode ARISTO-… tercatat di browser dan siap dibagikan.',
+					title: 'Admin membagikan kode',
+					detail: 'Salin kode voucher dan sampaikan ke peserta yang berhak.',
 					color: 'bg-orange-500 ring-orange-200'
 				},
 				{
-					title: 'Admin membagikan kode',
-					detail: 'Sampaikan kode voucher ke peserta secara manual.',
+					title: 'Peserta menukarkan kode',
+					detail: 'Peserta memasukkan kode di halaman Kursusku → formulir Tukar.',
 					color: 'bg-orange-600 ring-orange-200'
 				},
 				{
-					title: 'Peserta menukarkan kode',
-					detail: 'Peserta memasukkan kode di halaman Kursusku → Tukar.',
+					title: 'Sistem memvalidasi kode',
+					detail: 'Dicek kecocokan kode, riwayat tukar, sisa kuota, dan masa berlaku.',
 					color: 'bg-rose-500 ring-rose-200'
 				},
 				{
-					title: 'Validasi lokal',
-					detail: 'Dicek format dan riwayat tukar lokal; akses kursus belum dibuka.',
+					title: 'Akses kursus terbuka',
+					detail: 'Peserta mendapat kursus tujuan; setiap pemakaian tercatat di riwayat.',
 					color: 'bg-rose-600 ring-rose-200'
 				},
 				{
-					title: 'Akses nyata (backend)',
-					detail: 'Backend memvalidasi lalu membuka kursus untuk peserta.',
+					title: 'Admin memantau & membatalkan',
+					detail: 'Lihat riwayat penukaran tiap voucher dan batalkan bila diperlukan.',
 					color: 'bg-emerald-600 ring-emerald-200'
 				}
 			]

@@ -167,8 +167,13 @@ export const listCourses = async (
   pagination?: { limit?: number; page?: number; sort?: "newest" | "oldest" }
 ) => {
   const conditions = [];
-  if (onlyPublished || !filter.status) {
-    conditions.push(eq(courses.status, "published"));
+  if (onlyPublished) {
+    // Katalog publik: published + archived (arsip read-only), draft tidak bocor.
+    if (filter.status === "published" || filter.status === "archived") {
+      conditions.push(eq(courses.status, filter.status));
+    } else {
+      conditions.push(inArray(courses.status, ["published", "archived"]));
+    }
   } else if (filter.status) {
     conditions.push(eq(courses.status, filter.status));
   }

@@ -15,6 +15,7 @@ import { page } from '$app/state';
 		saveCurriculumDraft,
 		withSyncedFlat
 	} from '$lib/stores/curriculum';
+	import { invalidateCourseTree } from '$lib/stores/instructor-courses.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 
 	const courseId = $derived(Number(page.params.courseId));
@@ -176,6 +177,7 @@ import { page } from '$app/state';
 		if (serverMode && isServerId(target.subId)) {
 			try {
 				await deleteSubModule(Number(target.subId));
+				invalidateCourseTree(courseId);
 			} catch (e) {
 				markSaved(e instanceof Error ? e.message : 'Gagal menghapus sub-modul di server.');
 				return;
@@ -217,6 +219,7 @@ import { page } from '$app/state';
 					position: pos
 				});
 				id = String(created.id);
+				invalidateCourseTree(courseId);
 			} catch (e) {
 				markSaved(e instanceof Error ? e.message : 'Gagal menambah sub-modul.');
 				return;
@@ -272,6 +275,7 @@ import { page } from '$app/state';
 					isServerId(s.id) ? updateSubModule(Number(s.id), { position: i }) : Promise.resolve()
 				)
 			);
+			invalidateCourseTree(courseId);
 		} catch (e) {
 			markSaved(e instanceof Error ? e.message : 'Gagal menyimpan urutan sub-modul.');
 		}
@@ -297,6 +301,7 @@ import { page } from '$app/state';
 					position: newPos
 				});
 				newId = String(created.id);
+				invalidateCourseTree(courseId);
 			} catch (e) {
 				markSaved(e instanceof Error ? e.message : 'Gagal menduplikasi sub-modul.');
 				return;
@@ -332,6 +337,7 @@ import { page } from '$app/state';
 		if (serverMode && isServerId(subId)) {
 			try {
 				await updateSubModule(Number(subId), { title: d.title, description: d.description });
+				invalidateCourseTree(courseId);
 			} catch (e) {
 				subErrors[subId] = e instanceof Error ? e.message : 'Gagal menyimpan ke server.';
 				return;

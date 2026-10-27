@@ -109,6 +109,10 @@ export const GET: RequestHandler = async ({ url, fetch }) => {
 		const data = await upstream.json();
 		return json(data, { status: upstream.status });
 	} catch {
-		return json({ status: true, message: 'Riwayat kosong (backend offline).', data: [] });
+		// Jujur: backend tidak terjangkau bukan berarti riwayat kosong.
+		return json(
+			{ status: false, message: 'Backend tidak terjangkau. Riwayat tidak dapat dimuat.', data: null },
+			{ status: 502 }
+		);
 	}
 };

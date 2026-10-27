@@ -1,5 +1,5 @@
 import { apiRequest } from './backend';
-import { getAccessToken } from '$lib/stores/auth.svelte';
+import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svelte';
 
 export type UploadKind = 'image' | 'audio' | 'pdf' | 'cover' | 'assignment';
 
@@ -41,6 +41,9 @@ export async function uploadFile(
 		method: 'POST',
 		body: payload,
 		token: getAccessToken()
+	}).catch(async (e: unknown) => {
+		await handlePrivateRequestError(e);
+		throw e;
 	});
 	return (res as { file?: UploadedFile }).file ?? (res as UploadedFile);
 }

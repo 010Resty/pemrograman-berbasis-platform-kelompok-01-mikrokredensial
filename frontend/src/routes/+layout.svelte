@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { aristotelesLogo as favicon } from '$lib/assets/logo';
+	import ToastViewport from '$lib/components/ToastViewport.svelte';
 
 	let { children } = $props();
 </script>
@@ -9,13 +10,10 @@
 	<link rel="preconnect" href="https://fonts.googleapis.com" />
 	<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
 	<link
-		href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
-		rel="stylesheet"
-	/>
-	<link
 		rel="stylesheet"
 		href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css"
 	/>
 </svelte:head>
 
 {@render children()}
+<ToastViewport />

@@ -29,10 +29,36 @@ import {
   canReadCourseTree,
 } from "./curricula.service";
 import { canManageCourse } from "./course.service";
+import { hasCourseAccess } from "../enrollments/enrollment.service";
 
 const toFieldErrors = (
   issues: Array<{ path: Array<string | number>; message: string }>
 ) => issues.map((i) => ({ field: i.path.length > 0 ? String(i.path[0]) : "body", message: i.message }));
+
+/** Struktur materi tanpa isi untuk pengintip katalog tanpa hak akses. */
+const stripMaterialContent = <T extends { content?: unknown }>(mat: T): T => ({
+  ...mat,
+  content: null,
+});
+
+/** Hak akses belajar peminta untuk satu kursus (admin/pengelola/enrollment aktif). */
+const checkLearningAccess = async (
+  req: AuthenticatedRequest,
+  courseId: number
+): Promise<boolean> => {
+  const userId = uid(req);
+  if (userId === null) return false;
+  return hasCourseAccess(userId, req.user?.role ?? "", courseId);
+};
+
+/** 403 terstandar untuk peminta terautentikasi tanpa hak akses kursus. */
+const denyNoAccess = (res: Response) =>
+  res.status(403).json({
+    status: "error",
+    message: "Anda tidak memiliki akses ke kursus ini",
+    code: "NO_ACCESS",
+    data: null,
+  });
 
 const uid = (req: AuthenticatedRequest): number | null => {
   const id = Number(req.user?.id);
@@ -244,7 +270,13 @@ export const listMaterialsHandler = async (req: AuthenticatedRequest, res: Respo
     if (!Number.isInteger(sid) || sid <= 0) return fail(res, "not-found");
     const courseId = await getCourseOfSubModule(sid);
     if (!(await guardRead(req, res, courseId))) return;
-    res.status(200).json({ status: "success", message: "Daftar materi", data: await listMaterialsBySub(sid) });
+    const rows = await listMaterialsBySub(sid);
+    // Katalog boleh melihat struktur; isi hanya untuk pemegang akses.
+    const data =
+      courseId !== null && (await checkLearningAccess(req, courseId))
+        ? rows
+        : rows.map(stripMaterialContent);
+    res.status(200).json({ status: "success", message: "Daftar materi", data });
   } catch (e) { next(e); }
 };
 
@@ -254,7 +286,12 @@ export const listMaterialsByModuleHandler = async (req: AuthenticatedRequest, re
     if (!Number.isInteger(mid) || mid <= 0) return fail(res, "not-found");
     const courseId = await getCourseOfModule(mid);
     if (!(await guardRead(req, res, courseId))) return;
-    res.status(200).json({ status: "success", message: "Daftar materi", data: await listMaterialsByModule(mid) });
+    const rows = await listMaterialsByModule(mid);
+    const data =
+      courseId !== null && (await checkLearningAccess(req, courseId))
+        ? rows
+        : rows.map(stripMaterialContent);
+    res.status(200).json({ status: "success", message: "Daftar materi", data });
   } catch (e) { next(e); }
 };
 
@@ -266,6 +303,15 @@ export const getMaterialHandler = async (req: AuthenticatedRequest, res: Respons
     if (!(await guardRead(req, res, courseId))) return;
     const mat = await getMaterial(matId);
     if (!mat) return fail(res, "not-found");
+    // Isi materi adalah konten belajar: butuh hak akses (401 anonim, 403 tanpa akses).
+    if (courseId === null || !(await checkLearningAccess(req, courseId))) {
+      if (uid(req) === null) {
+        res.status(401).json({ status: "error", message: "Token autentikasi diperlukan", data: null });
+        return;
+      }
+      denyNoAccess(res);
+      return;
+    }
     res.status(200).json({ status: "success", message: "Detail materi", data: mat });
   } catch (e) { next(e); }
 };

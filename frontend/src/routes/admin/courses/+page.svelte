@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Pagination from '$lib/components/Pagination.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
+	import { allInstructors } from '$lib/stores/instructors';
 
 	type Status = 'all' | 'Published' | 'Draft' | 'Archived';
 
@@ -94,6 +95,13 @@
 
 	let nextId = $derived(courses.reduce((m, c) => Math.max(m, c.id), 0) + 1);
 
+	/**
+	 * Daftar nama instruktur dari registri admin (sumber yang sama dengan
+	 * halaman Instruktur). Bukan hasil fetch database — belum ada endpoint
+	 * backend daftar instruktur yang disepakati (lihat docs/05).
+	 */
+	const instructorOptions = $derived(allInstructors());
+
 	function closeAdd() {
 		showAdd = false;
 		formTitle = '';
@@ -129,6 +137,10 @@
 		formError = '';
 		if (!formTitle.trim()) {
 			formError = 'Judul kursus wajib diisi.';
+			return;
+		}
+		if (!formInstructor) {
+			formError = 'Pilih instruktur kursus.';
 			return;
 		}
 		isSubmitting = true;
@@ -349,7 +361,15 @@
 						</div>
 						<div>
 							<label for="course-ins" class="mb-1 block text-xs font-bold text-slate-700">Instruktur</label>
-							<input id="course-ins" type="text" bind:value={formInstructor} placeholder="cth. Kevin Perry" class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 focus:outline-none" />
+							<select id="course-ins" bind:value={formInstructor} class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 focus:border-emerald-500 focus:ring-4 focus:ring-emerald-500/10 focus:outline-none">
+								<option value="">Pilih instruktur…</option>
+								<option value="Tim Aristoteles">Tim Aristoteles</option>
+								{#each instructorOptions as ins (ins.id)}
+									<option value={ins.name}>
+										{ins.name} · {ins.expertise}{ins.status === 'Nonaktif' ? ' (Nonaktif)' : ''}
+									</option>
+								{/each}
+							</select>
 						</div>
 					</div>
 				</div>

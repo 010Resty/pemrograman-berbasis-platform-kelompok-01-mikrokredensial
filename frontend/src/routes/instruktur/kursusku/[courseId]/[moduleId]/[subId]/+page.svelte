@@ -13,6 +13,7 @@
 		saveCurriculumDraft,
 		withSyncedFlat
 	} from '$lib/stores/curriculum';
+	import { invalidateCourseTree } from '$lib/stores/instructor-courses.svelte';
 	import {
 		resolveServerCourse,
 		isServerKelola,
@@ -195,6 +196,7 @@
 		if (serverMode && isServerId(id)) {
 			try {
 				await updateMaterial(Number(id), { title: d.title, type: d.type, duration: d.duration });
+				invalidateCourseTree(courseId);
 			} catch (e) {
 				matErrors[id] = e instanceof Error ? e.message : 'Gagal menyimpan materi ke server.';
 				return;
@@ -248,6 +250,7 @@
 		if (serverMode && isServerId(matId)) {
 			try {
 				await deleteMaterial(Number(matId));
+				invalidateCourseTree(courseId);
 			} catch (e) {
 				markSaved(e instanceof Error ? e.message : 'Gagal menghapus materi di server.');
 				return;
@@ -292,6 +295,7 @@
 					position: target.materials.length
 				});
 				id = String(created.id);
+				invalidateCourseTree(courseId);
 			} catch (e) {
 				markSaved(e instanceof Error ? e.message : 'Gagal menambah materi ke server.');
 				return;
@@ -347,6 +351,7 @@
 					isServerId(t.id) ? updateMaterial(Number(t.id), { position: i }) : Promise.resolve()
 				)
 			);
+			invalidateCourseTree(courseId);
 		} catch (e) {
 			markSaved(e instanceof Error ? e.message : 'Gagal menyimpan urutan materi.');
 		}

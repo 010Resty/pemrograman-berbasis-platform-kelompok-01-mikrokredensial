@@ -3,6 +3,7 @@
 	import { formatIDR } from '$lib/data/payment';
 	import MonthPicker from '$lib/components/MonthPicker.svelte';
 	import { createCourse } from '$lib/api/courses';
+	import { invalidateMyCourses } from '$lib/stores/instructor-courses.svelte';
 	import { uploadFile } from '$lib/api/uploads';
 	import { BackendRequestError } from '$lib/api/backend';
 
@@ -191,6 +192,8 @@
 			});
 			createdId = course.id;
 			submitted = true;
+			// Sukses terkonfirmasi server: daftar kursus wajib memuat kursus baru.
+			invalidateMyCourses();
 			window.scrollTo({ top: 0, behavior: 'smooth' });
 		} catch (err) {
 			errors['server'] =

@@ -141,13 +141,21 @@ before(async () => {
     { courseId: pubCourse, userId: teacherId },
     { courseId: draftCourse, userId: teacherId },
   ]);
-  // Enrollment aktif siswa1 di kursus publik (mendokumentasikan: tidak jadi gate).
-  await db.insert(schema.enrollments).values({
-    userId: studentIds[0],
-    courseId: pubCourse,
-    source: "free",
-    status: "active",
-  });
+  // Enrollment aktif siswa1 dan siswa2 di kursus publik (syarat akses Tahap 1).
+  await db.insert(schema.enrollments).values([
+    {
+      userId: studentIds[0],
+      courseId: pubCourse,
+      source: "free",
+      status: "active",
+    },
+    {
+      userId: studentIds[1],
+      courseId: pubCourse,
+      source: "free",
+      status: "active",
+    },
+  ]);
   const [mH] = await db.insert(schema.modules).values({
     courseId: pubCourse,
     title: "Modul Publik Uji",

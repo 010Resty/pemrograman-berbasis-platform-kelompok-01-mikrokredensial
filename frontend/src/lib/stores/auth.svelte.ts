@@ -1,4 +1,5 @@
 import { browser } from '$app/environment';
+import { goto } from '$app/navigation';
 import {
 	BackendRequestError,
 	loginRequest,
@@ -6,14 +7,17 @@ import {
 	registerRequest,
 	type BackendUser
 } from '$lib/api/backend';
+import {
+	classifyRequestError,
+	createUnauthorizedCoordinator,
+	type RequestFailureKind
+} from '$lib/api/request-policy';
 
 /** Peran portal: student → /user, teacher → /instruktur, admin → /admin. */
 export type Role = 'student' | 'teacher' | 'admin';
 
-export interface PortalAccount {
-	email: string;
-	password: string;
-	name: string;
+/** Info portal statis (tanpa kredensial). Aman untuk deploy. */
+export interface PortalInfo {
 	role: Role;
 	home: string;
 	badge: string;
@@ -42,15 +46,11 @@ export const ROLE_HOME: Record<Role, string> = {
 };
 
 /**
- * Akun demo DEV-ONLY (tanpa backend).
- * Dipakai hanya bila `isDemoAuthEnabled()` true (import.meta.env.DEV).
- * JANGAN tampilkan/pakai di production — lihat login/+page.svelte.
+ * Info portal untuk UI login (tanpa email/password).
+ * Login nyata selalu via backend; tidak ada akun demo di bundle deploy.
  */
-export const DEMO_ACCOUNTS: PortalAccount[] = [
+export const PORTALS: PortalInfo[] = [
 	{
-		email: 'farisi@gmail.com',
-		password: '1234567',
-		name: 'Ahmad Farizi',
 		role: 'student',
 		home: '/user',
 		badge: 'Mahasiswa UNIRA',
@@ -58,9 +58,6 @@ export const DEMO_ACCOUNTS: PortalAccount[] = [
 		description: 'Akses kursus, materi, kuis, dan sertifikat.'
 	},
 	{
-		email: 'kevin@aristoteles.ac.id',
-		password: '1234567',
-		name: 'Kevin Perry',
 		role: 'teacher',
 		home: '/instruktur',
 		badge: 'Instruktur',
@@ -68,9 +65,6 @@ export const DEMO_ACCOUNTS: PortalAccount[] = [
 		description: 'Kelola kursus, nilai tugas, pantau pendapatan.'
 	},
 	{
-		email: 'admin@aristoteles.ac.id',
-		password: '1234567',
-		name: 'Admin Aristoteles',
 		role: 'admin',
 		home: '/admin',
 		badge: 'Administrator',
@@ -82,18 +76,31 @@ export const DEMO_ACCOUNTS: PortalAccount[] = [
 export const SESSION_KEY = 'aristoteles-session';
 const TOKEN_KEY = 'aristoteles-access-token';
 
-/** Mode demo eksplisit: hanya di `vite dev` / build DEV. Production (preview/prod) selalu false. */
-export function isDemoAuthEnabled(): boolean {
-	try {
-		return import.meta.env.DEV === true;
-	} catch {
-		return false;
-	}
-}
-
 let currentUser = $state<Session | null>(null);
 let accessToken: string | null = null;
 let initialized = false;
+
+/**
+ * Cache verifikasi sesi terpusat (optimasi request):
+ * - `verifiedSession/verifiedToken`: hasil /me terakhir yang valid.
+ * - `verifyInFlight`: single-flight — pemanggilan bersamaan berbagi satu Promise.
+ * Navigasi antarrute memakai cache ini tanpa request ulang; verifikasi ulang
+ * hanya bila `force`, token berubah, login baru, atau sesi ditolak.
+ */
+let verifiedSession: Session | null = null;
+let verifiedToken: string | null = null;
+let verifyInFlight: Promise<VerifyResult> | null = null;
+
+/**
+ * Generasi sesi: naik setiap login/register sukses dan setiap logout.
+ * Cache privat mencatat generasi saat request dikirim; respons yang tiba
+ * setelah generasi berganti (logout/ganti akun) WAJIB dibuang agar data
+ * akun lama tidak mengisi cache akun baru.
+ */
+let sessionGeneration = 0;
+
+/** Pembersih cache privat terdaftar (store domain mendaftarkan `clear`-nya). */
+const privateCacheClearers = new Set<() => void>();
 
 export function getCurrentUser(): Session | null {
 	return currentUser;
@@ -101,15 +108,20 @@ export function getCurrentUser(): Session | null {
 
 /** Token akses backend (memori + storage). TIDAK PERNAH disimpan di kode/dokumen. */
 export function getAccessToken(): string | null {
-	if (accessToken) return accessToken;
-	if (!browser) return null;
-	try {
-		return (
-			sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY)
-		);
-	} catch {
-		return null;
-	}
+	const raw =
+		accessToken ??
+		(browser
+			? (() => {
+					try {
+						return sessionStorage.getItem(TOKEN_KEY) || localStorage.getItem(TOKEN_KEY);
+					} catch {
+						return null;
+					}
+				})()
+			: null);
+	// Token era demo tidak valid untuk backend — tolak agar guard logout.
+	if (raw && raw.startsWith('demo-token-')) return null;
+	return raw;
 }
 
 function isValidRole(value: unknown): value is Role {
@@ -149,8 +161,10 @@ function persistAuth(session: Session, token: string, rememberMe: boolean): void
 }
 
 /**
- * Baca sesi tersimpan. Sesi lama TANPA `id` (era demo/localStorage) dianggap
- * tidak valid dan dibersihkan — user wajib login ulang via backend.
+ * Baca sesi tersimpan. Sesi lama era demo (id `demo-*`, token `demo-token-*`,
+ * atau tanpa `id`) dianggap tidak valid dan dibersihkan — user wajib login
+ * ulang via backend. Guard portal wajib memakai `verifySession()` (/me),
+ * bukan hanya fungsi ini.
  */
 export function loadSession(): Session | null {
 	if (currentUser) return currentUser;
@@ -166,13 +180,14 @@ export function loadSession(): Session | null {
 			if (
 				(typeof parsedId === 'string' || typeof parsedId === 'number') &&
 				String(parsedId).length > 0 &&
+				!String(parsedId).startsWith('demo-') &&
 				typeof parsed?.email === 'string' &&
 				isValidRole(parsed?.role)
 			) {
 				currentUser = { ...(parsed as Session), id: String(parsedId) };
 				return currentUser;
 			}
-			// Sesi lama tanpa id -> bersihkan agar tidak dianggap login.
+			// Sesi lama/demo tanpa id valid -> bersihkan agar tidak dianggap login.
 			storage.removeItem(SESSION_KEY);
 		} catch {
 			// abaikan data korup, lanjut ke penyimpanan berikutnya
@@ -210,6 +225,11 @@ export async function loginWithBackend(
 		const session = toSession(payload.user);
 		currentUser = session;
 		persistAuth(session, payload.accessToken, rememberMe);
+		// Seed cache verifikasi: respons login sudah tervalidasi server,
+		// sehingga guard portal setelah login tidak perlu /me tambahan.
+		verifiedSession = session;
+		verifiedToken = payload.accessToken;
+		sessionGeneration += 1;
 		return { ok: true, user: session };
 	} catch (err) {
 		return toUserMessage(err, 'Login gagal. Coba lagi nanti.');
@@ -231,6 +251,10 @@ export async function registerWithBackend(
 		const session = toSession(payload.user);
 		currentUser = session;
 		persistAuth(session, payload.accessToken, rememberMe);
+		// Seed cache verifikasi seperti login (respons register tervalidasi server).
+		verifiedSession = session;
+		verifiedToken = payload.accessToken;
+		sessionGeneration += 1;
 		return { ok: true, user: session };
 	} catch (err) {
 		return toUserMessage(err, 'Registrasi gagal. Coba lagi nanti.');
@@ -252,22 +276,47 @@ export type VerifyResult = { ok: true; session: Session } | { ok: false; reason:
 /**
  * Verifikasi sesi tersimpan ke server untuk guard portal.
  * - Sesi valid -> session (peran dari SERVER, bukan tebakan browser).
- * - Token salah/kedaluwarsa -> logout + 'unauthenticated'.
+ * - Token salah/kedaluwarsa/nonaktif -> logout + 'unauthenticated'.
  * - Backend tidak terjangkau -> 'backend-down' TANPA logout (sesi dipertahankan,
  *   UI wajib menampilkan kondisi ini eksplisit, bukan sukses palsu).
+ *
+ * Optimasi: hasil terverifikasi dipakai ulang tanpa request bila token sama.
+ * Pemanggilan bersamaan berbagi satu Promise (single-flight). Tidak ada
+ * polling/retry otomatis — retry hanya via `refreshSession()` eksplisit.
  */
-export async function verifySession(): Promise<VerifyResult> {
+export async function verifySession(options: { force?: boolean } = {}): Promise<VerifyResult> {
 	const stored = loadSession();
-	if (!stored) return { ok: false, reason: 'unauthenticated' };
+	if (!stored) {
+		clearVerifiedCache();
+		return { ok: false, reason: 'unauthenticated' };
+	}
 	const token = getAccessToken();
 	if (!token) {
 		logout();
 		return { ok: false, reason: 'unauthenticated' };
 	}
+	// Cache hit: token sama dan sudah terverifikasi -> tanpa request.
+	if (!options.force && verifiedSession && verifiedToken === token) {
+		currentUser = verifiedSession;
+		return { ok: true, session: verifiedSession };
+	}
+	// Single-flight: berbagi request yang sedang berjalan.
+	if (verifyInFlight) return verifyInFlight;
+	verifyInFlight = doVerify(token);
+	try {
+		return await verifyInFlight;
+	} finally {
+		verifyInFlight = null;
+	}
+}
+
+async function doVerify(token: string): Promise<VerifyResult> {
 	try {
 		const user = await meRequest(token);
 		const session = toSession(user);
 		currentUser = session;
+		verifiedSession = session;
+		verifiedToken = token;
 		if (browser) {
 			try {
 				if (localStorage.getItem(TOKEN_KEY)) {
@@ -289,66 +338,12 @@ export async function verifySession(): Promise<VerifyResult> {
 	}
 }
 
-/** Login DEMO dev-only. Jangan dipakai di production; tidak menyentuh backend. */
-export function login(
-	email: string,
-	password: string,
-	rememberMe: boolean
-): { ok: true; user: Session } | { ok: false; error: string } {
-	const account = DEMO_ACCOUNTS.find(
-		(a) => a.email.toLowerCase() === email.trim().toLowerCase()
-	);
-	if (!account || account.password !== password) {
-		return { ok: false, error: 'Email atau kata sandi salah. Gunakan akun demo sesuai portal.' };
-	}
-	const user: Session = {
-		id: `demo-${account.role}`,
-		email: account.email,
-		name: account.name,
-		role: account.role,
-		loginAt: new Date().toISOString()
-	};
-	currentUser = user;
-	persistAuth(user, `demo-token-${account.role}`, rememberMe);
-	return { ok: true, user };
-}
-
-/** Registrasi DEMO dev-only (student/teacher). Tidak membuat akun backend. */
-export function register(
-	name: string,
-	email: string,
-	role: Exclude<Role, 'admin'>,
-	rememberMe: boolean
-): Session {
-	const user: Session = {
-		id: `demo-${role}-${Date.now().toString(36)}`,
-		email: email.trim(),
-		name: name.trim(),
-		role,
-		loginAt: new Date().toISOString()
-	};
-	currentUser = user;
-	persistAuth(user, `demo-token-${role}`, rememberMe);
-	return user;
-}
-
-/** Masuk via SSO UNIRA (simulasi lokal, BUKAN auth backend). */
-export function loginWithUnita(nim: string, rememberMe = true): Session {
-	const user: Session = {
-		id: `demo-unira-${nim.trim()}`,
-		email: `${nim.trim()}@student.ac.id`,
-		name: `Mahasiswa ${nim.trim()}`,
-		role: 'student',
-		loginAt: new Date().toISOString()
-	};
-	currentUser = user;
-	persistAuth(user, 'demo-token-unira', rememberMe);
-	return user;
-}
-
 export function logout(): void {
 	currentUser = null;
 	accessToken = null;
+	clearVerifiedCache();
+	sessionGeneration += 1;
+	clearAllPrivateCaches();
 	if (!browser) return;
 	try {
 		localStorage.removeItem(SESSION_KEY);
@@ -358,6 +353,96 @@ export function logout(): void {
 	} catch {
 		// abaikan
 	}
+}
+
+/** Tandai cache verifikasi basi — verifikasi berikutnya wajib request baru. */
+export function invalidateSession(): void {
+	clearVerifiedCache();
+}
+
+/** Verifikasi ulang eksplisit ke server (bypass cache, tetap single-flight). */
+export function refreshSession(): Promise<VerifyResult> {
+	return verifySession({ force: true });
+}
+
+/** True bila sesi sudah terverifikasi untuk token aktif (tanpa request). */
+export function isSessionVerified(): boolean {
+	const token = getAccessToken();
+	return token !== null && verifiedSession !== null && verifiedToken === token;
+}
+
+function clearVerifiedCache(): void {
+	verifiedSession = null;
+	verifiedToken = null;
+}
+
+/** Generasi sesi saat ini — naik tiap login/register/logout. */
+export function currentSessionGeneration(): number {
+	return sessionGeneration;
+}
+
+/**
+ * Daftarkan pembersih cache privat milik store domain (dipanggil sekali
+ * saat modul store dimuat). Dieksekusi saat logout dan saat sesi 401.
+ */
+export function registerPrivateCacheClearer(clear: () => void): () => void {
+	privateCacheClearers.add(clear);
+	return () => {
+		privateCacheClearers.delete(clear);
+	};
+}
+
+/** Hapus seluruh cache privat terdaftar. Tidak pernah melempar. */
+export function clearAllPrivateCaches(): void {
+	for (const clear of privateCacheClearers) {
+		try {
+			clear();
+		} catch {
+			// satu store gagal dibersihkan tidak boleh menggagalkan yang lain
+		}
+	}
+}
+
+const unauthorizedCoordinator = createUnauthorizedCoordinator();
+
+function isAuthPage(): boolean {
+	if (!browser) return true;
+	try {
+		const p = window.location.pathname;
+		return p === '/login' || p === '/register';
+	} catch {
+		return true;
+	}
+}
+
+/**
+ * Penanganan terpusat error request privat (dipakai wrapper `req()` domain):
+ * - 401: sesi tidak valid/kedaluwarsa → invalidasi sesi + bersihkan cache
+ *   privat + logout, lalu arahkan ke /login. Single-flight: N request 401
+ *   bersamaan → side-effect 1×, redirect 1× per generasi. Tanpa retry.
+ * - 403: izin ditolak — sesi tetap valid, TANPA logout/redirect/clear.
+ * - network (0)/5xx: token dipertahankan, TANPA logout; caller menampilkan retry.
+ * Selalu kembalikan klasifikasi; caller wajib melempar error asli.
+ */
+export async function handlePrivateRequestError(err: unknown): Promise<RequestFailureKind> {
+	const kind = classifyRequestError(err);
+	if (kind !== 'unauthorized') return kind;
+	const generation = sessionGeneration;
+	await unauthorizedCoordinator.handle(
+		err,
+		generation,
+		{
+			runSideEffects: () => {
+				clearAllPrivateCaches();
+				logout();
+			},
+			requestRedirect: () => {
+				if (!browser || isAuthPage()) return;
+				void goto('/login');
+			}
+		}
+	);
+	return kind;
 }
 
 export function homeFor(role: Role): string {

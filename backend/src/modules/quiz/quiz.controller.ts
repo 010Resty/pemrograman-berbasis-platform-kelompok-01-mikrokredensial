@@ -1,10 +1,10 @@
 import { Response, NextFunction } from "express";
 import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import {
-  canReadCourseTree,
   getCourseOfMaterial,
   getMaterial,
 } from "../courses/curricula.service";
+import { resolveLearningGuard } from "../enrollments/enrollment.service";
 import { canManageCourse } from "../courses/course.service";
 import {
   QuizInputError,
@@ -33,7 +33,8 @@ const toFieldErrors = (
   issues: Array<{ path: Array<string | number>; message: string }>
 ) => issues.map((i) => ({ field: i.path.length > 0 ? String(i.path[0]) : "body", message: i.message }));
 
-/** Guard baca kuis: materi ada + pohon kursus boleh dibaca (anti-enumerasi). */
+/** Guard akses kuis peserta: materi ada + pohon boleh dibaca + hak akses belajar.
+ * Draft asing disamarkan 404; tanpa akses belajar ditolak 403 (NO_ACCESS). */
 async function guardRead(
   req: AuthenticatedRequest,
   res: Response,
@@ -48,19 +49,22 @@ async function guardRead(
     });
     return null;
   }
-  const mat = await getMaterial(materialId);
-  if (!mat) {
+  const guard = await resolveLearningGuard(
+    userId,
+    req.user?.role ?? "",
+    materialId
+  );
+  if (guard.status === "not-found") {
     notFound(res);
     return null;
   }
-  const courseId = await getCourseOfMaterial(materialId);
-  if (courseId === null) {
-    notFound(res);
-    return null;
-  }
-  const verdict = await canReadCourseTree(userId, req.user?.role ?? "", courseId);
-  if (verdict !== "ok") {
-    notFound(res);
+  if (guard.status === "no-access") {
+    res.status(403).json({
+      status: "error",
+      message: "Anda tidak memiliki akses ke kursus ini",
+      code: "NO_ACCESS",
+      data: null,
+    });
     return null;
   }
   return userId;

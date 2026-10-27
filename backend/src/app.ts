@@ -3,6 +3,12 @@ import courseRoutes, { instructorRouter } from "./modules/courses/course.routes"
 import curriculaRoutes from "./modules/courses/curricula.routes";
 import progressRoutes from "./modules/progress/progress.routes";
 import quizRoutes from "./modules/quiz/quiz.routes";
+import enrollmentRoutes from "./modules/enrollments/enrollment.routes";
+import submissionRoutes from "./modules/submissions/submission.routes";
+import certificateRoutes from "./modules/certificates/certificate.routes";
+import voucherRoutes from "./modules/vouchers/voucher.routes";
+import adminRoutes from "./modules/admin/admin.routes";
+import invitationRoutes from "./modules/invitations/invitation.routes";
 import { uploadsRouter, filesRouter } from "./modules/uploads/upload.routes";
 import express, { Application, Request, Response, NextFunction } from "express";
 import cors from "cors";
@@ -55,6 +61,18 @@ app.use("/api/v1", curriculaRoutes);
 app.use("/api/v1", progressRoutes);
 // Quiz bank + attempts (server-side grading; client scores never trusted)
 app.use("/api/v1", quizRoutes);
+// Enrollment & akses kursus (pendaftaran mandiri gratis, grant/revoke admin)
+app.use("/api/v1", enrollmentRoutes);
+// Pengumpulan & penilaian tugas (riwayat append-only, lulus ditentukan server)
+app.use("/api/v1", submissionRoutes);
+// Sertifikat per modul (kelayakan, penerbitan idempoten, verifikasi, cabut)
+app.use("/api/v1", certificateRoutes);
+// Voucher akses kursus (buat/kelola admin, tukar atomik peserta)
+app.use("/api/v1", voucherRoutes);
+// Manajemen pengguna & penugasan instruktur (admin)
+app.use("/api/v1", adminRoutes);
+// Undangan instruktur (kelola admin, aktivasi publik)
+app.use("/api/v1", invitationRoutes);
 
 // Upload & serve berkas (gambar/audio/PDF/cover/tugas)
 app.use("/api/v1/uploads", uploadsRouter);
@@ -78,7 +96,7 @@ app.use(
     }
 
     if (err instanceof AuthValidationError) {
-      res.status(400).json({
+      res.status(err.httpStatus || 400).json({
         status: "error",
         message: err.message,
         errors: err.errors,

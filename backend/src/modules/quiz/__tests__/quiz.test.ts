@@ -32,6 +32,7 @@ interface Envelope<T> {
 let base = "";
 let server: Server | null = null;
 let tokens: Record<string, string> = {};
+let studentIds: number[] = [];
 let quizMat = 0;
 let quizMat2 = 0;
 let nonQuizMat = 0;
@@ -113,12 +114,13 @@ before(async () => {
   });
   const teacherId = Number((tH as unknown as { insertId: number }).insertId);
   for (const [i, email] of ["murid1@uji.io", "murid2@uji.io"].entries()) {
-    await db.insert(schema.users).values({
+    const [h] = await db.insert(schema.users).values({
       name: `Murid ${i + 1}`,
       email,
       passwordHash: hash,
       role: "student",
     });
+    studentIds.push(Number((h as unknown as { insertId: number }).insertId));
   }
   const [cH] = await db.insert(schema.courses).values({
     title: "Kursus Kuis Uji Cukup Panjang",
@@ -168,6 +170,15 @@ before(async () => {
     position: 0,
   });
   const draftMod = Number((dmH as unknown as { insertId: number }).insertId);
+  // Enrollment aktif kedua murid di kursus publik (syarat akses Tahap 1).
+  await db.insert(schema.enrollments).values(
+    studentIds.map((userId) => ({
+      userId,
+      courseId,
+      source: "free",
+      status: "active" as const,
+    }))
+  );
   const mk = async (moduleId: number, title: string, type: string) => {
     const [h] = await db.insert(schema.materials).values({
       moduleId,
@@ -362,7 +373,7 @@ describe("kirim percobaan (server grading)", () => {
     }
   });
 
-  it("400 kuis tanpa soal & materi non-kuis; tanpa gate enrollment", async () => {
+  it("400 kuis tanpa soal & materi non-kuis; akses butuh enrollment", async () => {
     assert.equal(
       (await api("POST", `/api/v1/materials/${emptyQuizMat}/quiz-attempts`, tokens.s1, { answers: [] })).http,
       400
@@ -375,7 +386,7 @@ describe("kirim percobaan (server grading)", () => {
       ).http,
       400
     );
-    // s2 tanpa enrollment tetap bisa mengerjakan (keputusan didokumentasikan).
+    // s2 terdaftar (fixture) sehingga bisa mengerjakan; tanpa akses → 403.
     const g = await api<{ questions: { id: number; options: { id: number }[] }[] }>(
       "GET",
       `/api/v1/materials/${quizMat2}/quiz`,

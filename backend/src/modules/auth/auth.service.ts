@@ -20,11 +20,17 @@ export interface AuthFieldError {
 
 export class AuthValidationError extends Error {
   readonly errors: AuthFieldError[] | null;
+  readonly httpStatus: number;
 
-  constructor(message: string, errors: AuthFieldError[] | null = null) {
+  constructor(
+    message: string,
+    errors: AuthFieldError[] | null = null,
+    httpStatus = 400
+  ) {
     super(message);
     this.name = "AuthValidationError";
     this.errors = errors;
+    this.httpStatus = httpStatus;
   }
 }
 
@@ -203,6 +209,16 @@ export const loginUser = async (_input: unknown) => {
   // Pesan dibuat sama agar tidak membocorkan email yang terdaftar
   if (!user) {
     throw new AuthValidationError("Email atau password salah");
+  }
+
+  // Akun nonaktif tidak dapat login (penegakan saat login; token lama
+  // kedaluwarsa ≤15 menit sesuai JWT_EXPIRES_IN).
+  if (user.isActive === false) {
+    throw new AuthValidationError(
+      "Akun Anda dinonaktifkan. Hubungi admin.",
+      null,
+      403
+    );
   }
 
   // Verifikasi password dengan hash di database

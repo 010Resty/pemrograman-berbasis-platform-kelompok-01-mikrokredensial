@@ -183,7 +183,8 @@ const requireCourse = async (courseId: number) => {
   return rows[0] ?? null;
 };
 
-/** Baca publik bila kursus published; selain itu hanya admin/pengelola. */
+/** Baca katalog: kursus published DAN archived boleh dibaca publik (arsip read-only).
+ * Draft hanya untuk admin/pengelola. */
 export const canReadCourseTree = async (
   userId: number | null,
   role: string,
@@ -191,7 +192,7 @@ export const canReadCourseTree = async (
 ): Promise<"ok" | "not-found" | "forbidden"> => {
   const course = await requireCourse(courseId);
   if (!course) return "not-found";
-  if (course.status === "published") return "ok";
+  if (course.status === "published" || course.status === "archived") return "ok";
   if (userId !== null && (await canManageCourse(userId, role, courseId))) return "ok";
   return "forbidden";
 };

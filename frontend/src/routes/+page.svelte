@@ -101,8 +101,7 @@
 		}
 	];
 
-	const podiumOrder = [rankings[1], rankings[0], rankings[2]];
-	const tableRankings = rankings.slice(3);
+	const podiumOrder = [...rankings].filter((r) => r.rank <= 3).sort((a, b) => a.rank - b.rank);
 
 	const mobileLinks = [
 		{ id: 'beranda', label: 'Beranda' },
@@ -545,24 +544,25 @@
 	</section>
 
 	<!-- Rankings Section (Peringkat) -->
-	<section id="peringkat" class="relative overflow-hidden py-20 bg-slate-50">
-		<div
-			class="pointer-events-none absolute inset-0"
-			aria-hidden="true"
-		>
+	<section
+		id="peringkat"
+		aria-labelledby="peringkat-heading"
+		class="relative scroll-mt-20 overflow-hidden bg-slate-50 py-20"
+	>
+		<div class="pointer-events-none absolute inset-0" aria-hidden="true">
 			<div
 				class="absolute inset-0 bg-[linear-gradient(to_right,#e2e8f0_1px,transparent_1px),linear-gradient(to_bottom,#e2e8f0_1px,transparent_1px)] bg-[size:44px_44px] opacity-60 [mask-image:radial-gradient(ellipse_70%_60%_at_50%_0%,black,transparent)]"
 			></div>
 			<div class="absolute -top-10 left-1/2 h-56 w-[36rem] -translate-x-1/2 rounded-full bg-blue-200/40 blur-3xl"></div>
 		</div>
 
-		<div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-			<div class="text-center max-w-2xl mx-auto mb-12 space-y-3">
+		<div class="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+			<div class="mx-auto mb-10 max-w-2xl space-y-3 text-center">
 				<span
 					class="text-blue-600 font-bold text-xs uppercase tracking-widest bg-blue-100 px-3 py-1 rounded-full"
-					><i class="fa-solid fa-trophy"></i> PERINGKAT</span
+					><i class="fa-solid fa-trophy" aria-hidden="true"></i> PERINGKAT</span
 				>
-				<h2 class="text-3xl sm:text-4xl font-extrabold text-slate-900">
+				<h2 id="peringkat-heading" class="text-3xl sm:text-4xl font-extrabold text-slate-900">
 					Peringkat Pelatihan Terbaik
 				</h2>
 				<p class="text-slate-500 text-sm">
@@ -570,192 +570,352 @@
 				</p>
 			</div>
 
-			<!-- Podium Top 3 -->
+			<dl
+				class="mx-auto mb-12 grid max-w-3xl grid-cols-3 divide-x divide-slate-100 rounded-2xl border border-slate-200 bg-white shadow-sm"
+			>
+				<div class="px-4 py-4 text-center">
+					<dt class="mt-1 block text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+						Kurasi teratas
+					</dt>
+					<dd class="text-xl font-black tabular-nums text-slate-900 sm:text-2xl">10</dd>
+				</div>
+				<div class="px-4 py-4 text-center">
+					<dt class="mt-1 block text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+						Rata-rata rating
+					</dt>
+					<dd class="text-xl font-black tabular-nums text-amber-500 sm:text-2xl">
+						4,6<span class="text-sm font-bold text-slate-400">/5</span>
+					</dd>
+				</div>
+				<div class="px-4 py-4 text-center">
+					<dt class="mt-1 block text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">
+						Total peserta
+					</dt>
+					<dd class="text-xl font-black tabular-nums text-slate-900 sm:text-2xl">15.240</dd>
+				</div>
+			</dl>
+
+			<!-- Podium 3 besar: DOM tetap 1–2–3 untuk pembaca layar, juara 1 tampil di tengah -->
 			<ol
 				aria-label="Tiga pelatihan peringkat teratas"
-				class="mx-auto mb-12 grid max-w-4xl grid-cols-3 items-end gap-3 sm:gap-6"
+				class="mx-auto mb-4 grid max-w-5xl gap-5 md:grid-cols-3 md:items-stretch lg:gap-6"
 			>
 				{#each podiumOrder as item (item.rank)}
 					{@const isFirst = item.rank === 1}
 					{@const isSecond = item.rank === 2}
+					{@const score = (Number(item.rating) / 5) * 100}
+					{@const code = String(item.rank).padStart(2, '0')}
 					<li
-						class="animate-rise flex flex-col items-center text-center {isFirst
-							? 'order-2 -mt-2'
-							: isSecond
-								? 'order-1'
-								: 'order-3'}"
+						class="animate-rise {isFirst ? 'md:order-2' : isSecond ? 'md:order-1' : 'md:order-3'}"
 						style="animation-delay:{item.rank * 90}ms"
 					>
 						{#if isFirst}
-							<span
-								class="mb-1 inline-flex h-9 w-9 items-center justify-center rounded-full bg-amber-400 text-slate-900 shadow-lg shadow-amber-400/40 ring-4 ring-amber-100"
-								aria-hidden="true"
+							<article
+								class="relative h-full rounded-3xl border-2 border-amber-300 bg-white p-6 shadow-xl shadow-amber-200/50 sm:p-7"
 							>
-								<i class="fa-solid fa-crown text-base"></i>
-							</span>
+								<div
+									class="relative flex h-full flex-col overflow-hidden"
+								>
+									<span
+										class="pointer-events-none absolute -top-8 right-0 text-[6.5rem] leading-none font-black tabular-nums text-amber-100 select-none"
+										aria-hidden="true">{code}</span
+									>
+									<span
+										class="absolute -top-6 left-1/2 h-1 w-24 -translate-x-1/2 rounded-full bg-amber-400"
+										aria-hidden="true"
+									></span>
+									<div class="relative flex items-center justify-between gap-3">
+										<span
+											class="inline-flex h-11 w-11 items-center justify-center rounded-full bg-amber-400 text-slate-900 shadow-lg shadow-amber-400/40 ring-4 ring-amber-100"
+											aria-hidden="true"
+										>
+											<i class="fa-solid fa-crown text-lg"></i>
+										</span>
+										<span
+											class="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-[10px] font-extrabold tracking-[0.18em] text-amber-700 uppercase"
+										>
+											Juara {item.rank}
+										</span>
+									</div>
+									<h3 class="relative mt-5 text-left text-lg leading-snug font-extrabold text-slate-900 sm:text-xl">
+										{item.title}
+									</h3>
+									<p class="relative mt-2 flex items-center gap-2.5 text-left">
+										<span
+											class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-blue-800 text-[11px] font-black text-white"
+											aria-hidden="true">{item.initials}</span
+										>
+										<span class="text-xs font-semibold text-slate-600">
+											{item.instructor}
+											<span class="text-slate-400">· {item.category}</span>
+										</span>
+									</p>
+									<div class="relative mt-5 border-t border-slate-100 pt-4">
+										<div class="flex items-end justify-between gap-3">
+											<p class="flex items-center gap-1.5 text-sm font-black text-slate-900">
+												<i class="fa-solid fa-star text-amber-500" aria-hidden="true"></i>
+												{item.rating}<span class="text-xs font-bold text-slate-400">/5</span>
+											</p>
+											<p class="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+												<i class="fa-solid fa-users text-slate-400" aria-hidden="true"></i>
+												<span class="tabular-nums">{item.participants}</span> peserta
+											</p>
+										</div>
+										<div
+											class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"
+											role="img"
+											aria-label="Skor rating {item.rating} dari 5"
+										>
+											<div class="h-full rounded-full bg-amber-400" style="width:{score}%"></div>
+										</div>
+									</div>
+									<a
+										href="#modul"
+										class="relative mt-5 inline-flex items-center gap-2 text-xs font-extrabold tracking-wide text-blue-600 uppercase underline decoration-blue-200 underline-offset-4 transition hover:text-blue-700 hover:decoration-blue-400 focus-visible:rounded focus-visible:outline-2 focus-visible:outline-blue-600"
+										aria-label="Lihat {item.title} di daftar pelatihan"
+									>
+										Lihat di daftar pelatihan <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+									</a>
+								</div>
+							</article>
+						{:else}
+							<article
+								class="relative flex h-full flex-col overflow-hidden rounded-3xl border bg-white p-6 pt-8 shadow-sm transition-shadow hover:shadow-md sm:p-7 sm:pt-10 {isSecond
+									? 'border-slate-200'
+									: 'border-orange-200'}"
+							>
+								<span
+									class="pointer-events-none absolute -top-4 right-3 text-[5.5rem] leading-none font-black tabular-nums text-slate-100 select-none"
+									aria-hidden="true">{code}</span
+								>
+								<div class="relative flex items-center justify-between gap-3">
+									<span
+										class="inline-flex h-10 w-10 items-center justify-center rounded-full shadow {isSecond
+											? 'bg-slate-200 text-slate-700'
+											: 'bg-orange-100 text-orange-600'}"
+										aria-hidden="true"
+									>
+										<i class="fa-solid {isSecond ? 'fa-medal' : 'fa-award'}"></i>
+									</span>
+									<span
+										class="inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-extrabold tracking-[0.18em] uppercase {isSecond
+											? 'bg-slate-100 text-slate-500'
+											: 'bg-orange-100 text-orange-600'}"
+									>
+										Juara {item.rank}
+									</span>
+								</div>
+								<h3 class="relative mt-5 text-left text-base leading-snug font-extrabold text-slate-900 sm:text-lg">
+									{item.title}
+								</h3>
+								<p class="relative mt-2 flex items-center gap-2.5 text-left">
+									<span
+										class="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-black {isSecond
+											? 'bg-slate-200 text-slate-700'
+											: 'bg-orange-100 text-orange-600'}"
+										aria-hidden="true">{item.initials}</span
+									>
+									<span class="text-xs font-semibold text-slate-600">
+										{item.instructor}
+										<span class="text-slate-400">· {item.category}</span>
+									</span>
+								</p>
+								<div class="relative mt-5 border-t border-slate-100 pt-4">
+									<div class="flex items-end justify-between gap-3">
+										<p class="flex items-center gap-1.5 text-sm font-black text-slate-900">
+											<i class="fa-solid fa-star text-amber-500" aria-hidden="true"></i>
+											{item.rating}<span class="text-xs font-bold text-slate-400">/5</span>
+										</p>
+										<p class="flex items-center gap-1.5 text-xs font-bold text-slate-500">
+											<i class="fa-solid fa-users text-slate-400" aria-hidden="true"></i>
+											<span class="tabular-nums">{item.participants}</span> peserta
+										</p>
+									</div>
+									<div
+										class="mt-2 h-1.5 overflow-hidden rounded-full bg-slate-100"
+										role="img"
+										aria-label="Skor rating {item.rating} dari 5"
+									>
+										<div
+											class="h-full rounded-full {isSecond ? 'bg-slate-400' : 'bg-orange-400'}"
+											style="width:{score}%"
+										></div>
+									</div>
+								</div>
+							</article>
 						{/if}
-
-						<!-- Medali / avatar -->
-						<div class="relative">
-							<div
-								class="flex items-center justify-center rounded-2xl font-black {isFirst
-									? 'h-16 w-16 sm:h-20 sm:w-20 text-xl bg-blue-800 text-amber-300 ring-4 ring-amber-400 shadow-xl shadow-blue-800/30'
-									: isSecond
-										? 'h-14 w-14 sm:h-16 sm:w-16 text-lg bg-white text-slate-700 ring-2 ring-slate-300 shadow-lg'
-										: 'h-14 w-14 sm:h-16 sm:w-16 text-lg bg-white text-orange-700 ring-2 ring-orange-300 shadow-lg'}"
-								aria-hidden="true"
-							>
-								{isFirst ? '1' : isSecond ? '2' : '3'}
-							</div>
-							<span
-								class="absolute -right-2 -bottom-2 flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-xs shadow {isFirst
-									? 'bg-amber-400 text-slate-900'
-									: isSecond
-										? 'bg-slate-400 text-white'
-										: 'bg-orange-600 text-white'}"
-								aria-hidden="true"
-							>
-								<i
-									class="fa-solid {isFirst ? 'fa-trophy' : isSecond ? 'fa-medal' : 'fa-award'}"
-								></i>
-							</span>
-						</div>
-
-						<!-- Info kartu -->
-						<div
-							class="mt-3 w-full rounded-2xl border bg-white px-2 py-3 shadow-sm sm:px-4 {isFirst
-								? 'border-amber-300 shadow-amber-100'
-								: 'border-slate-200'}"
-						>
-							<p
-								class="text-[10px] font-extrabold tracking-[0.16em] uppercase {isFirst
-									? 'text-amber-600'
-									: isSecond
-										? 'text-slate-500'
-										: 'text-orange-600'}"
-							>
-								Juara {item.rank}
-							</p>
-							<h3
-								class="mt-1 line-clamp-2 min-h-8 text-[11px] leading-snug font-extrabold text-slate-900 sm:min-h-10 sm:text-sm"
-							>
-								{item.title}
-							</h3>
-							<p class="mt-1 hidden text-[11px] font-semibold text-slate-500 sm:block">
-								{item.category} · {item.instructor}
-							</p>
-							<div class="mt-2 flex items-center justify-center gap-2 text-[11px] font-bold">
-								<span class="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-amber-600">
-									<i class="fa-solid fa-star text-[10px]" aria-hidden="true"></i>
-									{item.rating}
-								</span>
-								<span class="hidden items-center gap-1 text-slate-500 sm:inline-flex">
-									<i class="fa-solid fa-users text-[10px]" aria-hidden="true"></i>
-									{item.participants}
-								</span>
-							</div>
-						</div>
-
-						<!-- Balok podium bertingkat -->
-						<div
-							class="mt-3 flex w-full flex-col items-center justify-start rounded-t-2xl border-x border-t px-2 pt-3 text-white {isFirst
-								? 'h-40 sm:h-48 bg-blue-800 border-blue-800 shadow-[0_-8px_30px_-10px_rgba(245,158,11,0.5)]'
-								: isSecond
-									? 'h-28 sm:h-32 bg-white border-slate-200 text-slate-700'
-									: 'h-24 sm:h-28 bg-white border-slate-200 text-slate-700'}"
-							aria-hidden="true"
-						>
-							{#if isFirst}
-								<span class="h-1 w-12 rounded-full bg-amber-400"></span>
-							{/if}
-							<span
-								class="mt-1 text-3xl font-black tracking-tight tabular-nums sm:text-4xl {isFirst
-									? 'text-amber-300'
-									: 'text-slate-300'}"
-							>
-								{item.rank}
-							</span>
-							<span
-								class="text-[10px] font-bold tracking-[0.2em] uppercase {isFirst
-									? 'text-slate-300'
-									: 'text-slate-400'}"
-							>
-								{item.participants} peserta
-							</span>
-						</div>
-						<div
-							class="h-2 w-full rounded-b-lg {isFirst
-								? 'bg-amber-400'
-								: isSecond
-									? 'bg-slate-400'
-									: 'bg-orange-600'}"
-							aria-hidden="true"
-						></div>
 					</li>
 				{/each}
 			</ol>
 
-			<!-- Rankings Table (peringkat 4 ke bawah) -->
-			<div class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-				<div class="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/60 px-6 py-4">
-					<h3 class="text-sm font-extrabold text-slate-900">
-						<i class="fa-solid fa-list-ol text-blue-600" aria-hidden="true"></i>
-						Peringkat 4 – 10
+			<!-- Kaki podium bertingkat -->
+			<div class="mx-auto mb-14 hidden max-w-5xl grid-cols-3 items-end gap-6 px-10 md:grid" aria-hidden="true">
+				<div class="h-8 rounded-t-xl border-x border-t border-slate-200 bg-white shadow-sm"></div>
+				<div class="h-14 rounded-t-xl bg-gradient-to-b from-amber-300 to-amber-500 shadow-lg shadow-amber-300/40"></div>
+				<div class="h-8 rounded-t-xl border-x border-t border-slate-200 bg-white shadow-sm"></div>
+			</div>
+
+			<!-- Papan peringkat 4–10 di atas kartu terang -->
+			<div class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm">
+				<div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/70 px-6 py-5 sm:px-8">
+					<h3 class="flex items-center gap-2.5 text-sm font-extrabold text-slate-900">
+						<span class="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-blue-800 text-xs text-white" aria-hidden="true">
+							<i class="fa-solid fa-list-ol"></i>
+						</span>
+						Top 10
 					</h3>
-					<p class="text-xs text-slate-500">Berdasarkan penilaian peserta</p>
+					<p class="flex items-center gap-2 text-xs font-semibold text-slate-500">
+						<i class="fa-solid fa-star text-amber-400" aria-hidden="true"></i>
+						Berdasarkan penilaian peserta
+					</p>
 				</div>
-				<div class="overflow-x-auto">
+
+				<!-- Tabel desktop -->
+				<div class="hidden overflow-x-auto md:block">
 					<table class="w-full text-sm">
-						<caption class="sr-only">Tabel peringkat pelatihan posisi 4 sampai 10</caption>
-						<thead class="bg-blue-800 text-white">
-							<tr>
-								<th class="px-6 py-4 text-left font-bold text-xs uppercase tracking-wider"
-									>Peringkat</th
-								>
-								<th class="px-6 py-4 text-left font-bold text-xs uppercase tracking-wider"
-									>Nama Pelatihan</th
-								>
-								<th
-									class="px-6 py-4 text-left font-bold text-xs uppercase tracking-wider hidden sm:table-cell"
-									>Kategori</th
-								>
-								<th
-									class="px-6 py-4 text-left font-bold text-xs uppercase tracking-wider hidden md:table-cell"
-									>Instruktur</th
-								>
-								<th class="px-6 py-4 text-center font-bold text-xs uppercase tracking-wider"
-									>Rating</th
-								>
-								<th
-									class="px-6 py-4 text-center font-bold text-xs uppercase tracking-wider hidden lg:table-cell"
-									>Peserta</th
-								>
+						<caption class="sr-only">Tabel 10 pelatihan peringkat teratas</caption>
+						<thead>
+							<tr class="border-b border-slate-100 text-left text-[11px] font-extrabold tracking-[0.14em] text-slate-400 uppercase">
+								<th scope="col" class="px-8 py-4 font-extrabold">Peringkat</th>
+								<th scope="col" class="px-6 py-4 font-extrabold">Nama Pelatihan</th>
+								<th scope="col" class="px-6 py-4 font-extrabold">Kategori</th>
+								<th scope="col" class="px-6 py-4 font-extrabold">Instruktur</th>
+								<th scope="col" class="px-6 py-4 text-right font-extrabold">Rating</th>
+								<th scope="col" class="px-8 py-4 text-right font-extrabold">Peserta</th>
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-slate-100">
-							{#each tableRankings as row (row.rank)}
-								<tr class="hover:bg-blue-50/50 transition">
-									<td class="px-6 py-4">
+							{#each rankings as row (row.rank)}
+								{@const score = (Number(row.rating) / 5) * 100}
+								{@const medal =
+									row.rank === 1
+										? 'bg-amber-400 text-slate-900'
+										: row.rank === 2
+											? 'bg-slate-200 text-slate-700'
+											: row.rank === 3
+												? 'bg-orange-200 text-orange-700'
+												: row.rank <= 5
+													? 'bg-blue-800 text-white'
+													: 'bg-slate-100 text-slate-600'}
+								<tr
+									class="group transition-colors {row.rank === 1
+										? 'bg-amber-50/70 hover:bg-amber-50'
+										: 'hover:bg-amber-50/60'}"
+								>
+									<td class="px-8 py-4">
 										<span
-											class="inline-flex items-center justify-center w-8 h-8 bg-slate-200 text-slate-700 font-black text-sm rounded-lg"
+											class="inline-flex h-9 w-9 items-center justify-center rounded-xl text-sm font-black tabular-nums {medal}"
 											>{row.rank}</span
 										>
 									</td>
-									<td class="px-6 py-4 font-bold text-slate-900">{row.title}</td>
-									<td class="px-6 py-4 text-slate-600 hidden sm:table-cell">{row.category}</td>
-									<td class="px-6 py-4 text-slate-600 hidden md:table-cell">{row.instructor}</td>
-									<td class="px-6 py-4 text-center">
-										<span class="inline-flex items-center gap-1 text-amber-500 font-bold"
-											><i class="fa-solid fa-star"></i> {row.rating}</span
-										>
+									<td class="max-w-72 px-6 py-4">
+										<p class="flex items-center gap-2 font-bold text-slate-900 transition-colors group-hover:text-blue-700">
+											{#if row.rank === 1}
+												<i class="fa-solid fa-crown text-sm text-amber-500" aria-hidden="true"></i>
+											{:else if row.rank === 2}
+												<i class="fa-solid fa-medal text-sm text-slate-400" aria-hidden="true"></i>
+											{:else if row.rank === 3}
+												<i class="fa-solid fa-award text-sm text-orange-500" aria-hidden="true"></i>
+											{/if}
+											{row.title}
+										</p>
 									</td>
-									<td class="px-6 py-4 text-center text-slate-600 hidden lg:table-cell">
-										{row.participants}
+									<td class="px-6 py-4 whitespace-nowrap">
+										<span class="inline-flex items-center rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+											{row.category}
+										</span>
+									</td>
+									<td class="px-6 py-4 whitespace-nowrap">
+										<span class="inline-flex items-center gap-2 text-[13px] font-semibold text-slate-600">
+											<span
+												class="inline-flex h-7 w-7 items-center justify-center rounded-full bg-blue-100 text-[10px] font-black text-blue-700"
+												aria-hidden="true">{row.initials}</span
+											>
+											{row.instructor}
+										</span>
+									</td>
+									<td class="px-6 py-4">
+										<div class="flex items-center justify-end gap-2">
+											<div
+												class="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100"
+												role="img"
+												aria-label="Skor rating {row.rating} dari 5"
+											>
+												<div class="h-full rounded-full bg-amber-400" style="width:{score}%"></div>
+											</div>
+											<span class="inline-flex items-center gap-1 font-black tabular-nums text-slate-900">
+												<i class="fa-solid fa-star text-xs text-amber-400" aria-hidden="true"></i>
+												{row.rating}
+											</span>
+										</div>
+									</td>
+									<td class="px-8 py-4 text-right">
+										<span class="inline-flex items-center gap-1.5 text-[13px] font-bold tabular-nums text-slate-500">
+											<i class="fa-solid fa-users text-xs text-slate-300" aria-hidden="true"></i>
+											{row.participants}
+										</span>
 									</td>
 								</tr>
 							{/each}
 						</tbody>
 					</table>
+				</div>
+
+				<!-- Kartu mobile: info yang sama tanpa kolom tersembunyi -->
+				<ol class="divide-y divide-slate-100 md:hidden" aria-label="10 pelatihan peringkat teratas">
+					{#each rankings as row (row.rank)}
+						{@const score = (Number(row.rating) / 5) * 100}
+						{@const medal =
+							row.rank === 1
+								? 'bg-amber-400 text-slate-900'
+								: row.rank === 2
+									? 'bg-slate-200 text-slate-700'
+									: row.rank === 3
+										? 'bg-orange-200 text-orange-700'
+										: row.rank <= 5
+											? 'bg-blue-800 text-white'
+											: 'bg-slate-100 text-slate-600'}
+						<li class="flex gap-4 px-5 py-4 {row.rank === 1 ? 'bg-amber-50/60' : ''}">
+							<span
+								class="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-black tabular-nums {medal}"
+								aria-label="Peringkat {row.rank}">{row.rank}</span
+							>
+							<div class="min-w-0 flex-1">
+								<p class="text-sm leading-snug font-bold text-slate-900">{row.title}</p>
+								<p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-semibold text-slate-500">
+									<span class="inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600">
+										{row.category}
+									</span>
+									<span>{row.instructor}</span>
+								</p>
+								<div class="mt-2 flex items-center justify-between gap-3">
+									<span class="inline-flex items-center gap-1.5 text-xs font-black tabular-nums text-slate-900">
+										<i class="fa-solid fa-star text-amber-400" aria-hidden="true"></i>
+										{row.rating}
+										<span class="h-1.5 w-16 overflow-hidden rounded-full bg-slate-100" aria-hidden="true">
+											<span class="block h-full rounded-full bg-amber-400" style="width:{score}%"></span>
+										</span>
+									</span>
+									<span class="inline-flex items-center gap-1 text-[11px] font-bold tabular-nums text-slate-500">
+										<i class="fa-solid fa-users text-slate-300" aria-hidden="true"></i>
+										{row.participants} peserta
+									</span>
+								</div>
+							</div>
+						</li>
+					{/each}
+				</ol>
+
+				<div class="flex flex-col items-center justify-between gap-4 border-t border-slate-100 bg-slate-50/70 px-6 py-5 sm:flex-row sm:px-8">
+					<p class="text-[11px] leading-relaxed text-slate-400">
+						Data peringkat ilustratif untuk tampilan — bukan data penilaian live.
+					</p>
+					<a
+						href="#modul"
+						class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-xs font-extrabold tracking-wide text-white uppercase shadow-lg shadow-blue-600/30 transition hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+					>
+						Jelajahi pelatihan <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+					</a>
 				</div>
 			</div>
 		</div>
@@ -815,37 +975,25 @@
 						karier.
 					</p>
 
-					<div class="space-y-3 pt-2">
-						<div class="flex items-start gap-3">
-							<div class="bg-blue-600 text-white p-1 rounded mt-1">
-								<i class="fa-solid fa-check text-xs"></i>
-							</div>
-							<p class="text-slate-700 text-sm font-semibold">
-								Kurikulum yang terus diperbarui sesuai kebutuhan industri dan transformasi digital.
-							</p>
-						</div>
-						<div class="flex items-start gap-3">
-							<div class="bg-blue-600 text-white p-1 rounded mt-1">
-								<i class="fa-solid fa-check text-xs"></i>
-							</div>
-							<p class="text-slate-700 text-sm font-semibold">
-								Akses lebih dari 100.000 kursus online dan mikrokredensial yang diperbarui setiap
-								tahun.
-							</p>
-						</div>
-						<div class="flex items-start gap-3">
-							<div class="bg-blue-600 text-white p-1 rounded mt-1">
-								<i class="fa-solid fa-check text-xs"></i>
-							</div>
-							<p class="text-slate-700 text-sm font-semibold">
-								Pelajari keterampilan berdampak tinggi yang dibutuhkan perusahaan global terkemuka.
-							</p>
-						</div>
-					</div>
+					<ul class="space-y-2.5 pt-2 text-sm text-slate-600">
+						<li class="flex items-start gap-2.5">
+							<i class="fa-solid fa-circle-check mt-0.5 text-green-500" aria-hidden="true"></i>
+							Kurikulum yang terus diperbarui sesuai kebutuhan industri dan transformasi digital.
+						</li>
+						<li class="flex items-start gap-2.5">
+							<i class="fa-solid fa-circle-check mt-0.5 text-green-500" aria-hidden="true"></i>
+							Akses lebih dari 100.000 kursus online dan mikrokredensial yang diperbarui setiap
+							tahun.
+						</li>
+						<li class="flex items-start gap-2.5">
+							<i class="fa-solid fa-circle-check mt-0.5 text-green-500" aria-hidden="true"></i>
+							Pelajari keterampilan berdampak tinggi yang dibutuhkan perusahaan global terkemuka.
+						</li>
+					</ul>
 
 					<div class="pt-4">
 						<a
-							href="/modules"
+							href="/tentang"
 							class="inline-flex items-center gap-3 bg-blue-600 text-white font-bold text-sm px-8 py-4 rounded-xl hover:bg-blue-700 transition shadow-lg shadow-blue-600/30"
 						>
 							BACA SELENGKAPNYA <i class="fa-solid fa-arrow-right"></i>

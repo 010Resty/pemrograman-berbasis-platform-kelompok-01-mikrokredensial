@@ -10,6 +10,10 @@
 		withSyncedFlat
 	} from '$lib/stores/curriculum';
 	import {
+		invalidateCourseTree,
+		invalidateMyCourses
+	} from '$lib/stores/instructor-courses.svelte';
+	import {
 		resolveServerCourse,
 		updateCourse,
 		deleteCourse,
@@ -77,6 +81,9 @@
 		deleteError = '';
 		try {
 			await deleteCourse(courseId);
+			// Sukses: daftar dan tree kursus ini basi.
+			invalidateMyCourses();
+			invalidateCourseTree(courseId);
 			await goto('/instruktur/kursusku');
 		} catch (e) {
 			deleteError = e instanceof Error ? e.message : 'Gagal menghapus kursus.';
@@ -119,15 +126,18 @@
 		return {
 			create: async (input: { title: string; description: string; position: number }) => {
 				const m = await createModule(courseId, { ...input, type: 'materi' });
+				invalidateCourseTree(courseId);
 				return String(m.id);
 			},
 			update: async (id: string, input: Record<string, unknown>) => {
 				if (!isServerId(id)) return;
 				await updateModule(Number(id), input);
+				invalidateCourseTree(courseId);
 			},
 			remove: async (id: string) => {
 				if (!isServerId(id)) return;
 				await deleteModule(Number(id));
+				invalidateCourseTree(courseId);
 			},
 			move: async (orderedIds: string[]) => {
 				await Promise.all(
@@ -135,6 +145,7 @@
 						isServerId(id) ? updateModule(Number(id), { position: i }) : Promise.resolve()
 					)
 				);
+				invalidateCourseTree(courseId);
 			}
 		};
 	}
@@ -165,6 +176,8 @@
 				const updated = await updateCourse(courseId, {
 					status: next ? 'published' : 'draft'
 				});
+				// Status berubah: badge daftar ikut basi (struktur tree tidak berubah).
+				invalidateMyCourses();
 				serverCourse = { ...serverCourse, publishState: updated.status };
 				isPublished = next;
 				markSaved(next ? 'Kursus diterbitkan.' : 'Kursus dikembalikan ke draft.');

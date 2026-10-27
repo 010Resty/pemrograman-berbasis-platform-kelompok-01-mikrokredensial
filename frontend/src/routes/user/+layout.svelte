@@ -6,6 +6,7 @@
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
 	import { homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
+	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
 	import { untrack } from 'svelte';
 
 	let { children } = $props();
@@ -41,6 +42,7 @@
 	}
 
 	function handleLogout() {
+		clearInstructorCourseCaches();
 		logout();
 	}
 

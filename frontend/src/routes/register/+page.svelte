@@ -94,11 +94,11 @@
 	}
 </script>
 
-<!-- Register satu viewport penuh: h-dvh + overflow-hidden, halaman tidak bisa di-scroll -->
-<div class="flex h-dvh flex-col overflow-hidden bg-slate-50 lg:flex-row">
+<!-- Register: min-h-dvh agar halaman bisa di-scroll di layar kecil; panel kiri menempel saat desktop -->
+<div class="flex min-h-dvh flex-col bg-slate-50 lg:flex-row">
 	<!-- Left Panel: Branding & Info -->
 	<div
-		class="relative hidden min-h-0 overflow-hidden bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 lg:flex lg:w-1/2 xl:w-3/5"
+		class="relative hidden overflow-hidden bg-gradient-to-br from-blue-900 via-blue-800 to-indigo-900 lg:sticky lg:top-0 lg:flex lg:h-dvh lg:w-1/2 xl:w-3/5"
 	>
 		<!-- Background Pattern -->
 		<div class="absolute inset-0 opacity-10" aria-hidden="true">
@@ -199,17 +199,17 @@
 		</div>
 	</div>
 
-	<!-- Right Panel: Register Form (tanpa card, form menempel langsung pada background) -->
+	<!-- Right Panel: Register Form (bisa scroll mandiri; m-auto = rata tengah saat konten pendek) -->
 	<div
-		class="flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-slate-50 p-4 sm:p-6 lg:w-1/2 lg:p-8 xl:w-2/5"
+		class="flex min-h-dvh flex-1 overflow-y-auto bg-slate-50 p-4 sm:p-6 lg:w-1/2 lg:p-8 xl:w-2/5"
 	>
-		<div class="flex max-h-full min-h-0 w-full max-w-md flex-col">
+		<div class="m-auto w-full max-w-md">
 			<!-- Mobile Logo (visible only on small screens) -->
-			<div class="mb-4 flex items-center justify-center gap-3 lg:hidden">
+			<div class="mb-4 flex items-center justify-center gap-3 pt-4 lg:hidden">
 				<Logo size="lg" showText={true} textSize="lg" />
 			</div>
 
-			<div class="min-h-0 shrink p-6 sm:p-7">
+			<div class="p-6 sm:p-7">
 				<!-- Header -->
 				<div class="mb-5">
 					<div
@@ -437,11 +437,11 @@
 							/>
 							<span class="text-xs leading-snug text-slate-600">
 								Saya menyetujui <a
-									href="/with_UNIRA"
+									href="/syarat-ketentuan"
 									class="font-medium text-blue-600 hover:underline">Syarat &amp; Ketentuan</a
 								>
 								serta
-								<a href="/with_UNIRA" class="font-medium text-blue-600 hover:underline"
+								<a href="/kebijakan-privasi" class="font-medium text-blue-600 hover:underline"
 									>Kebijakan Privasi</a
 								> Aristoteles.
 							</span>
@@ -463,23 +463,6 @@
 						{/if}
 					</button>
 
-					<!-- Divider -->
-					<div class="relative flex items-center py-1">
-						<div class="grow border-t border-slate-200"></div>
-						<span class="mx-4 shrink text-xs font-semibold tracking-wider text-slate-400 uppercase"
-							>atau</span
-						>
-						<div class="grow border-t border-slate-200"></div>
-					</div>
-
-					<!-- SSO Button -->
-					<a
-						href="/with_UNIRA"
-						class="flex w-full items-center justify-center gap-2.5 rounded-xl border border-slate-200 bg-white px-6 py-2.5 text-sm font-semibold text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
-					>
-						<i class="fa-brands fa-google text-red-500" aria-hidden="true"></i>
-						<span>Daftar dengan UNIRA</span>
-					</a>
 				</form>
 
 				<!-- Sudah memiliki akun -->
@@ -495,7 +478,7 @@
 			</div>
 
 			<!-- Back to Home -->
-			<div class="mt-4 shrink-0 text-center">
+			<div class="mt-4 pb-4 text-center">
 				<a
 					href="/"
 					class="inline-flex items-center gap-2 rounded text-sm font-medium text-slate-500 transition-colors hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600"

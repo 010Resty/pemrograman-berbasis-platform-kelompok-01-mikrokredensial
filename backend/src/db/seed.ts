@@ -344,8 +344,11 @@ async function seedCertificates() {
     {
       id: CERTIFICATE_ID,
       userId: STUDENT_ID,
+      courseId: COURSE_FREE_ID,
       moduleId: MODULE_MATERI_ID,
       credentialId: "ATS-2026-C1-M1",
+      code: "ATS-2026-SEED0001",
+      recipientName: "Ahmad Farizi",
       status: "issued",
     },
   ]);

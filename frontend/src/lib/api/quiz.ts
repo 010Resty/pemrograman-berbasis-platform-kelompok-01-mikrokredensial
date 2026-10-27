@@ -1,5 +1,5 @@
 import { apiRequest } from './backend';
-import { getAccessToken } from '$lib/stores/auth.svelte';
+import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svelte';
 
 /** Soal untuk peserta (TANPA kunci jawaban dan pembahasan). */
 export interface ServerQuizOption {
@@ -75,7 +75,10 @@ export interface QuizSetInput {
 }
 
 function req<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
-	return apiRequest<T>(path, { ...options, token: getAccessToken() });
+	return apiRequest<T>(path, { ...options, token: getAccessToken() }).catch(async (e: unknown) => {
+		await handlePrivateRequestError(e);
+		throw e;
+	});
 }
 
 /** Ambil soal kuis untuk peserta (tanpa kunci). */

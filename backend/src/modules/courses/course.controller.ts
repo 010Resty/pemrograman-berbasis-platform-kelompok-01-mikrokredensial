@@ -48,8 +48,8 @@ export const create = async (
   }
 };
 
-// GET /api/v1/courses — katalog publik (hanya published).
-// Mendukung ?category ?period ?q ?limit ?page ?sort (REST pagination).
+// GET /api/v1/courses — katalog publik (published + archived; draft tidak bocor).
+// Mendukung ?category ?period ?q ?status(published|archived) ?limit ?page ?sort.
 export const listPublic = async (
   req: Request,
   res: Response,
@@ -60,11 +60,17 @@ export const listPublic = async (
     const q = parsed.success
       ? parsed.data
       : { limit: 20 as number, page: 1 as number, sort: "newest" as const };
+    const status =
+      typeof req.query.status === "string" &&
+      (req.query.status === "published" || req.query.status === "archived")
+        ? req.query.status
+        : undefined;
     const data = await listCourses(
       {
         category: typeof req.query.category === "string" ? req.query.category : undefined,
         period: typeof req.query.period === "string" ? req.query.period : undefined,
         q: typeof req.query.q === "string" ? req.query.q : undefined,
+        status,
       },
       true,
       { limit: q.limit, page: q.page, sort: q.sort }
@@ -119,7 +125,7 @@ export const listMine = async (
 };
 
 // GET /api/v1/courses/:id — detail (+daftar pengampu).
-// Non-published: hanya admin/pengelola.
+// Published/archived: publik. Draft: hanya admin/pengelola (404 bagi asing).
 export const detail = async (
   req: AuthenticatedRequest,
   res: Response,
@@ -136,7 +142,7 @@ export const detail = async (
       res.status(404).json({ status: "error", message: "Kursus tidak ditemukan", data: null });
       return;
     }
-    if (course.status !== "published") {
+    if (course.status !== "published" && course.status !== "archived") {
       const userId = Number(req.user?.id);
       const role = req.user?.role ?? "";
       if (!Number.isInteger(userId) || !(await canManageCourse(userId, role, id))) {

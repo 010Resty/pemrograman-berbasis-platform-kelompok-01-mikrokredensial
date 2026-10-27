@@ -1,5 +1,5 @@
 import { apiRequest, getApiBase } from './backend';
-import { getAccessToken } from '$lib/stores/auth.svelte';
+import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svelte';
 import type { Course, CourseModule } from '$lib/data/courses';
 import { normalizeMaterialType, type MaterialType } from '$lib/data/courses';
 
@@ -55,7 +55,11 @@ export interface BackendMaterial {
 }
 
 function req<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
-	return apiRequest<T>(path, { ...options, token: getAccessToken() });
+	return apiRequest<T>(path, { ...options, token: getAccessToken() }).catch(async (e: unknown) => {
+		// 401 → logout+redirect terpusat (sekali); 403/network/5xx → teruskan apa adanya.
+		await handlePrivateRequestError(e);
+		throw e;
+	});
 }
 
 export interface CreateCourseInput {

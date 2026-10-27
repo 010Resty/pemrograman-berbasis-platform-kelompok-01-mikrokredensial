@@ -9,6 +9,7 @@ import {
   mediumtext,
   json,
   index,
+  uniqueIndex,
   primaryKey,
 } from "drizzle-orm/mysql-core";
 
@@ -24,6 +25,8 @@ export const users = mysqlTable("users", {
   role: mysqlEnum("role", ["student", "teacher", "admin"])
     .notNull()
     .default("student"),
+  // Penonaktifan oleh admin; ditegakkan saat login (jendela token ≤15 mnt).
+  isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
@@ -353,37 +356,61 @@ export const quizOptions = mysqlTable(
 // Riwayat pengumpulan tugas: kumpul ulang tanpa batas (satu baris per kumpul).
 // Kolom identitas + Drive mengikuti kontrak proxy frontend
 // (/api/assignments/*); integrasi Drive diputuskan terpisah.
-export const submissions = mysqlTable("submissions", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("user_id")
-    .notNull()
-    .references(() => users.id, {
-      onDelete: "cascade",
+// fileId menautkan ke tabel files (kind='assignment') agar proteksi akses
+// berkas dapat ditegakkan; filePath menyimpan snapshot URL konten.
+// Penilaian: gradedBy/gradedAt + decision eksplisit (passed/failed/
+// revision_requested); lulus bersifat menempel (EXISTS passed).
+export const submissions = mysqlTable(
+  "submissions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    materialId: int("material_id")
+      .notNull()
+      .references(() => materials.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    fileId: int("file_id").references(() => files.id, {
+      onDelete: "restrict",
       onUpdate: "cascade",
     }),
-  materialId: int("material_id")
-    .notNull()
-    .references(() => materials.id, {
-      onDelete: "cascade",
+    filePath: varchar("file_path", { length: 500 }).notNull(),
+    studentName: varchar("student_name", { length: 100 }),
+    studentNim: varchar("student_nim", { length: 30 }),
+    note: text("note"),
+    driveFileId: varchar("drive_file_id", { length: 255 }),
+    driveLink: varchar("drive_link", { length: 500 }),
+    score: int("score"),
+    feedback: text("feedback"),
+    gradedBy: int("graded_by").references(() => users.id, {
+      onDelete: "set null",
       onUpdate: "cascade",
     }),
-  filePath: varchar("file_path", { length: 500 }).notNull(),
-  studentName: varchar("student_name", { length: 100 }),
-  studentNim: varchar("student_nim", { length: 30 }),
-  note: text("note"),
-  driveFileId: varchar("drive_file_id", { length: 255 }),
-  driveLink: varchar("drive_link", { length: 500 }),
-  score: int("score"),
-  feedback: text("feedback"),
-  status: mysqlEnum("status", [
-    "submitted",
-    "reviewed",
-    "revision_requested",
-  ])
-    .notNull()
-    .default("submitted"),
-  submittedAt: timestamp("submitted_at").defaultNow().notNull(),
-});
+    gradedAt: timestamp("graded_at"),
+    status: mysqlEnum("status", [
+      "submitted",
+      "reviewed",
+      "revision_requested",
+      "passed",
+      "failed",
+    ])
+      .notNull()
+      .default("submitted"),
+    submittedAt: timestamp("submitted_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    materialUserIdx: index("submissions_material_user_idx").on(
+      table.materialId,
+      table.userId
+    ),
+  })
+);
 
 export const progress = mysqlTable(
   "progress",
@@ -410,76 +437,149 @@ export const progress = mysqlTable(
 );
 
 // Voucher resmi: terikat kursus, batas pakai, riwayat penukaran.
-// Pemetaan status UI: Aktif~available, Habis/Digunakan~redeemed,
-// Kedaluwarsa~expired, Dibatalkan~revoked (kolom status diperluas bila perlu).
-export const vouchers = mysqlTable("vouchers", {
-  code: varchar("code", { length: 100 }).primaryKey(),
-  courseId: int("course_id").references(() => courses.id, {
-    onDelete: "restrict",
-    onUpdate: "cascade",
-  }),
-  kind: mysqlEnum("kind", ["personal", "umum"]).notNull().default("umum"),
-  maxUses: int("max_uses").notNull().default(1),
-  usedCount: int("used_count").notNull().default(0),
-  assignedUserId: int("assigned_user_id").references(() => users.id, {
-    onDelete: "restrict",
-    onUpdate: "cascade",
-  }),
-  expiresAt: timestamp("expires_at"),
-  status: mysqlEnum("status", [
-    "available",
-    "assigned",
-    "redeemed",
-    "expired",
-  ])
-    .notNull()
-    .default("available"),
-});
-
-// Jejak audit penukaran: 1 baris per (voucher, akun, kursus) — basis anti-race K-03.
-export const voucherRedemptions = mysqlTable("voucher_redemptions", {
-  id: int("id").autoincrement().primaryKey(),
-  voucherCode: varchar("voucher_code", { length: 100 })
-    .notNull()
-    .references(() => vouchers.code, {
+// Pemetaan status UI: Aktif~available/assigned, Habis/Digunakan~redeemed,
+// Kedaluwarsa~expired, Dinonaktifkan~revoked.
+export const vouchers = mysqlTable(
+  "vouchers",
+  {
+    code: varchar("code", { length: 100 }).primaryKey(),
+    courseId: int("course_id").references(() => courses.id, {
       onDelete: "restrict",
       onUpdate: "cascade",
     }),
-  userId: int("user_id")
-    .notNull()
-    .references(() => users.id, {
-      onDelete: "cascade",
+    kind: mysqlEnum("kind", ["personal", "umum"]).notNull().default("umum"),
+    maxUses: int("max_uses").notNull().default(1),
+    usedCount: int("used_count").notNull().default(0),
+    assignedUserId: int("assigned_user_id").references(() => users.id, {
+      onDelete: "restrict",
       onUpdate: "cascade",
     }),
-  courseId: int("course_id")
-    .notNull()
-    .references(() => courses.id, {
-      onDelete: "cascade",
-      onUpdate: "cascade",
-    }),
-  redeemedAt: timestamp("redeemed_at").defaultNow().notNull(),
+    expiresAt: timestamp("expires_at"),
+    status: mysqlEnum("status", [
+      "available",
+      "assigned",
+      "redeemed",
+      "expired",
+      "revoked",
+    ])
+      .notNull()
+      .default("available"),
+  },
+  (table) => ({
+    courseIdx: index("vouchers_course_idx").on(table.courseId),
+  })
+);
+
+// Jejak audit penukaran: 1 baris per (voucher, akun, kursus) — basis anti-race K-03.
+export const voucherRedemptions = mysqlTable(
+  "voucher_redemptions",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    voucherCode: varchar("voucher_code", { length: 100 })
+      .notNull()
+      .references(() => vouchers.code, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    courseId: int("course_id")
+      .notNull()
+      .references(() => courses.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    redeemedAt: timestamp("redeemed_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    voucherUserUniq: uniqueIndex("voucher_redemptions_voucher_user_uniq").on(
+      table.voucherCode,
+      table.userId
+    ),
+  })
+);
+
+// Jejak audit tindakan administratif dan perubahan hak akses
+// (pemberian/pencabutan akses manual, penerbitan/pencabutan sertifikat, dsb).
+export const auditLogs = mysqlTable("audit_logs", {
+  id: int("id").autoincrement().primaryKey(),
+  actorUserId: int("actor_user_id").references(() => users.id, {
+    onDelete: "set null",
+    onUpdate: "cascade",
+  }),
+  action: varchar("action", { length: 100 }).notNull(),
+  targetType: varchar("target_type", { length: 50 }).notNull(),
+  targetIdInt: int("target_id_int"),
+  targetIdStr: varchar("target_id_str", { length: 100 }),
+  metadata: json("metadata").$type<Record<string, unknown>>(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
 // Sertifikat per modul (K-05). Sertifikat tingkat kursus adalah turunan
 // (terbit bila semua modul tuntas) sehingga tidak disimpan sebagai baris.
-export const certificates = mysqlTable("certificates", {
-  id: int("id").autoincrement().primaryKey(),
-  userId: int("user_id")
-    .notNull()
-    .references(() => users.id, {
-      onDelete: "cascade",
+// Kelayakan dievaluasi sekali saat penerbitan; snapshot persyaratan + nama
+// penerima diarsipkan agar materi baru belakangan tidak menginvalidasi.
+// Satu baris per (peserta, modul): UNIQUE(userId, moduleId) + transaksi
+// membuat penerbitan idempoten dan anti-ganda saat request bersamaan.
+export const certificates = mysqlTable(
+  "certificates",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    courseId: int("course_id")
+      .notNull()
+      .references(() => courses.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    moduleId: int("module_id")
+      .notNull()
+      .references(() => modules.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    // ID kredensial deterministik ala frontend lawas, mis. ATS-2026-C1-M1.
+    // Dipertahankan nullable demi kompatibilitas seed lama; kode verifikasi
+    // resmi adalah `code` (unik per sertifikat, tak tertebak).
+    credentialId: varchar("credential_id", { length: 100 }).unique(),
+    // Kode verifikasi unik buatan server, mis. ATS-2026-3F9AC2E1.
+    code: varchar("code", { length: 32 }).notNull().unique(),
+    // Snapshot nama penerima saat terbit; ganti nama profil tak mengubahnya.
+    recipientName: varchar("recipient_name", { length: 100 }).notNull(),
+    // Arsip persyaratan saat kelayakan diverifikasi (audit Tahap 3).
+    requirementsSnapshot: json("requirements_snapshot").$type<{
+      evaluatedAt: string;
+      materials: Array<{
+        materialId: number;
+        title: string;
+        type: string;
+        state: string;
+      }>;
+    }>(),
+    status: mysqlEnum("status", ["issued", "revoked"])
+      .notNull()
+      .default("issued"),
+    revokeReason: varchar("revoke_reason", { length: 500 }),
+    revokedBy: int("revoked_by").references(() => users.id, {
+      onDelete: "set null",
       onUpdate: "cascade",
     }),
-  moduleId: int("module_id")
-    .notNull()
-    .references(() => modules.id, {
-      onDelete: "cascade",
-      onUpdate: "cascade",
-    }),
-  // ID kredensial deterministik ala frontend, mis. ATS-2026-C1-M1.
-  credentialId: varchar("credential_id", { length: 100 }).unique(),
-  status: mysqlEnum("status", ["issued", "revoked"])
-    .notNull()
-    .default("issued"),
-  issuedAt: timestamp("issued_at").defaultNow().notNull(),
-});
+    revokedAt: timestamp("revoked_at"),
+    issuedAt: timestamp("issued_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    userModuleUniq: uniqueIndex("certificates_user_module_uniq").on(
+      table.userId,
+      table.moduleId
+    ),
+  })
+);

@@ -2,13 +2,14 @@
 	import { goto } from '$app/navigation';
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
+	import { uniraLogo } from '$lib/assets/logo';
 	import {
-		DEMO_ACCOUNTS,
+		PORTALS,
 		ROLE_LABEL,
 		homeFor,
-		isDemoAuthEnabled,
 		loadSession,
 		loginWithBackend,
+		verifySession,
 		type Role
 	} from '$lib/stores/auth.svelte';
 
@@ -36,15 +37,14 @@
 
 	let activeTab = $state<Role>('student');
 	let showPassword = $state(false);
-	// Demo DEV-only: prefill hanya bila mode demo aktif. Production mulai kosong.
-	const demoEnabled = isDemoAuthEnabled();
-	let email = $state(demoEnabled ? DEMO_ACCOUNTS[0].email : '');
-	let password = $state(demoEnabled ? DEMO_ACCOUNTS[0].password : '');
+	// Deploy: mulai kosong, tanpa prefill demo.
+	let email = $state('');
+	let password = $state('');
 	let rememberMe = $state(false);
 	let isLoading = $state(false);
 	let errorMessage = $state('');
 
-	const account = $derived(DEMO_ACCOUNTS.find((a) => a.role === activeTab)!);
+	const account = $derived(PORTALS.find((a) => a.role === activeTab)!);
 	const style = $derived(TAB_STYLE[activeTab]);
 
 	function togglePassword() {
@@ -53,21 +53,8 @@
 
 	function selectTab(role: Role) {
 		activeTab = role;
-		if (demoEnabled) {
-			const demo = DEMO_ACCOUNTS.find((a) => a.role === role)!;
-			email = demo.email;
-			password = demo.password;
-		} else {
-			email = '';
-			password = '';
-		}
-		errorMessage = '';
-	}
-
-	function fillDemo() {
-		if (!demoEnabled) return;
-		email = account.email;
-		password = account.password;
+		email = '';
+		password = '';
 		errorMessage = '';
 	}
 
@@ -96,10 +83,18 @@
 		}
 	}
 
-	// Sudah login → langsung ke portal perannya
+	// Sudah login (terverifikasi server) → langsung ke portal perannya.
+	// Tidak memakai loadSession mentah agar sesi palsu tidak lolos.
 	$effect(() => {
-		const s = loadSession();
-		if (s) goto(homeFor(s.role));
+		let cancelled = false;
+		if (!loadSession()) return;
+		(void (async () => {
+			const res = await verifySession();
+			if (!cancelled && res.ok) goto(homeFor(res.session.role));
+		})());
+		return () => {
+			cancelled = true;
+		};
 	});
 </script>
 
@@ -152,27 +147,27 @@
 				</p>
 
 				<div class="space-y-2.5">
-					{#each DEMO_ACCOUNTS as demo (demo.role)}
+					{#each PORTALS as portal (portal.role)}
 						<button
 							type="button"
-							onclick={() => selectTab(demo.role)}
-							aria-pressed={activeTab === demo.role}
-							class={`flex w-full max-w-md items-center gap-3 rounded-2xl border p-3.5 text-left backdrop-blur-sm transition-all focus-visible:outline-2 focus-visible:outline-cyan-300 ${activeTab === demo.role ? 'border-cyan-300/60 bg-white/15' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}
+							onclick={() => selectTab(portal.role)}
+							aria-pressed={activeTab === portal.role}
+							class={`flex w-full max-w-md items-center gap-3 rounded-2xl border p-3.5 text-left backdrop-blur-sm transition-all focus-visible:outline-2 focus-visible:outline-cyan-300 ${activeTab === portal.role ? 'border-cyan-300/60 bg-white/15' : 'border-white/10 bg-white/5 hover:bg-white/10'}`}
 						>
 							<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-white/10">
-								<i class={`fa-solid ${demo.icon} text-cyan-300`} aria-hidden="true"></i>
+								<i class={`fa-solid ${portal.icon} text-cyan-300`} aria-hidden="true"></i>
 							</span>
 							<span class="min-w-0 flex-1">
 								<span class="block text-sm font-bold text-white">
-									Portal {ROLE_LABEL[demo.role]}
-									{#if activeTab === demo.role}
+									Portal {ROLE_LABEL[portal.role]}
+									{#if activeTab === portal.role}
 										<span class="ml-1.5 rounded-full bg-cyan-400/20 px-2 py-0.5 text-[10px] font-bold text-cyan-200">dipilih</span>
 									{/if}
 								</span>
-								<span class="block truncate text-xs text-blue-200">{demo.description}</span>
+								<span class="block truncate text-xs text-blue-200">{portal.description}</span>
 							</span>
 							<i
-								class={`fa-solid fa-chevron-right text-xs ${activeTab === demo.role ? 'text-cyan-300' : 'text-white/30'}`}
+								class={`fa-solid fa-chevron-right text-xs ${activeTab === portal.role ? 'text-cyan-300' : 'text-white/30'}`}
 								aria-hidden="true"
 							></i>
 						</button>
@@ -264,7 +259,7 @@
 								name="email"
 								type="email"
 								autocomplete="email"
-								placeholder={account.email}
+								placeholder="nama@email.com"
 								bind:value={email}
 								class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-4 pl-11 text-sm text-slate-800 transition-all placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 							/>
@@ -356,38 +351,17 @@
 						<div class="grow border-t border-slate-200"></div>
 					</div>
 
-					<!-- Demo account DEV-ONLY: disembunyikan di production -->
-					{#if demoEnabled}
-						<div class="rounded-xl border border-dashed border-blue-200 bg-blue-50/60 px-4 py-2.5">
-							<p class="mb-1 text-[10px] font-bold tracking-wider text-blue-600 uppercase">
-								Mode demo (dev saja — tanpa backend)
-							</p>
-						<div class="flex flex-wrap items-center justify-between gap-2">
-							<span>
-								<span class="block text-[11px] font-bold text-slate-800">
-									{account.badge} — {account.name}
-								</span>
-								<span class="block font-mono text-[11px] text-blue-700">
-									{account.email} · {account.password}
-								</span>
-							</span>
-							<button
-								type="button"
-								onclick={fillDemo}
-								class="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-							>
-								<i class="fa-solid fa-wand-magic-sparkles" aria-hidden="true"></i>
-								Isi otomatis
-							</button>
-						</div>
-						</div>
-					{/if}
-
 					<a
 						href="/with_UNIRA"
 						class="flex w-full items-center justify-center gap-2.5 rounded-xl border border-slate-200 bg-white px-6 py-2.5 text-sm font-semibold text-slate-700 transition-all duration-200 hover:border-slate-300 hover:bg-slate-50 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
+						aria-label="Masuk dengan UNIRA (segera hadir, belum terhubung backend)"
+						title="SSO UNIRA belum terhubung backend pada deploy ini"
 					>
-						<i class="fa-brands fa-google text-red-500" aria-hidden="true"></i>
+						<img
+							src={uniraLogo}
+							alt="Logo UNIRA"
+							class="h-5 w-5 rounded-full object-cover"
+						/>
 						<span>Masuk dengan UNIRA</span>
 					</a>
 				</form>

@@ -8,15 +8,20 @@
 		type CoursePeriod as MetaPeriod
 	} from '$lib/data/course-meta';
 	import {
-		fetchMyCourses,
-		fetchCourseTree,
 		deleteCourse,
 		toCourseView,
 		publishBadge,
 		markServerKelola,
 		type BackendCourse
 	} from '$lib/api/courses';
+	import {
+		loadMyCourses,
+		loadCourseTree,
+		invalidateMyCourses,
+		invalidateCourseTree
+	} from '$lib/stores/instructor-courses.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	type Status = 'all' | 'Aktif' | 'Draft';
 
@@ -45,9 +50,14 @@
 		try {
 			await deleteCourse(deleteTarget.id);
 			const removed = deleteTarget.id;
+			const removedTitle = deleteTarget.title;
 			serverCourses = serverCourses.filter((c) => c.id !== removed);
+			// Mutasi sukses: invalidasi cache domain agar kunjungan berikutnya baca server.
+			invalidateMyCourses();
+			invalidateCourseTree(removed);
 			deleteTarget = null;
 			showDelete = false;
+			toast.success(`Kursus “${removedTitle}” dihapus.`);
 		} catch (e) {
 			deleteError = e instanceof Error ? e.message : 'Gagal menghapus kursus.';
 		} finally {
@@ -59,7 +69,8 @@
 		loading = true;
 		loadError = '';
 		try {
-			const list: BackendCourse[] = await fetchMyCourses();
+			// Cache terpusat: mount ulang/double-effect berbagi hasil tanpa request baru.
+			const list: BackendCourse[] = await loadMyCourses();
 			const adapted = list.map(toCourseView);
 			serverCourses = adapted;
 			for (const c of adapted) markServerKelola(c.id);
@@ -71,8 +82,8 @@
 						: { period: 'ongoing' };
 			}
 			backendPeriod = periods;
-			// Muat pohon tiap kursus untuk hitungan modul/materi (best-effort).
-			const trees = await Promise.allSettled(adapted.map((c) => fetchCourseTree(c.id)));
+			// Muat pohon tiap kursus (best-effort, didedup per courseId di store).
+			const trees = await Promise.allSettled(adapted.map((c) => loadCourseTree(c.id)));
 			trees.forEach((t, i) => {
 				if (t.status === 'fulfilled') {
 					adapted[i].modules = t.value;

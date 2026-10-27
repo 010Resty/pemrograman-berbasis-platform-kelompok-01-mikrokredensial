@@ -12,6 +12,7 @@
 		saveCurriculumDraft,
 		withSyncedFlat
 	} from '$lib/stores/curriculum';
+	import { invalidateCourseTree } from '$lib/stores/instructor-courses.svelte';
 	import {
 		countDocWords,
 		loadMaterialDoc,
@@ -238,6 +239,8 @@
 		if (!serverMode || !isServerId(materialId)) return true;
 		try {
 			await updateMaterial(Number(materialId), { title });
+			// Judul tampil di tree: tandai basi setelah sukses.
+			invalidateCourseTree(courseId);
 			return true;
 		} catch (e) {
 			saveError = e instanceof Error ? e.message : 'Gagal menyimpan judul ke server.';
@@ -298,6 +301,8 @@
 				title,
 				passScore: normalizePassScore(draft.passScore)
 			});
+			// Judul ikut di-PATCH: tandai tree basi (isi soal tidak tersimpan di tree).
+			invalidateCourseTree(courseId);
 			await loadServerQuiz(Number(materialId));
 			return true;
 		} catch (e) {

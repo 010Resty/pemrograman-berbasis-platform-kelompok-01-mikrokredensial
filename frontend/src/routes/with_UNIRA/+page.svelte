@@ -1,28 +1,31 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import { uniraLogo } from '$lib/assets/logo';
-	import { loginWithUnita } from '$lib/stores/auth.svelte';
 
 	let showPassword = $state(false);
 	let nim = $state('');
 	let password = $state('');
 	let isLoading = $state(false);
+	let errorMessage = $state('');
 
 	function togglePassword() {
 		showPassword = !showPassword;
 	}
 
+	/**
+	 * SSO UNIRA belum terhubung backend (mock dilarang untuk deploy).
+	 * Form tidak membuat sesi — user diarahkan login email/backend.
+	 */
 	function handleSubmit(event: Event) {
 		event.preventDefault();
-		if (!nim.trim() || !password) return;
-		isLoading = true;
-		setTimeout(() => {
-			isLoading = false;
-			loginWithUnita(nim);
-			goto('/user');
-		}, 900);
+		errorMessage = '';
+		if (!nim.trim() || !password) {
+			errorMessage = 'NIM dan kata sandi wajib diisi.';
+			return;
+		}
+		errorMessage =
+			'SSO UNIRA belum terhubung ke backend pada deploy ini. Gunakan Masuk dengan Email / Akun Aristoteles.';
 	}
 </script>
 
@@ -70,6 +73,15 @@
 
 				<!-- Form -->
 				<form class="space-y-4" onsubmit={handleSubmit}>
+					{#if errorMessage}
+						<p
+							role="alert"
+							class="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-800"
+						>
+							<i class="fa-solid fa-circle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
+							<span>{errorMessage}</span>
+						</p>
+					{/if}
 					<!-- NIM Input -->
 					<div>
 						<label for="nim" class="block text-sm font-semibold text-slate-700 mb-1.5">
