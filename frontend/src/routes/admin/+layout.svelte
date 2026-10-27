@@ -4,26 +4,40 @@
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
-	import { homeFor, loadSession, logout } from '$lib/stores/auth.svelte';
+	import { homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
+	import { untrack } from 'svelte';
 
 	let { children } = $props();
 
-	// Guard portal admin: wajib login dengan role admin.
-	let authorized = $state(false);
+	// Guard portal admin: sesi diverifikasi ke server (/me), peran dari server.
+	// `started` + `untrack`: verifySession membaca $state (via loadSession);
+	// tanpa ini $effect berlangganan ulang dan memicu loop /me tanpa henti.
+	let phase = $state<'checking' | 'ready' | 'down'>('checking');
+	let started = false;
 
 	$effect(() => {
-		if (!browser) return;
-		const session = loadSession();
-		if (!session) {
-			goto('/login');
-			return;
-		}
-		if (session.role !== 'admin') {
-			goto(homeFor(session.role));
-			return;
-		}
-		authorized = true;
+		if (!browser || started) return;
+		started = true;
+		untrack(() => void runVerify());
 	});
+
+	async function runVerify(): Promise<void> {
+		phase = 'checking';
+		const res = await verifySession();
+		if (res.ok) {
+			if (res.session.role !== 'admin') {
+				goto(homeFor(res.session.role));
+				return;
+			}
+			phase = 'ready';
+			return;
+		}
+		if (res.reason === 'backend-down') {
+			phase = 'down';
+			return;
+		}
+		goto('/login');
+	}
 
 	function handleLogout() {
 		logout();
@@ -64,7 +78,7 @@
 	Lewati ke konten utama
 </a>
 
-{#if authorized}
+{#if phase === 'ready'}
 <div class="grid min-h-screen grid-cols-1 bg-slate-50 lg:grid-cols-[auto_1fr]">
 	<Sidebar
 		{navItems}
@@ -215,9 +229,33 @@
 	</div>
 </div>
 {:else}
-	<div class="flex min-h-screen items-center justify-center bg-slate-50" role="status" aria-label="Memeriksa sesi">
-		<p class="flex items-center gap-2 text-sm font-semibold text-slate-500">
-			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memeriksa sesi portal...
-		</p>
+	<div
+		class="flex min-h-screen items-center justify-center bg-slate-50"
+		role="status"
+		aria-label={phase === 'down' ? 'Backend tidak tersedia' : 'Memeriksa sesi'}
+	>
+		{#if phase === 'down'}
+			<div class="max-w-sm px-6 text-center">
+				<p class="flex items-center justify-center gap-2 text-sm font-bold text-slate-700">
+					<i class="fa-solid fa-triangle-exclamation text-amber-500" aria-hidden="true"></i>
+					Backend tidak tersedia
+				</p>
+				<p class="mt-1 text-xs text-slate-500">
+					Sesi Anda belum diverifikasi ke server. Periksa backend lalu coba lagi — Anda tidak
+					dikeluarkan.
+				</p>
+				<button
+					type="button"
+					onclick={() => void runVerify()}
+					class="mt-3 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+				>
+					<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+				</button>
+			</div>
+		{:else}
+			<p class="flex items-center gap-2 text-sm font-semibold text-slate-500">
+				<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memeriksa sesi portal...
+			</p>
+		{/if}
 	</div>
 {/if}

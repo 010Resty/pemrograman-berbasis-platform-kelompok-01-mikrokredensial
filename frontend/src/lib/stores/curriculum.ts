@@ -2,6 +2,7 @@ import {
 	getCourseById,
 	normalizeMaterialType,
 	type CourseModule,
+	type SubModule,
 	type Material
 } from '$lib/data/courses';
 
@@ -21,28 +22,34 @@ function storageKey(courseId: number): string {
 	return `kurikulum-draft-${courseId}`;
 }
 
-/** Normalisasi draf: tiap modul wajib punya sub-modul + flat materials sinkron. */
+/** Normalisasi draf: selaraskan flat materials + tipe materi.
+ * Sub-modul default HANYA dibuat bila field subModules belum ada sama sekali
+ * (draf lama); array kosong yang disengaja (mis. modul server baru) dibiarkan
+ * kosong agar tidak muncul sub hantu. */
 export function normalizeModule(mod: CourseModule): CourseModule {
+	const hasSubs = Array.isArray(mod.subModules);
 	const subs =
-		mod.subModules?.length && mod.subModules.length > 0
-			? mod.subModules.map((s) => ({
+		hasSubs && (mod.subModules as SubModule[]).length > 0
+			? (mod.subModules as SubModule[]).map((s) => ({
 					...s,
 					materials: (s.materials ?? []).map((m: Material) => ({
 						...m,
 						type: normalizeMaterialType(String(m.type))
 					}))
 				}))
-			: [
-					{
-						id: `${mod.id}-sub1`,
-						title: 'Sub-modul 1',
-						description: mod.description,
-						materials: (mod.materials ?? []).map((m: Material) => ({
-							...m,
-							type: normalizeMaterialType(String(m.type))
-						}))
-					}
-				];
+			: hasSubs
+				? []
+				: [
+						{
+							id: `${mod.id}-sub1`,
+							title: 'Sub-modul 1',
+							description: mod.description,
+							materials: (mod.materials ?? []).map((m: Material) => ({
+								...m,
+								type: normalizeMaterialType(String(m.type))
+							}))
+						}
+					];
 	return { ...mod, subModules: subs, materials: subs.flatMap((s) => s.materials) };
 }
 

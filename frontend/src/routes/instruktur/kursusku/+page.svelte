@@ -1,13 +1,96 @@
 <script lang="ts">
-	import { courses, type Course } from '$lib/data/courses';
-	import { getCourseMeta, periodBadgeClass, periodIcon } from '$lib/data/course-meta';
-
-	// Kursus milik instruktur demo (Kevin Perry) + 2 kursus kolaborasi.
-	// Untuk demo, tampilkan 4 kursus pertama sebagai "kursusku" instruktur.
-	const ownedIds = [1, 5, 3, 4];
-	const owned = $derived(courses.filter((c) => ownedIds.includes(c.id)));
+	import { browser } from '$app/environment';
+	import type { Course } from '$lib/data/courses';
+	import {
+		getCourseMeta,
+		periodBadgeClass,
+		periodIcon,
+		type CoursePeriod as MetaPeriod
+	} from '$lib/data/course-meta';
+	import {
+		fetchMyCourses,
+		fetchCourseTree,
+		deleteCourse,
+		toCourseView,
+		publishBadge,
+		markServerKelola,
+		type BackendCourse
+	} from '$lib/api/courses';
+	import WarningModal from '$lib/components/WarningModal.svelte';
 
 	type Status = 'all' | 'Aktif' | 'Draft';
+
+	/** Kursus server milik instruktur login + jumlah modul/materi dari pohon. */
+	let serverCourses = $state<Array<Course & { publishState: string }>>([]);
+	let backendPeriod = $state<Record<number, { period: MetaPeriod; startMonth?: string }>>({});
+	let loading = $state(true);
+	let loadError = $state('');
+
+	/** State hapus kursus (konfirmasi via WarningModal pola proyek). */
+	let showDelete = $state(false);
+	let deleting = $state(false);
+	let deleteTarget = $state<{ id: number; title: string } | null>(null);
+	let deleteError = $state('');
+
+	function askDeleteCourse(id: number, title: string): void {
+		deleteTarget = { id, title };
+		deleteError = '';
+		showDelete = true;
+	}
+
+	async function confirmDeleteCourse(): Promise<void> {
+		if (!deleteTarget || deleting) return;
+		deleting = true;
+		deleteError = '';
+		try {
+			await deleteCourse(deleteTarget.id);
+			const removed = deleteTarget.id;
+			serverCourses = serverCourses.filter((c) => c.id !== removed);
+			deleteTarget = null;
+			showDelete = false;
+		} catch (e) {
+			deleteError = e instanceof Error ? e.message : 'Gagal menghapus kursus.';
+		} finally {
+			deleting = false;
+		}
+	}
+
+	async function load(): Promise<void> {
+		loading = true;
+		loadError = '';
+		try {
+			const list: BackendCourse[] = await fetchMyCourses();
+			const adapted = list.map(toCourseView);
+			serverCourses = adapted;
+			for (const c of adapted) markServerKelola(c.id);
+			const periods: Record<number, { period: MetaPeriod; startMonth?: string }> = {};
+			for (const b of list) {
+				periods[b.id] =
+					b.period === 'upcoming' || b.period === 'ongoing' || b.period === 'ended'
+						? { period: b.period, startMonth: b.startMonth ?? undefined }
+						: { period: 'ongoing' };
+			}
+			backendPeriod = periods;
+			// Muat pohon tiap kursus untuk hitungan modul/materi (best-effort).
+			const trees = await Promise.allSettled(adapted.map((c) => fetchCourseTree(c.id)));
+			trees.forEach((t, i) => {
+				if (t.status === 'fulfilled') {
+					adapted[i].modules = t.value;
+					adapted[i].totalMaterials = t.value.flatMap((m) => m.materials).length;
+				}
+			});
+		} catch (e) {
+			loadError = e instanceof Error ? e.message : 'Gagal memuat kursus.';
+		} finally {
+			loading = false;
+		}
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		void load();
+	});
+
 	let activeFilter = $state<Status>('all');
 	let search = $state('');
 
@@ -17,12 +100,12 @@
 		{ value: 'Draft', label: 'Draft' }
 	];
 
-	function courseStatus(c: Course): 'Aktif' | 'Draft' {
-		return c.id === 4 ? 'Draft' : 'Aktif';
+	function courseStatus(c: Course & { publishState?: string }): 'Aktif' | 'Draft' {
+		return publishBadge((c as { publishState?: string }).publishState ?? 'draft');
 	}
 
 	const filtered = $derived(
-		owned.filter((c) => {
+		serverCourses.filter((c) => {
 			const st = courseStatus(c);
 			const matchStatus = activeFilter === 'all' || st === activeFilter;
 			const q = search.trim().toLowerCase();
@@ -33,7 +116,11 @@
 	);
 
 	const filteredWithMeta = $derived(
-		filtered.map((c) => ({ course: c, meta: getCourseMeta(c.id) }))
+		filtered.map((c) => {
+			const base = getCourseMeta(c.id);
+			const ov = backendPeriod[c.id];
+			return { course: c, meta: ov ? { ...base, ...ov } : base };
+		})
 	);
 </script>
 
@@ -51,8 +138,11 @@
 			<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">Menu Utama · Kursusku</p>
 			<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Kursusku</h1>
 			<p class="mt-1 text-sm text-slate-500">
-				{owned.length} kursus kamu ampu · {owned.reduce((n, c) => n + c.modules.length, 0)} modul ·
-				{owned.reduce((n, c) => n + c.totalMaterials, 0)} materi.
+				{serverCourses.length} kursus kamu ampu · {serverCourses.reduce(
+					(n, c) => n + c.modules.length,
+					0
+				)} modul ·
+				{serverCourses.reduce((n, c) => n + c.totalMaterials, 0)} materi.
 			</p>
 		</div>
 		<a
@@ -100,7 +190,24 @@
 		</div>
 	</div>
 
-	{#if filtered.length === 0}
+	{#if loading}
+		<div class="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-12 text-sm font-semibold text-slate-500" role="status" aria-label="Memuat kursus">
+			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat kursus dari server...
+		</div>
+	{:else if loadError}
+		<div class="rounded-2xl border border-red-200 bg-red-50 p-12 text-center" role="alert">
+			<i class="fa-solid fa-triangle-exclamation mb-3 text-3xl text-red-300" aria-hidden="true"></i>
+			<p class="text-sm font-bold text-red-800">Gagal memuat kursus</p>
+			<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{loadError}</p>
+			<button
+				type="button"
+				onclick={() => void load()}
+				class="mt-4 inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-xs font-bold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-red-600"
+			>
+				<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+			</button>
+		</div>
+	{:else if filtered.length === 0}
 		<div class="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
 			<i class="fa-solid fa-folder-open mb-3 text-3xl text-slate-300" aria-hidden="true"></i>
 			<p class="text-sm font-semibold text-slate-700">Tidak ada kursus pada filter ini.</p>
@@ -141,7 +248,7 @@
 						</p>
 						<h2 class="mt-1 line-clamp-2 text-base font-bold text-slate-900">
 							<a
-								href={`/instruktur/kursusku/${course.id}`}
+								href={`/instruktur/kursusku/${course.id}?src=server`}
 								class="rounded transition-colors duration-200 ease-smooth hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
 								{course.title}
@@ -175,17 +282,19 @@
 
 						<div class="mt-5 flex gap-2">
 							<a
-								href={`/instruktur/kursusku/${course.id}`}
+								href={`/instruktur/kursusku/${course.id}?src=server`}
 								class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
 								<i class="fa-solid fa-list-check" aria-hidden="true"></i> Kelola Kurikulum
 							</a>
 							<button
 								type="button"
-								aria-label={`Pengaturan cepat ${course.title}`}
-								class="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition-colors duration-200 ease-smooth hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
+								onclick={() => askDeleteCourse(course.id, course.title)}
+								aria-label={`Hapus kursus ${course.title}`}
+								title="Hapus kursus beserta seluruh kurikulumnya"
+								class="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-red-200 text-red-600 transition-colors duration-200 ease-smooth hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-600"
 							>
-								<i class="fa-solid fa-gear" aria-hidden="true"></i>
+								<i class="fa-solid fa-trash-can" aria-hidden="true"></i>
 							</button>
 						</div>
 					</div>
@@ -193,4 +302,24 @@
 			{/each}
 		</div>
 	{/if}
+
+	{#if deleteError}
+		<p role="alert" class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">
+			<i class="fa-solid fa-triangle-exclamation mr-1.5" aria-hidden="true"></i>{deleteError}
+		</p>
+	{/if}
 </div>
+
+<WarningModal
+	bind:open={showDelete}
+	type="danger"
+	title="Hapus kursus ini?"
+	message={deleteTarget
+		? `“${deleteTarget.title}” beserta seluruh modul, sub-modul, dan materinya akan dihapus permanen dan tidak bisa dikembalikan.`
+		: 'Kursus beserta seluruh kurikulumnya akan dihapus permanen.'}
+	confirmText="Ya, hapus kursus"
+	cancelText="Batal"
+	confirmAriaLabel={deleteTarget ? `Konfirmasi hapus kursus ${deleteTarget.title}` : 'Konfirmasi hapus kursus'}
+	loading={deleting}
+	onconfirm={() => void confirmDeleteCourse()}
+/>

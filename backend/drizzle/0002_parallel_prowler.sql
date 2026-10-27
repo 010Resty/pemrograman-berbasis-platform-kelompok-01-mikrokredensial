@@ -1,0 +1,1 @@
+ALTER TABLE `materials` ADD `pass_score` int DEFAULT 70 NOT NULL;

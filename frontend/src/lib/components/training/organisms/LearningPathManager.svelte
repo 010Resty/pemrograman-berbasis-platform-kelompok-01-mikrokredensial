@@ -2,6 +2,7 @@
 	import { SvelteSet } from 'svelte/reactivity';
 	import type { CourseModule, SubModule } from '$lib/data/courses';
 	import { resolveSubModules } from '$lib/data/training';
+	import { isServerId } from '$lib/api/courses';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 
 	/**
@@ -12,12 +13,31 @@
 	let {
 		modules = $bindable([]),
 		onnotice = () => {},
-		moduleHref
+		moduleHref,
+		persist,
+		withDefaultSub = true
 	}: {
 		modules: CourseModule[];
 		onnotice?: (msg: string) => void;
 		/** Bila diisi, judul modul menjadi tautan ke halaman kelola sub-modulnya. */
 		moduleHref?: (mod: CourseModule, index: number) => string;
+		/**
+		 * Jembatan persistensi server (opsional). Bila diisi, tiap aksi
+		 * menyunting modul juga ditulis ke backend; bila tidak diisi,
+		 * perilaku murni draf lokal seperti semula.
+		 */
+		persist?: {
+			create?: (input: {
+				title: string;
+				description: string;
+				position: number;
+			}) => Promise<string | null>;
+			update?: (id: string, input: { title?: string; description?: string; position?: number }) => Promise<void>;
+			remove?: (id: string) => Promise<void>;
+			move?: (orderedIds: string[]) => Promise<void>;
+		};
+		/** Buat sub-modul awal otomatis (dimatikan untuk kursus server — sub dibuat eksplisit). */
+		withDefaultSub?: boolean;
 	} = $props();
 
 	const uid = (prefix: string) =>
@@ -62,7 +82,7 @@
 	}
 
 	/** Satu-satunya jalan menyimpan perubahan nama/deskripsi modul. */
-	function saveModuleDraft(id: string | null) {
+	async function saveModuleDraft(id: string | null) {
 		if (!id) return;
 		const d = editDrafts[id];
 		const idx = modules.findIndex((m) => m.id === id);
@@ -72,6 +92,14 @@
 			return;
 		}
 		delete editErrors[id];
+		if (persist?.update && isServerId(id)) {
+			try {
+				await persist.update(id, { title: d.title, description: d.description });
+			} catch (e) {
+				editErrors[id] = e instanceof Error ? e.message : 'Gagal menyimpan modul ke server.';
+				return;
+			}
+		}
 		modules = modules.map((m, i) =>
 			i === idx ? { ...m, title: d.title, description: d.description } : m
 		);
@@ -108,20 +136,55 @@
 		onnotice(msg);
 	}
 
-	function addModule(atIndex?: number) {
-		const id = uid('mod');
-		const subId = uid('sub');
+	async function addModule(atIndex?: number) {
+		const pos =
+			atIndex === undefined || atIndex < 0 || atIndex > modules.length
+				? modules.length
+				: atIndex;
+		const draftTitle = `Modul Baru ${modules.length + 1}`;
+		const draftDesc = 'Deskripsi singkat modul baru — klik untuk sunting.';
+		let id = uid('mod');
+		let subId: string | null = null;
+		if (persist?.create) {
+			try {
+				const serverId = await persist.create({
+					title: draftTitle,
+					description: draftDesc,
+					position: pos
+				});
+				if (!serverId) {
+					announce('Gagal menyimpan modul baru ke server.');
+					return;
+				}
+				id = serverId;
+			} catch (e) {
+				announce(e instanceof Error ? e.message : 'Gagal menyimpan modul baru ke server.');
+				return;
+			}
+		} else {
+			subId = uid('sub');
+		}
 		const next: CourseModule = {
 			id,
-			title: `Modul Baru ${modules.length + 1}`,
-			description: 'Deskripsi singkat modul baru — klik untuk sunting.',
+			title: draftTitle,
+			description: draftDesc,
 			materials: [],
-			subModules: [{ id: subId, title: 'Sub-modul 1', description: '', materials: [] }]
+			subModules:
+				withDefaultSub && subId
+					? [{ id: subId, title: 'Sub-modul 1', description: '', materials: [] }]
+					: []
 		};
 		if (atIndex === undefined || atIndex < 0 || atIndex > modules.length) {
 			modules = [...modules, next];
 		} else {
 			modules = [...modules.slice(0, atIndex), next, ...modules.slice(atIndex)];
+		}
+		if (persist?.move) {
+			try {
+				await persist.move(modules.map((m) => m.id));
+			} catch (e) {
+				announce(e instanceof Error ? e.message : 'Gagal menyimpan urutan modul.');
+			}
 		}
 		openPatches.add(id);
 		editDrafts[id] = { title: next.title, description: next.description };
@@ -159,6 +222,13 @@
 		const next = [...modules];
 		[next[idx], next[target]] = [next[target], next[idx]];
 		modules = next;
+		if (persist?.move) {
+			void persist
+				.move(next.map((m) => m.id))
+				.catch((e: unknown) =>
+					announce(e instanceof Error ? e.message : 'Gagal menyimpan urutan modul.')
+				);
+		}
 		announce(`Modul dipindah ke posisi ${target + 1}.`);
 	}
 
@@ -166,12 +236,20 @@
 		pendingDelete = null;
 	}
 
-	function executeDelete() {
+	async function executeDelete() {
 		const target = pendingDelete;
+		if (!target) return;
+		if (persist?.remove && isServerId(target.moduleId)) {
+			try {
+				await persist.remove(target.moduleId);
+			} catch (e) {
+				announce(e instanceof Error ? e.message : 'Gagal menghapus modul di server.');
+				return;
+			}
+		}
 		pendingDelete = null;
 		showDelete = false;
 		closeMenu();
-		if (!target) return;
 		removeModule(target.moduleId);
 	}
 

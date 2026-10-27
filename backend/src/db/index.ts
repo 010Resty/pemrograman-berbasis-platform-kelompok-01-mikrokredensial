@@ -9,11 +9,30 @@ import mysql from "mysql2/promise";
 import { drizzle } from "drizzle-orm/mysql2";
 import * as schema from "./schema";
 
-const databaseUrl = process.env.DATABASE_URL;
+/**
+ * Konfigurasi koneksi Tahap 1.
+ * Prioritas: DATABASE_URL (satu string, cocok untuk production/PaaS).
+ * Fallback: DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME
+ * (cocok dengan `.env.example` dan `drizzle.config.ts`).
+ */
+export function buildDatabaseUrl(): string {
+  const direct = process.env.DATABASE_URL?.trim();
+  if (direct) return direct;
 
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL belum dikonfigurasi");
+  const host = process.env.DB_HOST || "localhost";
+  const port = Number.parseInt(process.env.DB_PORT || "3306", 10);
+  const user = process.env.DB_USER || "root";
+  const password = process.env.DB_PASSWORD || "";
+  const database = process.env.DB_NAME || "aristoteles";
+
+  if (!Number.isFinite(port)) {
+    throw new Error("DB_PORT harus berupa angka");
+  }
+
+  return `mysql://${encodeURIComponent(user)}:${encodeURIComponent(password)}@${host}:${port}/${database}`;
 }
+
+const databaseUrl = buildDatabaseUrl();
 
 const pool = mysql.createPool(databaseUrl);
 

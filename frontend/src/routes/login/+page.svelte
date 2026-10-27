@@ -6,8 +6,9 @@
 		DEMO_ACCOUNTS,
 		ROLE_LABEL,
 		homeFor,
+		isDemoAuthEnabled,
 		loadSession,
-		login,
+		loginWithBackend,
 		type Role
 	} from '$lib/stores/auth.svelte';
 
@@ -35,8 +36,10 @@
 
 	let activeTab = $state<Role>('student');
 	let showPassword = $state(false);
-	let email = $state(DEMO_ACCOUNTS[0].email);
-	let password = $state(DEMO_ACCOUNTS[0].password);
+	// Demo DEV-only: prefill hanya bila mode demo aktif. Production mulai kosong.
+	const demoEnabled = isDemoAuthEnabled();
+	let email = $state(demoEnabled ? DEMO_ACCOUNTS[0].email : '');
+	let password = $state(demoEnabled ? DEMO_ACCOUNTS[0].password : '');
 	let rememberMe = $state(false);
 	let isLoading = $state(false);
 	let errorMessage = $state('');
@@ -50,25 +53,35 @@
 
 	function selectTab(role: Role) {
 		activeTab = role;
-		const demo = DEMO_ACCOUNTS.find((a) => a.role === role)!;
-		email = demo.email;
-		password = demo.password;
+		if (demoEnabled) {
+			const demo = DEMO_ACCOUNTS.find((a) => a.role === role)!;
+			email = demo.email;
+			password = demo.password;
+		} else {
+			email = '';
+			password = '';
+		}
 		errorMessage = '';
 	}
 
 	function fillDemo() {
+		if (!demoEnabled) return;
 		email = account.email;
 		password = account.password;
 		errorMessage = '';
 	}
 
-	function handleSubmit(event: Event) {
+	/** Login nyata via backend. Gagal = tetap di halaman ini dengan pesan error. */
+	async function handleSubmit(event: Event) {
 		event.preventDefault();
 		errorMessage = '';
+		if (!email.trim() || !password) {
+			errorMessage = 'Email dan kata sandi wajib diisi.';
+			return;
+		}
 		isLoading = true;
-		setTimeout(() => {
-			isLoading = false;
-			const result = login(email, password, rememberMe);
+		try {
+			const result = await loginWithBackend(email, password, rememberMe);
 			if (!result.ok) {
 				errorMessage = result.error;
 				return;
@@ -78,7 +91,9 @@
 				return;
 			}
 			goto(account.home);
-		}, 700);
+		} finally {
+			isLoading = false;
+		}
 	}
 
 	// Sudah login → langsung ke portal perannya
@@ -341,8 +356,12 @@
 						<div class="grow border-t border-slate-200"></div>
 					</div>
 
-					<!-- Demo account per peran aktif -->
-					<div class="rounded-xl border border-dashed border-blue-200 bg-blue-50/60 px-4 py-2.5">
+					<!-- Demo account DEV-ONLY: disembunyikan di production -->
+					{#if demoEnabled}
+						<div class="rounded-xl border border-dashed border-blue-200 bg-blue-50/60 px-4 py-2.5">
+							<p class="mb-1 text-[10px] font-bold tracking-wider text-blue-600 uppercase">
+								Mode demo (dev saja — tanpa backend)
+							</p>
 						<div class="flex flex-wrap items-center justify-between gap-2">
 							<span>
 								<span class="block text-[11px] font-bold text-slate-800">
@@ -361,7 +380,8 @@
 								Isi otomatis
 							</button>
 						</div>
-					</div>
+						</div>
+					{/if}
 
 					<a
 						href="/with_UNIRA"

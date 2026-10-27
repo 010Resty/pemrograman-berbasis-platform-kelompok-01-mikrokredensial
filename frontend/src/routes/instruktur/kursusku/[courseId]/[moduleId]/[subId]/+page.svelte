@@ -13,6 +13,14 @@
 		saveCurriculumDraft,
 		withSyncedFlat
 	} from '$lib/stores/curriculum';
+	import {
+		resolveServerCourse,
+		isServerKelola,
+		isServerId,
+		createMaterial,
+		updateMaterial,
+		deleteMaterial
+	} from '$lib/api/courses';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 	import { getMaterialDocMeta } from '$lib/stores/material-docs';
 	import { loadQuizDraft, validateQuizDraft } from '$lib/stores/quiz-drafts';
@@ -24,7 +32,27 @@
 	const courseId = $derived(Number(page.params.courseId));
 	const moduleId = $derived(page.params.moduleId ?? '');
 	const subId = $derived(page.params.subId ?? '');
-	const course = $derived(getCourseById(courseId));
+	const serverMode = $derived(
+		page.url.searchParams.get('src') === 'server' || isServerKelola(courseId)
+	);
+	let serverCourse = $state<Awaited<ReturnType<typeof resolveServerCourse>>>(null);
+	let serverLoading = $state(false);
+	let serverLoadedFor = $state<number | null>(null);
+
+	$effect(() => {
+		if (!serverMode || serverLoadedFor === courseId) return;
+		serverLoadedFor = courseId;
+		serverLoading = true;
+		void resolveServerCourse(courseId)
+			.then((res) => {
+				serverCourse = res;
+			})
+			.finally(() => {
+				serverLoading = false;
+			});
+	});
+
+	const course = $derived(serverMode ? serverCourse : getCourseById(courseId));
 
 	let editableModules = $state<CourseModule[]>([]);
 	let savedMessage = $state('');
@@ -153,7 +181,7 @@
 	}
 
 	/** Satu-satunya jalan menyimpan perubahan judul/tipe/durasi materi. */
-	function saveMatDraft(id: string | null) {
+	async function saveMatDraft(id: string | null) {
 		if (!id || moduleIndex < 0 || subIndex < 0) return;
 		const d = matDrafts[id];
 		const m = editableModules[moduleIndex];
@@ -164,6 +192,14 @@
 			return;
 		}
 		delete matErrors[id];
+		if (serverMode && isServerId(id)) {
+			try {
+				await updateMaterial(Number(id), { title: d.title, type: d.type, duration: d.duration });
+			} catch (e) {
+				matErrors[id] = e instanceof Error ? e.message : 'Gagal menyimpan materi ke server.';
+				return;
+			}
+		}
 		const current = [...(m.subModules ?? [])];
 		const mats = [...current[subIndex].materials];
 		mats[mi] = { ...mats[mi], title: d.title, type: d.type, duration: d.duration };
@@ -204,31 +240,65 @@
 
 	function executeDelete() {
 		const target = pendingDelete;
+		if (!target || moduleIndex < 0 || subIndex < 0) return;
+		void executeDeleteAsync(target.matId);
+	}
+
+	async function executeDeleteAsync(matId: string): Promise<void> {
+		if (serverMode && isServerId(matId)) {
+			try {
+				await deleteMaterial(Number(matId));
+			} catch (e) {
+				markSaved(e instanceof Error ? e.message : 'Gagal menghapus materi di server.');
+				return;
+			}
+		}
 		pendingDelete = null;
 		showDelete = false;
 		menuFor = null;
 		menuPos = null;
-		if (!target || moduleIndex < 0 || subIndex < 0) return;
 		const m = editableModules[moduleIndex];
 		const current = [...(m.subModules ?? [])];
 		current[subIndex] = {
 			...current[subIndex],
-			materials: current[subIndex].materials.filter((x) => x.id !== target.matId)
+			materials: current[subIndex].materials.filter((x) => x.id !== matId)
 		};
 		editableModules[moduleIndex] = withSyncedFlat({ ...m, subModules: current });
-		openMats = openMats.filter((x) => x !== target.matId);
-		delete matDrafts[target.matId];
-		delete matErrors[target.matId];
+		openMats = openMats.filter((x) => x !== matId);
+		delete matDrafts[matId];
+		delete matErrors[matId];
 		markSaved('Materi dihapus.');
+		if (serverMode) void renumberMaterials();
 	}
 
 	function addMaterial() {
 		if (moduleIndex < 0 || subIndex < 0) return;
+		void addMaterialAsync();
+	}
+
+	async function addMaterialAsync(): Promise<void> {
+		if (moduleIndex < 0 || subIndex < 0) return;
 		const m = editableModules[moduleIndex];
 		const current = [...(m.subModules ?? [])];
 		const target = { ...current[subIndex], materials: [...current[subIndex].materials] };
+		let id = curriculumUid('mat');
+		if (serverMode && isServerId(subId)) {
+			try {
+				const created = await createMaterial(Number(subId), {
+					title: 'Materi baru',
+					type: 'materi',
+					duration: '10 mnt',
+					content: '{"type":"doc","content":[{"type":"paragraph"}]}',
+					position: target.materials.length
+				});
+				id = String(created.id);
+			} catch (e) {
+				markSaved(e instanceof Error ? e.message : 'Gagal menambah materi ke server.');
+				return;
+			}
+		}
 		target.materials.push({
-			id: curriculumUid('mat'),
+			id,
 			title: 'Materi baru',
 			type: 'materi' as MaterialType,
 			duration: '10 mnt',
@@ -264,7 +334,22 @@
 		[mats[idx], mats[target]] = [mats[target], mats[idx]];
 		current[subIndex] = { ...current[subIndex], materials: mats };
 		editableModules[moduleIndex] = withSyncedFlat({ ...m, subModules: current });
+		if (serverMode) void renumberMaterials();
 		markSaved(`Materi dipindah ke posisi ${target + 1}.`);
+	}
+
+	/** Tulis ulang position semua materi ke server sesuai urutan. */
+	async function renumberMaterials(): Promise<void> {
+		const mats = editableModules[moduleIndex]?.subModules?.[subIndex]?.materials ?? [];
+		try {
+			await Promise.all(
+				mats.map((t, i) =>
+					isServerId(t.id) ? updateMaterial(Number(t.id), { position: i }) : Promise.resolve()
+				)
+			);
+		} catch (e) {
+			markSaved(e instanceof Error ? e.message : 'Gagal menyimpan urutan materi.');
+		}
 	}
 
 	function typeLabel(type: string): string {
@@ -304,7 +389,11 @@
 <svelte:window onscroll={closeMenu} onresize={closeMenu} />
 
 <div class="p-4 sm:p-6 lg:p-8">
-	{#if !course}
+	{#if serverMode && serverLoading && !course}
+		<div class="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-12 text-sm font-semibold text-slate-500" role="status" aria-label="Memuat kursus">
+			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat kursus dari server...
+		</div>
+	{:else if !course}
 		<div class="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-10 text-center">
 			<i class="fa-solid fa-triangle-exclamation mb-3 text-3xl text-amber-500" aria-hidden="true"></i>
 			<h1 class="text-xl font-bold text-slate-900">Kursus tidak ditemukan</h1>

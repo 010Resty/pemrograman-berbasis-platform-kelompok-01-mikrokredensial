@@ -5,6 +5,8 @@
 	import { page } from '$app/state';
 	import { getCourseById, normalizeMaterialType } from '$lib/data/courses';
 	import type { CourseModule } from '$lib/data/courses';
+	import { resolveServerCourse, isServerKelola, isServerId, updateMaterial, fetchMaterialDetail } from '$lib/api/courses';
+	import { fetchQuizQuestions, saveQuizSet } from '$lib/api/quiz';
 	import {
 		loadCurriculumDraft,
 		saveCurriculumDraft,
@@ -44,7 +46,27 @@
 	const moduleId = $derived(page.params.moduleId ?? '');
 	const subId = $derived(page.params.subId ?? '');
 	const materialId = $derived(page.params.materialId ?? '');
-	const course = $derived(getCourseById(courseId));
+	const serverMode = $derived(
+		page.url.searchParams.get('src') === 'server' || isServerKelola(courseId)
+	);
+	let serverCourse = $state<Awaited<ReturnType<typeof resolveServerCourse>>>(null);
+	let serverLoading = $state(false);
+	let serverLoadedFor = $state<number | null>(null);
+
+	$effect(() => {
+		if (!serverMode || serverLoadedFor === courseId) return;
+		serverLoadedFor = courseId;
+		serverLoading = true;
+		void resolveServerCourse(courseId)
+			.then((res) => {
+				serverCourse = res;
+			})
+			.finally(() => {
+				serverLoading = false;
+			});
+	});
+
+	const course = $derived(serverMode ? serverCourse : getCourseById(courseId));
 
 	let editableModules = $state<CourseModule[]>([]);
 	let savedMessage = $state('');
@@ -60,6 +82,19 @@
 	let latestQuiz = $state<QuizDraft | null>(null);
 	let quizCount = $state(0);
 	let storedQuiz = $state<QuizDraft | null>(null);
+
+	/** Kuis server (materi kuis numerik saja): sumber kebenaran terpisah dari draf lokal.
+	 * Kunci jawaban tidak pernah dimuat dari server; impor butuh tandai ulang. */
+	let serverQuizQs = $state<Array<{ question: string; options: string[] }> | null>(null);
+	let serverQuizCount = $state(0);
+	let serverQuizLoading = $state(false);
+	let serverQuizError = $state('');
+	let serverQuizPass = $state<number | null>(null);
+	let quizServerLoadedFor = $state<string | null>(null);
+	let quizEditorKey = $state(0);
+	let showOverwriteQuiz = $state(false);
+	let quizSavingServer = $state(false);
+	let pendingServerQuiz = $state<QuizDraft | null>(null);
 	/** Draf tugas (tipe tugas): disunting via TaskBriefBuilder (3 bagian). */
 	let latestTask = $state<TaskDraft | null>(null);
 	let taskCount = $state(0);
@@ -195,7 +230,124 @@
 		editableModules[moduleIndex] = withSyncedFlat(editableModules[moduleIndex]);
 	}
 
-	function handleSave() {
+	/**
+	 * Sinkronkan judul ke server (draf isi/kuis/tugas tetap lokal).
+	 * Mengembalikan false bila sinkronisasi gagal (pengguna tetap di halaman).
+	 */
+	async function pushTitleToServer(title: string): Promise<boolean> {
+		if (!serverMode || !isServerId(materialId)) return true;
+		try {
+			await updateMaterial(Number(materialId), { title });
+			return true;
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : 'Gagal menyimpan judul ke server.';
+			return false;
+		}
+	}
+
+	/* Muat status kuis server (jumlah soal + ambang) untuk materi kuis numerik.
+	 * Isi draf lokal tidak ditimpa otomatis; guru memuatnya eksplisit bila perlu. */
+	$effect(() => {
+		if (!serverMode || !isServerId(materialId) || materialId === '' || kind !== 'kuis') return;
+		if (quizServerLoadedFor === initKey) return;
+		quizServerLoadedFor = initKey;
+		serverQuizQs = null;
+		serverQuizCount = 0;
+		serverQuizError = '';
+		serverQuizPass = null;
+		void loadServerQuiz(Number(materialId));
+	});
+
+	async function loadServerQuiz(mid: number): Promise<void> {
+		serverQuizLoading = true;
+		try {
+			const [quiz, detail] = await Promise.all([
+				fetchQuizQuestions(mid),
+				fetchMaterialDetail(mid).catch(() => null)
+			]);
+			serverQuizCount = quiz.questions.length;
+			serverQuizPass = typeof detail?.passScore === 'number' ? detail.passScore : null;
+			serverQuizQs = quiz.questions.map((q) => ({
+				question: q.questionText,
+				options: q.options.map((o) => o.optionText)
+			}));
+		} catch (e) {
+			serverQuizError = e instanceof Error ? e.message : 'Gagal memuat kuis server.';
+		} finally {
+			serverQuizLoading = false;
+		}
+	}
+
+	function quizDraftToPayload(draft: QuizDraft) {
+		return {
+			questions: draft.questions.map((q) => ({
+				questionText: q.question,
+				explanation: q.explanation || null,
+				options: q.options.map((opt, oi) => ({ optionText: opt, isCorrect: oi === q.answer }))
+			}))
+		};
+	}
+
+	/** Simpan set soal + ambang ke server (judul ikut dalam PATCH yang sama). */
+	async function pushQuizToServer(draft: QuizDraft, title: string): Promise<boolean> {
+		if (!isServerId(materialId)) return true;
+		quizSavingServer = true;
+		try {
+			await saveQuizSet(Number(materialId), quizDraftToPayload(draft));
+			await updateMaterial(Number(materialId), {
+				title,
+				passScore: normalizePassScore(draft.passScore)
+			});
+			await loadServerQuiz(Number(materialId));
+			return true;
+		} catch (e) {
+			saveError = e instanceof Error ? e.message : 'Gagal menyimpan kuis ke server.';
+			return false;
+		} finally {
+			quizSavingServer = false;
+		}
+	}
+
+	async function confirmOverwriteQuiz(): Promise<void> {
+		showOverwriteQuiz = false;
+		const d = pendingServerQuiz;
+		pendingServerQuiz = null;
+		if (!d) return;
+		saveError = '';
+		if (await pushQuizToServer(d, d.title)) {
+			saveCurriculumDraft(courseId, editableModules);
+			dirty = false;
+			lastSavedLabel = new Date().toLocaleString('id-ID', {
+				day: 'numeric',
+				month: 'short',
+				hour: '2-digit',
+				minute: '2-digit'
+			});
+			savedMessage = `Soal tersimpan ke server (${d.questions.length} soal, minimal ${normalizePassScore(d.passScore)}).`;
+		}
+	}
+
+	/** Muat soal server ke editor (kunci jawaban harus ditandai ulang). */
+	function importServerQuiz(): void {
+		if (!serverQuizQs) return;
+		latestQuiz = {
+			title: previewTitle,
+			intro: storedQuiz?.intro ?? '',
+			questions: serverQuizQs.map((q) => ({
+				question: q.question,
+				options: [...q.options, '', '', '', ''].slice(0, 4),
+				answer: 0,
+				explanation: ''
+			})),
+			passScore: storedQuiz?.passScore ?? serverQuizPass ?? DEFAULT_PASS_SCORE,
+			updatedAt: ''
+		};
+		quizCount = serverQuizQs.length;
+		quizEditorKey += 1;
+		dirty = true;
+	}
+
+	async function handleSave() {
 		saveError = '';
 		if (moduleIndex < 0 || subIndex < 0 || matIndex < 0) return;
 		const title =
@@ -226,6 +378,7 @@
 			storedTask = draft;
 			latestTask = null;
 			touchModule();
+			if (!(await pushTitleToServer(title))) return;
 			saveCurriculumDraft(courseId, editableModules);
 			dirty = false;
 			lastSavedLabel = new Date(updatedAt).toLocaleString('id-ID', {
@@ -261,6 +414,28 @@
 			storedQuiz = draft;
 			latestQuiz = null;
 			touchModule();
+			if (serverMode && isServerId(materialId)) {
+				/* Server: ganti seluruh set soal. Minta konfirmasi bila server
+				   sudah menyimpan soal agar tidak tertimpa diam-diam. */
+				if (serverQuizCount > 0) {
+					pendingServerQuiz = draft;
+					showOverwriteQuiz = true;
+					return;
+				}
+				if (!(await pushQuizToServer(draft, title))) return;
+				saveCurriculumDraft(courseId, editableModules);
+				dirty = false;
+				lastSavedLabel = new Date(updatedAt).toLocaleString('id-ID', {
+					day: 'numeric',
+					month: 'short',
+					hour: '2-digit',
+					minute: '2-digit'
+				});
+				savedMessage = `Soal tersimpan ke server (${draft.questions.length} soal, minimal ${normalizePassScore(draft.passScore)}).`;
+				goto(backHref);
+				return;
+			}
+			if (!(await pushTitleToServer(title))) return;
 			saveCurriculumDraft(courseId, editableModules);
 			dirty = false;
 			lastSavedLabel = new Date(updatedAt).toLocaleString('id-ID', {
@@ -285,6 +460,7 @@
 			return;
 		}
 		touchModule();
+		if (!(await pushTitleToServer(title))) return;
 		saveCurriculumDraft(courseId, editableModules);
 		dirty = false;
 		lastSavedLabel = new Date(updatedAt).toLocaleString('id-ID', {
@@ -315,7 +491,11 @@
 </svelte:head>
 
 <div class="p-4 sm:p-6 lg:p-8">
-	{#if !course}
+	{#if serverMode && serverLoading && !course}
+		<div class="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-12 text-sm font-semibold text-slate-500" role="status" aria-label="Memuat kursus">
+			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat kursus dari server...
+		</div>
+	{:else if !course}
 		<div class="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-10 text-center">
 			<i class="fa-solid fa-triangle-exclamation mb-3 text-3xl text-amber-500" aria-hidden="true"></i>
 			<h1 class="text-xl font-bold text-slate-900">Kursus tidak ditemukan</h1>
@@ -512,9 +692,14 @@
 						<button
 							type="button"
 							onclick={handleSave}
-							class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-all hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
+							disabled={quizSavingServer}
+							class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-all hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:bg-slate-300 disabled:shadow-none"
 						>
-							<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Simpan
+							{#if quizSavingServer}
+								<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Menyimpan…
+							{:else}
+								<i class="fa-solid fa-floppy-disk" aria-hidden="true"></i> Simpan
+							{/if}
 						</button>
 					</div>
 				</div>
@@ -541,7 +726,7 @@
 			`hidden` menyembunyikan tanpa menghancurkan instance editor. -->
 		<div id="panel-tulis" role="tabpanel" aria-labelledby="tab-tulis" hidden={mode !== 'tulis'}>
 			{#if kind === 'kuis'}
-				<QuizBuilder draftKey={docKey} initial={quizInitial} onupdate={handleQuizUpdate} />
+			<QuizBuilder draftKey={`${docKey}#q${quizEditorKey}`} initial={quizInitial} onupdate={handleQuizUpdate} />
 				<p class="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-slate-500">
 					<i class="fa-solid fa-lightbulb mt-0.5 shrink-0 text-amber-500" aria-hidden="true"></i>
 					<span>
@@ -549,6 +734,54 @@
 						hapus, atau susun ulang soal lalu tekan Simpan.
 					</span>
 				</p>
+				{#if serverMode && isServerId(materialId)}
+					<div
+						class="mt-3 rounded-xl border border-violet-200 bg-violet-50/70 px-3.5 py-3 text-[11px] leading-relaxed text-slate-600"
+						role="status"
+						aria-label="Status kuis di server"
+					>
+						{#if serverQuizLoading}
+							<p class="flex items-center gap-2 font-semibold text-slate-500">
+								<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
+								Memeriksa soal tersimpan di server…
+							</p>
+						{:else if serverQuizError}
+							<p class="font-semibold text-red-700">
+								<i class="fa-solid fa-triangle-exclamation mr-1" aria-hidden="true"></i>
+								{serverQuizError}
+							</p>
+							<button
+								type="button"
+								onclick={() => void loadServerQuiz(Number(materialId))}
+								class="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1 text-[11px] font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
+							>
+								<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+							</button>
+						{:else if serverQuizCount > 0}
+							<p>
+								<i class="fa-solid fa-cloud mr-1 text-violet-600" aria-hidden="true"></i>
+								Server menyimpan <strong>{serverQuizCount} soal</strong>
+								{#if serverQuizPass !== null}(minimal {serverQuizPass}){/if}.
+								Menyimpan akan <strong>mengganti seluruhnya</strong>.
+							</p>
+							<button
+								type="button"
+								onclick={importServerQuiz}
+								class="mt-2 inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-violet-300 bg-white px-3 py-1 text-[11px] font-bold text-violet-700 hover:bg-violet-100 focus-visible:outline-2 focus-visible:outline-violet-600"
+							>
+								<i class="fa-solid fa-download" aria-hidden="true"></i> Muat soal server ke editor
+							</button>
+							<p class="mt-1.5 text-slate-500">
+								Kunci jawaban tidak dikirim ke browser — tandai ulang kunci (radio kuning) sebelum menyimpan.
+							</p>
+						{:else}
+							<p>
+								<i class="fa-solid fa-cloud mr-1 text-slate-400" aria-hidden="true"></i>
+								Belum ada soal di server. Tekan Simpan untuk mengunggah draf ini.
+							</p>
+						{/if}
+					</div>
+				{/if}
 			{:else if kind === 'tugas'}
 				<TaskBriefBuilder draftKey={docKey} initial={taskInitial} onupdate={handleTaskUpdate} />
 				<p class="mt-3 flex items-start gap-2 text-[11px] leading-relaxed text-slate-500">
@@ -727,6 +960,19 @@
 			confirmText="Ya, tinggalkan"
 			cancelText="Tetap di sini"
 			onconfirm={confirmLeave}
+		/>
+
+		<WarningModal
+			bind:open={showOverwriteQuiz}
+			type="warning"
+			title="Ganti seluruh soal di server?"
+			message={serverQuizCount > 0
+				? `Server menyimpan ${serverQuizCount} soal. Menyimpan akan mengganti seluruhnya dan tidak bisa dibatalkan.`
+				: 'Menyimpan akan mengganti seluruh soal di server.'}
+			confirmText="Ya, ganti semua"
+			cancelText="Batal"
+			loading={quizSavingServer}
+			onconfirm={() => void confirmOverwriteQuiz()}
 		/>
 	{/if}
 </div>

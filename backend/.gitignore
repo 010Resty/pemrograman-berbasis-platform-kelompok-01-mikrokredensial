@@ -4,6 +4,9 @@ node_modules/
 # Build output
 dist/
 
+# Uploaded files (local disk storage, dev only)
+uploads/
+
 # Environment files
 .env
 .env.local

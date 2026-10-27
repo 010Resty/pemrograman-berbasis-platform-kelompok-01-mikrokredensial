@@ -1,7 +1,6 @@
 import jwt, { SignOptions } from "jsonwebtoken";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
-import { randomUUID } from "node:crypto";
 import { eq } from "drizzle-orm";
 import { db } from "../../db";
 import { users } from "../../db/schema";
@@ -14,12 +13,28 @@ export class AuthNotImplementedError extends Error {
   }
 }
 
+export interface AuthFieldError {
+  field: string;
+  message: string;
+}
+
 export class AuthValidationError extends Error {
-  constructor(message: string) {
+  readonly errors: AuthFieldError[] | null;
+
+  constructor(message: string, errors: AuthFieldError[] | null = null) {
     super(message);
     this.name = "AuthValidationError";
+    this.errors = errors;
   }
 }
+
+const toFieldErrors = (
+  issues: Array<{ path: Array<string | number>; message: string }>
+): AuthFieldError[] =>
+  issues.map((issue) => ({
+    field: issue.path.length > 0 ? String(issue.path[0]) : "body",
+    message: issue.message,
+  }));
 
 
 const registerSchema = z.object({
@@ -61,7 +76,7 @@ export const verifyPassword = async (
 };
 
 export const createAccessToken = (user: {
-  id: string;
+  id: string | number;
   email: string;
   role: string;
 }): string => { 
@@ -87,7 +102,10 @@ export const registerUser = async (_input: unknown) => {
   const parsed = registerSchema.safeParse(_input);
 
   if (!parsed.success) {
-    throw new AuthValidationError("Data registrasi tidak valid");
+    throw new AuthValidationError(
+      "Data registrasi tidak valid",
+      toFieldErrors(parsed.error.issues)
+    );
   }
 
   const { name, email, password } = parsed.data;
@@ -106,16 +124,29 @@ export const registerUser = async (_input: unknown) => {
   // Hash password sebelum disimpan
   const passwordHash = await hashPassword(password);
 
+  // ID integer auto-increment dibuat oleh database (selaras id numerik frontend).
   const user = {
-    id: randomUUID(),
     name,
     email,
     passwordHash,
     role: "student" as const,
   };
 
+  let userId: number;
   try {
-  await db.insert(users).values(user);
+    await db.insert(users).values(user);
+
+    // Ambil ID auto-increment lewat email unik (kolom id numerik).
+    const created = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+
+    if (!created[0]) {
+      throw new Error("Gagal membaca ID pengguna baru");
+    }
+    userId = created[0].id;
   } catch (error: unknown) {
     if (
       typeof error === "object" &&
@@ -130,7 +161,7 @@ export const registerUser = async (_input: unknown) => {
   }
 
   const accessToken = createAccessToken({
-    id: user.id,
+    id: userId,
     email: user.email,
     role: user.role,
   });
@@ -139,7 +170,7 @@ export const registerUser = async (_input: unknown) => {
     message: "Registrasi berhasil",
     accessToken,
     user: {
-      id: user.id,
+      id: userId,
       name: user.name,
       email: user.email,
       role: user.role,
@@ -152,7 +183,10 @@ export const loginUser = async (_input: unknown) => {
   const parsed = loginSchema.safeParse(_input);
 
   if (!parsed.success) {
-    throw new AuthValidationError("Data login tidak valid");
+    throw new AuthValidationError(
+      "Data login tidak valid",
+      toFieldErrors(parsed.error.issues)
+    );
   }
 
   const { email, password } = parsed.data;

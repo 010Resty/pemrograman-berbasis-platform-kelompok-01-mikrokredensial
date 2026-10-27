@@ -1,7 +1,13 @@
 <script lang="ts">
-	import { page } from '$app/state';
+import { page } from '$app/state';
 	import { getCourseById } from '$lib/data/courses';
 	import type { CourseModule, SubModule } from '$lib/data/courses';
+	import { resolveServerCourse, isServerKelola, isServerId } from '$lib/api/courses';
+	import {
+		createSubModule,
+		updateSubModule,
+		deleteSubModule
+	} from '$lib/api/courses';
 	import {
 		curriculumUid,
 		clonePlain,
@@ -13,7 +19,27 @@
 
 	const courseId = $derived(Number(page.params.courseId));
 	const moduleId = $derived(page.params.moduleId);
-	const course = $derived(getCourseById(courseId));
+	const serverMode = $derived(
+		page.url.searchParams.get('src') === 'server' || isServerKelola(courseId)
+	);
+	let serverCourse = $state<Awaited<ReturnType<typeof resolveServerCourse>>>(null);
+	let serverLoading = $state(false);
+	let serverLoadedFor = $state<number | null>(null);
+
+	$effect(() => {
+		if (!serverMode || serverLoadedFor === courseId) return;
+		serverLoadedFor = courseId;
+		serverLoading = true;
+		void resolveServerCourse(courseId)
+			.then((res) => {
+				serverCourse = res;
+			})
+			.finally(() => {
+				serverLoading = false;
+			});
+	});
+
+	const course = $derived(serverMode ? serverCourse : getCourseById(courseId));
 
 	let editableModules = $state<CourseModule[]>([]);
 	let savedMessage = $state('');
@@ -144,13 +170,21 @@
 		pendingDelete = null;
 	}
 
-	function executeDelete() {
+	async function executeDelete() {
 		const target = pendingDelete;
+		if (!target || moduleIndex < 0) return;
+		if (serverMode && isServerId(target.subId)) {
+			try {
+				await deleteSubModule(Number(target.subId));
+			} catch (e) {
+				markSaved(e instanceof Error ? e.message : 'Gagal menghapus sub-modul di server.');
+				return;
+			}
+		}
 		pendingDelete = null;
 		showDelete = false;
 		menuFor = null;
 		menuPos = null;
-		if (!target || moduleIndex < 0) return;
 		const m = editableModules[moduleIndex];
 		const current = m.subModules ?? [];
 		if (current.length <= 1) return;
@@ -166,10 +200,30 @@
 
 	function addSubModule() {
 		if (moduleIndex < 0) return;
+		void addSubModuleAsync();
+	}
+
+	async function addSubModuleAsync(): Promise<void> {
+		if (moduleIndex < 0) return;
 		const m = editableModules[moduleIndex];
 		const current = m.subModules ?? [];
+		const pos = current.length;
+		let id = curriculumUid('sub');
+		if (serverMode && isServerId(moduleId)) {
+			try {
+				const created = await createSubModule(Number(moduleId), {
+					title: `Sub-modul ${current.length + 1}`,
+					description: '',
+					position: pos
+				});
+				id = String(created.id);
+			} catch (e) {
+				markSaved(e instanceof Error ? e.message : 'Gagal menambah sub-modul.');
+				return;
+			}
+		}
 		const sub: SubModule = {
-			id: curriculumUid('sub'),
+			id,
 			title: `Sub-modul ${current.length + 1}`,
 			description: '',
 			materials: []
@@ -205,18 +259,52 @@
 		if (idx < 0 || target < 0 || target >= current.length) return;
 		[current[idx], current[target]] = [current[target], current[idx]];
 		editableModules[moduleIndex] = withSyncedFlat({ ...m, subModules: current });
+		if (serverMode) void syncSubPositions();
 		markSaved(`Sub-modul dipindah ke posisi ${target + 1}.`);
+	}
+
+	/** Tulis ulang position semua sub-modul ke server sesuai urutan. */
+	async function syncSubPositions(): Promise<void> {
+		const current = editableModules[moduleIndex]?.subModules ?? [];
+		try {
+			await Promise.all(
+				current.map((s, i) =>
+					isServerId(s.id) ? updateSubModule(Number(s.id), { position: i }) : Promise.resolve()
+				)
+			);
+		} catch (e) {
+			markSaved(e instanceof Error ? e.message : 'Gagal menyimpan urutan sub-modul.');
+		}
 	}
 
 	function duplicateSub(subId: string | null) {
 		if (!subId || moduleIndex < 0) return;
+		void duplicateSubAsync(subId);
+	}
+
+	async function duplicateSubAsync(subId: string): Promise<void> {
 		const m = editableModules[moduleIndex];
 		const current = m.subModules ?? [];
 		const src = current.find((s) => s.id === subId);
 		if (!src) return;
+		let newId = curriculumUid('sub');
+		let newPos = current.findIndex((s) => s.id === subId) + 1;
+		if (serverMode && isServerId(moduleId)) {
+			try {
+				const created = await createSubModule(Number(moduleId), {
+					title: `${src.title} (salinan)`,
+					description: src.description,
+					position: newPos
+				});
+				newId = String(created.id);
+			} catch (e) {
+				markSaved(e instanceof Error ? e.message : 'Gagal menduplikasi sub-modul.');
+				return;
+			}
+		}
 		const copy: SubModule = {
 			...clonePlain(src),
-			id: curriculumUid('sub'),
+			id: newId,
 			title: `${src.title} (salinan)`,
 			materials: []
 		};
@@ -225,11 +313,12 @@
 			...m,
 			subModules: [...current.slice(0, at), copy, ...current.slice(at)]
 		});
+		if (serverMode) void syncSubPositions();
 		markSaved('Sub-modul diduplikasi (materi tidak ikut disalin).');
 	}
 
 	/** Satu-satunya jalan menyimpan perubahan nama/deskripsi sub-modul. */
-	function saveSubDraft(subId: string | null) {
+	async function saveSubDraft(subId: string | null) {
 		if (!subId || moduleIndex < 0) return;
 		const d = subDrafts[subId];
 		const m = editableModules[moduleIndex];
@@ -240,6 +329,14 @@
 			return;
 		}
 		delete subErrors[subId];
+		if (serverMode && isServerId(subId)) {
+			try {
+				await updateSubModule(Number(subId), { title: d.title, description: d.description });
+			} catch (e) {
+				subErrors[subId] = e instanceof Error ? e.message : 'Gagal menyimpan ke server.';
+				return;
+			}
+		}
 		const current = [...(m.subModules ?? [])];
 		current[si] = { ...current[si], title: d.title, description: d.description };
 		editableModules[moduleIndex] = withSyncedFlat({ ...m, subModules: current });
@@ -266,7 +363,11 @@
 <svelte:window onscroll={closeMenu} onresize={closeMenu} />
 
 <div class="p-4 sm:p-6 lg:p-8">
-	{#if !course}
+	{#if serverMode && serverLoading && !course}
+		<div class="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-12 text-sm font-semibold text-slate-500" role="status" aria-label="Memuat kursus">
+			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat kursus dari server...
+		</div>
+	{:else if !course}
 		<div class="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-10 text-center">
 			<i class="fa-solid fa-triangle-exclamation mb-3 text-3xl text-amber-500" aria-hidden="true"></i>
 			<h1 class="text-xl font-bold text-slate-900">Kursus tidak ditemukan</h1>

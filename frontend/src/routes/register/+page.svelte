@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
-	import { homeFor, register as registerSession, type Role } from '$lib/stores/auth.svelte';
+	import { homeFor, registerWithBackend, type Role } from '$lib/stores/auth.svelte';
 
 	let showPassword = $state(false);
 	let showConfirmPassword = $state(false);
@@ -56,7 +56,7 @@
 		calculatePasswordStrength(value);
 	}
 
-	function handleSubmit(event: Event) {
+	async function handleSubmit(event: Event) {
 		event.preventDefault();
 		errorMessage = '';
 		if (role === 'teacher') {
@@ -76,16 +76,21 @@
 			errorMessage = 'Kata sandi tidak cocok.';
 			return;
 		}
-		if (password.length < 7) {
-			errorMessage = 'Kata sandi minimal 7 karakter.';
+		if (password.length < 8) {
+			errorMessage = 'Kata sandi minimal 8 karakter (mengikuti aturan backend).';
 			return;
 		}
 		isLoading = true;
-		setTimeout(() => {
+		try {
+			const result = await registerWithBackend(fullName, email, password, true);
+			if (!result.ok) {
+				errorMessage = result.error;
+				return;
+			}
+			goto(homeFor(result.user.role));
+		} finally {
 			isLoading = false;
-			const user = registerSession(fullName, email, role, true);
-			goto(homeFor(user.role));
-		}, 900);
+		}
 	}
 </script>
 

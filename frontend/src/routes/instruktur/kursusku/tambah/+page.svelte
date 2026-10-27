@@ -2,6 +2,9 @@
 	import { goto } from '$app/navigation';
 	import { formatIDR } from '$lib/data/payment';
 	import MonthPicker from '$lib/components/MonthPicker.svelte';
+	import { createCourse } from '$lib/api/courses';
+	import { uploadFile } from '$lib/api/uploads';
+	import { BackendRequestError } from '$lib/api/backend';
 
 	const CATEGORIES = [
 		'Pengembangan Web',
@@ -36,6 +39,8 @@
 	let tools = $state<string[]>(['']);
 
 	let errors = $state<Record<string, string>>({});
+	let createdId = $state<number | null>(null);
+	let isLoading = $state(false);
 
 	const coverSrc = $derived(
 		coverPreview ||
@@ -150,41 +155,59 @@
 		tools = tools.filter((_, x) => x !== i);
 	}
 
-	function handleSubmit(e: Event) {
+	async function handleSubmit(e: SubmitEvent) {
 		e.preventDefault();
+		delete errors['server'];
 		if (!validate()) {
 			requestAnimationFrame(() => errorSummaryEl?.focus());
 			window.scrollTo({ top: 0, behavior: 'smooth' });
 			return;
 		}
-		const payload = {
-			title: title.trim(),
-			category,
-			level,
-			duration: durationLabel,
-			durationMonths: durationNum,
-			description: description.trim(),
-			cover: coverPreview,
-			period,
-			startMonth: startMonthLabel,
-			price: priceNum === 0 ? 'GRATIS' : priceLabel,
-			priceNominal: priceNum,
-			outcomes: outcomes.map((o) => o.trim()).filter(Boolean),
-			tools: tools.map((t) => t.trim()).filter(Boolean),
-			// Kurikulum (modul → materi) diisi belakangan dari halaman Kelola Kurikulum.
-			modules: [],
-			status: 'published',
-			createdAt: new Date().toISOString()
-		};
+		if (isLoading) return;
+		isLoading = true;
 		try {
-			const key = 'instruktur-draft-course';
-			const prev = JSON.parse(localStorage.getItem(key) ?? '[]');
-			localStorage.setItem(key, JSON.stringify([...prev, payload]));
-		} catch {
-			/* abaikan gagal storage */
+			// 1) Unggah sampul bila pengguna memilih berkas (dataURL -> URL server).
+			let imageUrl: string | null = null;
+			if (coverPreview.startsWith('data:')) {
+				const picked = await fileFromDataUrl(coverPreview, 'sampul');
+				const uploaded = await uploadFile(picked, 'cover');
+				imageUrl = uploaded.url;
+			} else {
+				imageUrl = coverSrc;
+			}
+			// 2) Buat kursus di backend (draft). Gagal = tetap di form + pesan error.
+			const course = await createCourse({
+				title: title.trim(),
+				category,
+				level,
+				durationMonths: durationNum,
+				description: description.trim(),
+				coverUrl: imageUrl,
+				period,
+				startMonth: startMonthLabel,
+				priceNominal: priceNum ?? 0,
+				outcomes: validOutcomes,
+				tools: validTools
+			});
+			createdId = course.id;
+			submitted = true;
+			window.scrollTo({ top: 0, behavior: 'smooth' });
+		} catch (err) {
+			errors['server'] =
+				err instanceof BackendRequestError
+					? err.message
+					: 'Gagal menyimpan kursus. Periksa koneksi ke backend lalu coba lagi.';
+			requestAnimationFrame(() => errorSummaryEl?.focus());
+			window.scrollTo({ top: 0, behavior: 'smooth' });
+		} finally {
+			isLoading = false;
 		}
-		submitted = true;
-		window.scrollTo({ top: 0, behavior: 'smooth' });
+	}
+
+	function fileFromDataUrl(dataUrl: string, name: string): Promise<File> {
+		return fetch(dataUrl)
+			.then((r) => r.blob())
+			.then((b) => new File([b], name, { type: b.type || 'image/png' }));
 	}
 
 	const errorList = $derived(Object.entries(errors));
@@ -243,6 +266,14 @@
 				</div>
 			</dl>
 			<div class="flex flex-col gap-2 border-t border-slate-100 p-5 sm:flex-row sm:justify-center">
+				{#if createdId !== null}
+					<a
+						href={`/instruktur/kursusku/${createdId}?src=server`}
+						class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+					>
+						<i class="fa-solid fa-list-check" aria-hidden="true"></i> Kelola Kurikulum
+					</a>
+				{/if}
 				<a
 					href="/instruktur/kursusku"
 					class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
@@ -695,10 +726,16 @@
 					</a>
 					<button
 						type="submit"
-						class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/25 hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600"
+						disabled={isLoading}
+						class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-6 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/25 transition-all hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600 disabled:cursor-not-allowed disabled:bg-emerald-400"
 					>
-						<i class="fa-solid fa-plus" aria-hidden="true"></i>
-						Tambah Kursus
+						{#if isLoading}
+							<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
+							<span>Menyimpan...</span>
+						{:else}
+							<i class="fa-solid fa-plus" aria-hidden="true"></i>
+							Tambah Kursus
+						{/if}
 					</button>
 				</div>
 			</form>
