@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import { canReadCourseTree } from "../courses/curricula.service";
 import { resolveLearningGuard } from "../enrollments/enrollment.service";
 import {
+  getMyProgressSummary,
   listMaterialIdsOfCourse,
   listMine,
   markComplete,
@@ -102,6 +103,32 @@ export const unmarkHandler = async (
       status: "success",
       message: removed ? "Tanda selesai dihapus." : "Progres tidak tercatat.",
       data: null,
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+// GET /api/v1/me/progress/summary — ringkasan "Progres Keseluruhan" dasbor user.
+export const summaryHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = uid(req);
+    if (userId === null) {
+      res.status(401).json({
+        status: "error",
+        message: "Token autentikasi diperlukan",
+        data: null,
+      });
+      return;
+    }
+    res.status(200).json({
+      status: "success",
+      message: "Ringkasan progres saya",
+      data: await getMyProgressSummary(userId),
     });
   } catch (e) {
     next(e);

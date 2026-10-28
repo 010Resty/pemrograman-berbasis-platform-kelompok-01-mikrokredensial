@@ -2,7 +2,6 @@
 	import { browser } from '$app/environment';
 	import type { Course } from '$lib/data/courses';
 	import {
-		getCourseMeta,
 		periodBadgeClass,
 		periodIcon,
 		type CoursePeriod as MetaPeriod
@@ -10,7 +9,6 @@
 	import {
 		deleteCourse,
 		toCourseView,
-		publishBadge,
 		markServerKelola,
 		type BackendCourse
 	} from '$lib/api/courses';
@@ -23,7 +21,11 @@
 	import WarningModal from '$lib/components/WarningModal.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
 
-	type Status = 'all' | 'Aktif' | 'Draft';
+	type Status = 'all' | 'Aktif' | 'Draft' | 'Diarsipkan';
+
+	/** Sampul pengganti bila kursus belum punya gambar (hindari <img> rusak). */
+	const COVER_FALLBACK =
+		'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80';
 
 	/** Kursus server milik instruktur login + jumlah modul/materi dari pohon. */
 	let serverCourses = $state<Array<Course & { publishState: string }>>([]);
@@ -108,11 +110,16 @@
 	const filters: { value: Status; label: string }[] = [
 		{ value: 'all', label: 'Semua' },
 		{ value: 'Aktif', label: 'Aktif' },
-		{ value: 'Draft', label: 'Draft' }
+		{ value: 'Draft', label: 'Draft' },
+		{ value: 'Diarsipkan', label: 'Diarsipkan' }
 	];
 
-	function courseStatus(c: Course & { publishState?: string }): 'Aktif' | 'Draft' {
-		return publishBadge((c as { publishState?: string }).publishState ?? 'draft');
+	/** Status server 3 nilai (published/archived/draft); tanpa ini arsip salah tampil sebagai Draft. */
+	function courseStatus(c: Course & { publishState?: string }): 'Aktif' | 'Draft' | 'Diarsipkan' {
+		const s = c.publishState ?? 'draft';
+		if (s === 'published') return 'Aktif';
+		if (s === 'archived') return 'Diarsipkan';
+		return 'Draft';
 	}
 
 	const filtered = $derived(
@@ -128,9 +135,9 @@
 
 	const filteredWithMeta = $derived(
 		filtered.map((c) => {
-			const base = getCourseMeta(c.id);
+			// Periode + bulan mulai murni dari server; tanpa data contoh.
 			const ov = backendPeriod[c.id];
-			return { course: c, meta: ov ? { ...base, ...ov } : base };
+			return { course: c, meta: ov ?? { period: 'ongoing' as MetaPeriod } };
 		})
 	);
 </script>
@@ -232,7 +239,7 @@
 				>
 					<div class="relative overflow-hidden">
 						<img
-							src={course.image}
+							src={course.image || COVER_FALLBACK}
 							alt={`Sampul kursus ${course.title}`}
 							class="h-44 w-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-105"
 							loading="lazy"
@@ -266,30 +273,8 @@
 							</a>
 						</h2>
 						<p class="mt-1 text-xs text-slate-500">
-							{course.modules.length} modul · {course.totalMaterials} materi · {kMeta.students.toLocaleString(
-								'id-ID'
-							)} peserta
+							{course.modules.length} modul · {course.totalMaterials} materi
 						</p>
-
-						<div class="mt-4">
-							<div class="mb-1.5 flex justify-between text-xs">
-								<span class="text-slate-500">Rata-rata progres peserta</span>
-								<span class="font-bold text-slate-700">{course.progress}%</span>
-							</div>
-							<div
-								class="h-2 overflow-hidden rounded-full bg-slate-100"
-								role="progressbar"
-								aria-valuenow={course.progress}
-								aria-valuemin={0}
-								aria-valuemax={100}
-								aria-label={`Progres ${course.title}`}
-							>
-								<div
-									class={`h-full rounded-full ${course.progress === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`}
-									style="width: {course.progress}%"
-								></div>
-							</div>
-						</div>
 
 						<div class="mt-5 flex gap-2">
 							<a

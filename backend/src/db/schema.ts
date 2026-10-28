@@ -133,7 +133,9 @@ export const modules = mysqlTable("modules", {
   position: int("position").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  courseIdx: index("modules_course_idx").on(table.courseId),
+}));
 
 // Hierarki frontend: Course -> Modul -> Sub-Modul -> Materi.
 // Kolom `materials` flat di UI adalah turunan kompatibilitas, bukan tabel.
@@ -190,7 +192,9 @@ export const materials = mysqlTable("materials", {
   position: int("position").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
+}, (table) => ({
+  moduleIdx: index("materials_module_idx").on(table.moduleId),
+}));
 
 // Metadata berkas yang disimpan di disk server (Opsi A).
 // Byte berkas TIDAK di database — kolom ini hanya penunjuk + metadata.
@@ -246,6 +250,11 @@ export const enrollments = mysqlTable(
     pk: primaryKey({
       columns: [table.userId, table.courseId],
     }),
+    // Optimasi daftar peserta per kursus (eligibility/dashboard): filter courseId+status.
+    courseStatusIdx: index("enrollments_course_status_idx").on(
+      table.courseId,
+      table.status
+    ),
   })
 );
 
@@ -433,6 +442,8 @@ export const progress = mysqlTable(
     pk: primaryKey({
       columns: [table.userId, table.materialId],
     }),
+    // Batch progres per materi (eligibility): filter materialId.
+    materialIdx: index("progress_material_idx").on(table.materialId),
   })
 );
 
@@ -581,5 +592,13 @@ export const certificates = mysqlTable(
       table.userId,
       table.moduleId
     ),
+    // Optimasi baca instruktur: filter courseId+status (riwayat/summary) dan moduleId.
+    // Perlu `drizzle-kit generate` + migrasi agar aktif di DB (tanpa migrasi hanya dokumen).
+    courseStatusIdx: index("certificates_course_status_idx").on(
+      table.courseId,
+      table.status
+    ),
+    moduleIdx: index("certificates_module_idx").on(table.moduleId),
+    issuedIdx: index("certificates_issued_idx").on(table.issuedAt),
   })
 );

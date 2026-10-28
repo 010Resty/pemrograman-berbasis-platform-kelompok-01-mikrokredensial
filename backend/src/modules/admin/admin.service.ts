@@ -4,8 +4,10 @@ import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import { db } from "../../db";
 import {
   auditLogs,
+  certificates,
   courseInstructors,
   courses,
+  enrollments,
   users,
 } from "../../db/schema";
 
@@ -114,6 +116,79 @@ export const listUsers = async (
       .offset((page - 1) * limit),
   ]);
   return { items: rows, total: Number(countRows[0]?.n ?? 0) };
+};
+
+// ---------- Ringkasan badge sidebar admin ----------
+
+export interface AdminOverview {
+  totalStudents: number;
+  totalTeachers: number;
+  totalCourses: number;
+  totalCertificates: number;
+}
+
+/** Hitungan badge + kartu ringkasan admin: 4 agregat ringan paralel (tanpa daftar). */
+export const getAdminOverview = async (): Promise<AdminOverview> => {
+  const [userRows, courseRows, certRows] = await Promise.all([
+    db
+      .select({ role: users.role, n: sql<number>`count(*)` })
+      .from(users)
+      .groupBy(users.role),
+    db.select({ n: sql<number>`count(*)` }).from(courses),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(certificates)
+      .where(eq(certificates.status, "issued")),
+  ]);
+  const byRole = new Map(userRows.map((r) => [r.role as string, Number(r.n)]));
+  return {
+    totalStudents: byRole.get("student") ?? 0,
+    totalTeachers: byRole.get("teacher") ?? 0,
+    totalCourses: Number(courseRows[0]?.n ?? 0),
+    totalCertificates: Number(certRows[0]?.n ?? 0),
+  };
+};
+
+// ---------- Detail satu pengguna ----------
+
+export interface AdminUserDetail extends PublicUser {
+  enrollmentCount: number;
+  certificateCount: number;
+}
+
+/** Detail pengguna untuk halaman admin (tanpa passwordHash). */
+export const getUserById = async (id: number): Promise<AdminUserDetail> => {
+  const rows = await db
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      role: users.role,
+      isActive: users.isActive,
+      createdAt: users.createdAt,
+    })
+    .from(users)
+    .where(eq(users.id, id))
+    .limit(1);
+  const user = rows[0];
+  if (!user) {
+    throw new AdminError(404, "USER_NOT_FOUND", "Pengguna tidak ditemukan");
+  }
+  const [enrRows, certRows] = await Promise.all([
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(enrollments)
+      .where(eq(enrollments.userId, id)),
+    db
+      .select({ n: sql<number>`count(*)` })
+      .from(certificates)
+      .where(eq(certificates.userId, id)),
+  ]);
+  return {
+    ...user,
+    enrollmentCount: Number(enrRows[0]?.n ?? 0),
+    certificateCount: Number(certRows[0]?.n ?? 0),
+  };
 };
 
 // ---------- Buat akun instruktur ----------

@@ -6,6 +6,8 @@
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
 	import { homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
+	import { fetchInstructorDashboard } from '$lib/api/dashboard';
+	import { fetchCertificateSummary } from '$lib/api/certificates';
 	import { untrack } from 'svelte';
 
 	let { children } = $props();
@@ -30,6 +32,7 @@
 				goto(homeFor(res.session.role));
 				return;
 			}
+			void loadBadges();
 			phase = 'ready';
 			return;
 		}
@@ -50,14 +53,34 @@
 	let searchQuery = $state('');
 	let showProfileMenu = $state(false);
 
+	// Badge sidebar dari backend: kursus aktif + antrean penilaian (dasbor)
+	// + sertifikat aktif terbit (ringkasan sertifikat). Gagal = badge hilang.
+	let courseBadge = $state<string | undefined>(undefined);
+	let reviewBadge = $state<string | undefined>(undefined);
+	let certBadge = $state<string | undefined>(undefined);
+
+	async function loadBadges(): Promise<void> {
+		try {
+			const [dashboard, summary] = await Promise.all([
+				fetchInstructorDashboard(),
+				fetchCertificateSummary()
+			]);
+			courseBadge = String(dashboard.totals.activeCourses);
+			reviewBadge = String(dashboard.totals.pendingReviews);
+			certBadge = String(summary.issuedActiveCount);
+		} catch {
+			// Abaikan: navigasi tetap jalan tanpa badge.
+		}
+	}
+
 	// Shell sama persis dengan portal user, hanya menu + identitas yang berbeda.
-	const navItems: NavItem[] = [
+	const navItems = $derived<NavItem[]>([
 		{ label: 'Dashboard', icon: 'fa-house', href: '/instruktur' },
-		{ label: 'Kursusku', icon: 'fa-book-open', href: '/instruktur/kursusku', badge: '4' },
-		{ label: 'Penilaian', icon: 'fa-clipboard-check', href: '/instruktur/penilaian', badge: '12' },
+		{ label: 'Kursusku', icon: 'fa-book-open', href: '/instruktur/kursusku', badge: courseBadge },
+		{ label: 'Penilaian', icon: 'fa-clipboard-check', href: '/instruktur/penilaian', badge: reviewBadge },
 		{ label: 'Pendapatan', icon: 'fa-wallet', href: '/instruktur/pendapatan' },
-		{ label: 'Sertifikat', icon: 'fa-award', href: '/instruktur/sertifikat', badge: '8' }
-	];
+		{ label: 'Sertifikat', icon: 'fa-award', href: '/instruktur/sertifikat', badge: certBadge }
+	]);
 
 	function toggleProfileMenu() {
 		showProfileMenu = !showProfileMenu;

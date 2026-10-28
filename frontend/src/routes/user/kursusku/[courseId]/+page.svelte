@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { untrack } from 'svelte';
 	import { SvelteSet } from 'svelte/reactivity';
@@ -8,9 +9,24 @@
 		isMaterialLocked,
 		isSubModuleLocked,
 		normalizeMaterialType,
+		type Course,
 		type CourseModule,
 		type MaterialType
 	} from '$lib/data/courses';
+	import {
+		fetchCourseAccess,
+		fetchCourseDetail,
+		fetchCourseTree,
+		toCourseView
+	} from '$lib/api/courses';
+	import { fetchMyProgressIds } from '$lib/api/progress';
+	import { fetchQuizBest } from '$lib/api/quiz';
+	import { fetchTaskStatus } from '$lib/api/submissions';
+	import {
+		fetchMyModuleCertificateStatus,
+		type MyModuleCertificateStatus
+	} from '$lib/api/certificates';
+	import { BackendRequestError } from '$lib/api/backend';
 	import {
 		courseProgress,
 		firstUnfinishedInCourse,
@@ -19,7 +35,7 @@
 		resolveSubModules,
 		subModuleProgress
 	} from '$lib/data/training';
-	import { doneMaterials, ensureSeeded } from '$lib/stores/progress.svelte';
+	import { doneMaterials } from '$lib/stores/progress.svelte';
 	import { getQuizResult } from '$lib/stores/quiz-results.svelte';
 	import { latestFor } from '$lib/stores/submissions.svelte';
 	import { getCourseMeta } from '$lib/data/course-meta';
@@ -41,27 +57,48 @@
 	}
 
 	/**
-	 * Tahap 2a — baca-saja. Status kuis per modul dari hasil tersimpan di browser.
-	 * Hanya percobaan terakhir yang tersedia, bukan nilai terbaik (K-02).
+	 * Tahap 2a — baca-saja. Status kuis per modul.
+	 * Mode server: nilai terbaik dari backend (K-02). Mode lokal:
+	 * percobaan terakhir di browser.
 	 */
 	function quizStatsFor(mod: CourseModule): { total: number; passed: number } {
 		const qs = getModuleMaterials(mod).filter((m) => normalizeMaterialType(m.type) === 'kuis');
+		if (mode === 'server') {
+			let passed = 0;
+			for (const q of qs) if (quizPassedByMat[q.id]) passed++;
+			return { total: qs.length, passed };
+		}
 		let passed = 0;
 		for (const q of qs) if (getQuizResult(q.id)?.passed) passed++;
 		return { total: qs.length, passed };
 	}
 
 	/**
-	 * Tahap 2a — baca-saja. Status tugas per modul dari riwayat lokal peserta.
-	 * Nilai instruktur tersimpan di antrean terpisah dan belum tentu tersinkron ke sini,
-	 * jadi `graded` hanya yang benar-benar terbaca di sisi peserta.
+	 * Tahap 2a — baca-saja. Status tugas per modul.
+	 * Mode server: `passed`/`waiting` dari backend (lulus menempel,
+	 * menunggu = submitted/reviewed). Mode lokal: riwayat browser.
 	 */
 	function taskStatsFor(mod: CourseModule): {
 		total: number;
 		submitted: number;
 		graded: number;
+		passed: number;
+		waiting: number;
 	} {
 		const ts = getModuleMaterials(mod).filter((m) => normalizeMaterialType(m.type) === 'tugas');
+		if (mode === 'server') {
+			let submitted = 0;
+			let passed = 0;
+			let waiting = 0;
+			for (const t of ts) {
+				const s = taskByMat[t.id];
+				if (!s) continue;
+				if (s.submitted) submitted++;
+				if (s.passed) passed++;
+				if (s.waiting) waiting++;
+			}
+			return { total: ts.length, submitted, graded: passed, passed, waiting };
+		}
 		let submitted = 0;
 		let graded = 0;
 		for (const t of ts) {
@@ -71,14 +108,149 @@
 				if (s.score !== null && s.score !== undefined) graded++;
 			}
 		}
-		return { total: ts.length, submitted, graded };
+		return { total: ts.length, submitted, graded, passed: graded, waiting: submitted - graded };
 	}
 
 	const courseId = $derived(Number(page.params.courseId));
-	const course = $derived(getCourseById(courseId));
+
+	type Phase = 'loading' | 'error' | 'ready';
+	let phase = $state<Phase>('loading');
+	let loadError = $state('');
+	/** 'server' bila backend memiliki kursus ini; 'local' = fallback demo berlabel. */
+	let mode = $state<'server' | 'local'>('server');
+	let course = $state<Course | null>(null);
+	let serverHasAccess = $state(true);
+	let serverUpcoming = $state(false);
+	let quizPassedByMat = $state<Record<string, boolean>>({});
+	let taskByMat = $state<Record<string, { submitted: boolean; passed: boolean; waiting: boolean }>>({});
+	let certByModule = $state<
+		Record<string, { eligible: boolean; code: string | null; failReasons: string[] }>
+	>({});
+	let loadSeq = 0;
+	let hydratedFor: number | null = null;
+
+	/**
+	 * Peta kebutuhan API halaman ini → backend (semua sudah ada):
+	 * detail + tree kurikulum, progres milik sendiri, status akses,
+	 * nilai terbaik kuis, status tugas, kelayakan sertifikat per modul.
+	 * Gagal total → error + coba lagi (tidak ada sukses palsu).
+	 * 404 backend → fallback data lokal berlabel (jalur lama tetap jalan).
+	 */
+	async function load(id: number): Promise<void> {
+		const my = ++loadSeq;
+		phase = 'loading';
+		loadError = '';
+		try {
+			const [detail, tree, doneIds, access] = await Promise.all([
+				fetchCourseDetail(id),
+				fetchCourseTree(id),
+				fetchMyProgressIds(id),
+				fetchCourseAccess(id)
+			]);
+			if (my !== loadSeq) return;
+			course = { ...toCourseView(detail), modules: tree };
+			if (hydratedFor !== id) {
+				hydratedFor = id;
+				for (const mid of doneIds) doneMaterials.add(String(mid));
+			}
+			serverHasAccess = access.hasAccess || access.isManager;
+			serverUpcoming = serverHasAccess && detail.period === 'upcoming';
+			mode = 'server';
+			const mats = tree.flatMap((m) => getModuleMaterials(m));
+			const quizIds = mats
+				.filter((t) => normalizeMaterialType(t.type) === 'kuis')
+				.map((t) => Number(t.id));
+			const taskIds = mats
+				.filter((t) => normalizeMaterialType(t.type) === 'tugas')
+				.map((t) => Number(t.id));
+			const [quizBests, taskStats, certStats] = await Promise.all([
+				Promise.all(quizIds.map((mid) => fetchQuizBest(mid).catch(() => null))),
+				Promise.all(taskIds.map((mid) => fetchTaskStatus(mid).catch(() => null))),
+				Promise.all(
+					tree.map((m) =>
+						fetchMyModuleCertificateStatus(Number(m.id)).catch(
+							(): MyModuleCertificateStatus | null => null
+						)
+					)
+				)
+			]);
+			if (my !== loadSeq) return;
+			const qb: Record<string, boolean> = {};
+			quizIds.forEach((mid, i) => {
+				qb[String(mid)] = quizBests[i]?.passed ?? false;
+			});
+			quizPassedByMat = qb;
+			const ts: Record<string, { submitted: boolean; passed: boolean; waiting: boolean }> = {};
+			taskIds.forEach((mid, i) => {
+				const st = taskStats[i];
+				const attempts = st?.attempts ?? 0;
+				const passed = st?.passed ?? false;
+				ts[String(mid)] = {
+					submitted: attempts > 0,
+					passed,
+					waiting:
+						!passed && attempts > 0 && !!st?.lastStatus && ['submitted', 'reviewed'].includes(st.lastStatus)
+				};
+			});
+			taskByMat = ts;
+			const cs: Record<string, { eligible: boolean; code: string | null; failReasons: string[] }> = {};
+			tree.forEach((m, i) => {
+				const s = certStats[i];
+				cs[m.id] = {
+					eligible: s?.eligible ?? false,
+					code: s?.certificate?.code ?? null,
+					failReasons: s?.failReasons ?? []
+				};
+			});
+			certByModule = cs;
+			phase = 'ready';
+		} catch (e) {
+			if (my !== loadSeq) return;
+			const local = getCourseById(id);
+			if (
+				local &&
+				e instanceof BackendRequestError &&
+				(e.httpStatus === 401 || e.httpStatus === 404)
+			) {
+				// Backend tidak memiliki kursus ini (atau sesi habis untuk akses
+				// privat): tampilkan data lokal dengan label jujur, bukan error.
+				course = local;
+				mode = 'local';
+				serverHasAccess = true;
+				serverUpcoming = false;
+				quizPassedByMat = {};
+				taskByMat = {};
+				certByModule = {};
+				phase = 'ready';
+				return;
+			}
+			loadError = e instanceof Error ? e.message : 'Gagal memuat kursus.';
+			phase = 'error';
+		}
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		const id = courseId;
+		if (!Number.isInteger(id) || id <= 0) {
+			phase = 'ready';
+			course = null;
+			return;
+		}
+		void load(id);
+	});
+
 	const meta = $derived(course ? getCourseMeta(course.id) : null);
-	const paidLocked = $derived(course ? !canAccessCourse(course.id) : false);
-	const periodLocked = $derived(course ? !paidLocked && isPeriodLocked(course.id) : false);
+	const paidLocked = $derived(
+		course ? (mode === 'server' ? !serverHasAccess : !canAccessCourse(course.id)) : false
+	);
+	const periodLocked = $derived(
+		course
+			? mode === 'server'
+				? serverHasAccess && serverUpcoming
+				: !paidLocked && isPeriodLocked(course.id)
+			: false
+	);
 
 	let openModules = new SvelteSet<string>();
 	let openSubs = new SvelteSet<string>();
@@ -87,13 +259,15 @@
 	let typeFilter = $state<'all' | MaterialType>('all');
 	let hideDone = $state(false);
 
-	// Seed + buka otomatis modul & sub-modul pertama yang belum selesai.
+	// Buka otomatis modul & sub-modul pertama yang belum selesai.
 	// Dilewati saat materi terkunci (belum bayar / batch belum mulai).
+	// Progres dihidrasi dari backend di load(); store lokal hanya menampung
+	// tandai sesi ini (mis. dari halaman materi) tanpa menghapus progres user.
 	$effect(() => {
-		if (!course || paidLocked || periodLocked) return;
-		ensureSeeded(course);
+		const c = course;
+		if (!c || paidLocked || periodLocked) return;
 		const isDone = (id: string) => untrack(() => doneMaterials.has(id));
-		const first = untrack(() => firstUnfinishedInCourse(course, isDone));
+		const first = untrack(() => firstUnfinishedInCourse(c, isDone));
 		openModules.clear();
 		openSubs.clear();
 		if (first) {
@@ -102,9 +276,9 @@
 			const sub = subs.find((s) => s.materials.some((m) => m.id === first.material.id));
 			if (sub) openSubs.add(sub.id);
 			else if (subs[0]) openSubs.add(subs[0].id);
-		} else if (course.modules[0]) {
-			openModules.add(course.modules[0].id);
-			const s0 = resolveSubModules(course.modules[0])[0];
+		} else if (c.modules[0]) {
+			openModules.add(c.modules[0].id);
+			const s0 = resolveSubModules(c.modules[0])[0];
 			if (s0) openSubs.add(s0.id);
 		}
 	});
@@ -227,7 +401,36 @@
 </svelte:head>
 
 <div class="p-4 sm:p-6 lg:p-8">
-	{#if !course || !stats || !prog}
+	{#if phase === 'loading'}
+	<div class="p-4 sm:p-6 lg:p-8" aria-label="Memuat kursus">
+		<div class="mb-6 animate-pulse overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
+			<div class="h-48 bg-slate-100 sm:h-56"></div>
+			<div class="space-y-2 p-4 sm:p-6">
+				<div class="h-5 w-2/3 rounded bg-slate-100"></div>
+				<div class="h-4 w-full rounded bg-slate-100"></div>
+				<div class="h-4 w-1/2 rounded bg-slate-100"></div>
+			</div>
+		</div>
+		<p class="flex items-center justify-center gap-2 text-sm font-semibold text-slate-500" role="status">
+			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat kursus dari server…
+		</p>
+	</div>
+{:else if phase === 'error'}
+	<div class="p-4 sm:p-6 lg:p-8">
+		<div role="alert" class="mx-auto max-w-lg rounded-2xl border border-red-200 bg-red-50 p-10 text-center">
+			<i class="fa-solid fa-triangle-exclamation mb-3 text-3xl text-red-400" aria-hidden="true"></i>
+			<h1 class="text-xl font-bold text-slate-900">Kursus belum dapat dimuat</h1>
+			<p class="mx-auto mt-1 max-w-md text-sm text-red-600">{loadError}</p>
+			<button
+				type="button"
+				onclick={() => void load(courseId)}
+				class="mt-4 inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-red-600"
+			>
+				<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+			</button>
+		</div>
+	</div>
+{:else if !course || !stats || !prog}
 		<div class="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-10 text-center">
 			<i class="fa-solid fa-triangle-exclamation mb-3 text-3xl text-amber-500" aria-hidden="true"
 			></i>
@@ -360,6 +563,18 @@
 			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
 			<span aria-current="page" class="truncate font-medium text-slate-700">{course.title}</span>
 		</nav>
+		{#if mode === 'local'}
+			<p
+				role="note"
+				class="mb-4 flex items-start gap-2 rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800"
+			>
+				<i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
+				<span
+					>Mode lokal — backend tidak memiliki kursus ini, menampilkan data perangkat. Progres
+					tidak tersimpan ke server.</span
+				>
+			</p>
+		{/if}
 
 		<!-- Header kursus: sama seperti halaman instruktur, aksi = mengikuti pelatihan -->
 		<header class="mb-6 overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
@@ -536,7 +751,8 @@
 				{#each view as { mod, moduleIndex, subs } (mod.id)}
 					{@const mProg = moduleProgress(mod, (id) => doneMaterials.has(id))}
 					{@const modOpen = searching ? true : openModules.has(mod.id)}
-					{@const modComplete = mProg.done === mProg.total && mProg.total > 0}
+					{@const cert = certByModule[mod.id]}
+					{@const modComplete = mode === 'server' ? !!(cert?.eligible || cert?.code) : (mProg.done === mProg.total && mProg.total > 0)}
 					{@const qStat = quizStatsFor(mod)}
 					{@const tStat = taskStatsFor(mod)}
 					{@const missingMateri = mProg.total - mProg.done}
@@ -627,7 +843,7 @@
 												{/if}
 											</strong>
 											<span class="block text-[11px] text-slate-600">
-												ID <span class="font-mono font-bold text-slate-800">{moduleCredentialId(course.id, moduleIndex)}</span>
+												Kode <span class="font-mono font-bold text-slate-800">{mode === 'server' ? (cert?.code ?? 'Belum terbit') : moduleCredentialId(course.id, moduleIndex)}</span>
 												· {mProg.done}/{mProg.total} materi
 											</span>
 										</span>
@@ -641,7 +857,7 @@
 										</a>
 									{:else}
 										<span class="text-[11px] font-bold text-amber-700">
-											Tuntaskan {mProg.total - mProg.done} materi lagi
+											{#if mode === 'server' && cert && cert.failReasons.length > 0}{cert.failReasons[0]}{:else}Tuntaskan {mProg.total - mProg.done} materi lagi{/if}
 										</span>
 									{/if}
 								</div>
@@ -652,26 +868,25 @@
 									<p class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[13px] font-extrabold text-slate-900">
 										Status persyaratan
 										<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500">
-											data lokal, bukan bukti resmi
+											{#if mode === 'server'}terhitung dari data server{:else}data lokal, bukan bukti resmi{/if}
 										</span>
 									</p>
 									<ul class="mt-1.5 space-y-1 text-[12px] text-slate-600">
 										<li>
-											Materi: {mProg.done}/{mProg.total} ditandai selesai (progres lokal di browser ini).
+											Materi: {mProg.done}/{mProg.total} ditandai selesai {#if mode === 'server'}(progres server).{:else}(progres lokal di browser ini).{/if}
 										</li>
 										{#if qStat.total > 0}
 											<li>
-												Kuis: {qStat.passed}/{qStat.total} lulus (acuan percobaan terakhir, bukan
-												nilai terbaik).
+												Kuis: {qStat.passed}/{qStat.total} lulus {#if mode === 'server'}(nilai terbaik).{:else}(acuan percobaan terakhir, bukan nilai terbaik).{/if}
 											</li>
 										{:else}
 											<li>Tidak ada kuis di modul ini.</li>
 										{/if}
 										{#if tStat.total > 0}
 											<li>
-												Tugas: {tStat.submitted}/{tStat.total} terkumpul · {tStat.graded} ada nilai
+												{#if mode === 'server'}Tugas: {tStat.submitted}/{tStat.total} terkumpul · {tStat.passed} lulus · {tStat.waiting} menunggu penilaian.{:else}Tugas: {tStat.submitted}/{tStat.total} terkumpul · {tStat.graded} ada nilai
 												yang terbaca di sisi peserta. Terkumpul ≠ lulus; nilai instruktur belum
-												tentu tersinkron ke perangkat ini.
+												tentu tersinkron ke perangkat ini.{/if}
 											</li>
 										{:else}
 											<li>Tidak ada tugas di modul ini.</li>
@@ -687,9 +902,9 @@
 										</p>
 									{:else}
 										<p class="mt-1.5 text-[12px] font-bold text-slate-600">
-											Belum dapat diverifikasi. Data lokal tampak lengkap, tetapi penerbitan resmi
+											{#if mode === 'server'}Memenuhi syarat menurut data server. Sertifikat modul diterbitkan otomatis oleh sistem.{:else}Belum dapat diverifikasi. Data lokal tampak lengkap, tetapi penerbitan resmi
 											membutuhkan validasi server, nilai terbaik kuis, dan status kelulusan tugas
-											yang belum tersedia di sini.
+											yang belum tersedia di sini.{/if}
 										</p>
 									{/if}
 								</div>

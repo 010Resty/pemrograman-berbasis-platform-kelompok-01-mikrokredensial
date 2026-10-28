@@ -68,6 +68,8 @@
 	let activeFilter = $state<Filter>('all');
 	let search = $state('');
 	let draftScores: Record<string, string> = $state({});
+	let draftDecisions: Record<string, string> = $state({});
+	let draftFeedback: Record<string, string> = $state({});
 	let message = $state('');
 
 	const loading = $derived(gradingLoading());
@@ -100,8 +102,14 @@
 			message = 'Masukkan nilai 0–100 terlebih dahulu.';
 			return;
 		}
-		message = await submitReviewScore(key, val);
+		const decision =
+			draftDecisions[key] === 'failed' || draftDecisions[key] === 'revision_requested'
+				? draftDecisions[key]
+				: 'passed';
+		message = await submitReviewScore(key, val, { decision, feedback: draftFeedback[key] ?? '' });
 		delete draftScores[key];
+		delete draftDecisions[key];
+		delete draftFeedback[key];
 	}
 </script>
 
@@ -348,17 +356,42 @@
 										<td class="px-5 py-4">
 											{#if r.status === 'Dinilai' && r.score !== null}
 												<span class="text-sm font-bold text-emerald-600">{r.score}</span>
+												{#if r.feedback}
+													<span class="mt-1 block max-w-44 truncate text-[11px] text-slate-500" title={r.feedback}>“{r.feedback}”</span>
+												{/if}
 											{:else}
 												<label for={`score-${r.id}`} class="sr-only">Nilai untuk {r.student}</label>
-												<input
-													id={`score-${r.id}`}
-													type="number"
-													min="0"
-													max="100"
-													placeholder="0–100"
-													bind:value={draftScores[String(r.id)]}
-													class="w-24 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
-												/>
+												<div class="flex flex-col gap-1.5">
+													<div class="flex items-center gap-1.5">
+														<input
+															id={`score-${r.id}`}
+															type="number"
+															min="0"
+															max="100"
+															placeholder="0–100"
+															bind:value={draftScores[String(r.id)]}
+															class="w-20 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+														/>
+													<label for={`decision-${r.id}`} class="sr-only">Keputusan untuk {r.student}</label>
+													<select
+														id={`decision-${r.id}`}
+														bind:value={draftDecisions[String(r.id)]}
+														class="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none"
+														>
+															<option value="passed">Lulus</option>
+															<option value="revision_requested">Minta revisi</option>
+															<option value="failed">Tidak lulus</option>
+													</select>
+													</div>
+													<label for={`feedback-${r.id}`} class="sr-only">Umpan balik untuk {r.student}</label>
+													<input
+														id={`feedback-${r.id}`}
+														type="text"
+														bind:value={draftFeedback[String(r.id)]}
+														placeholder="Umpan balik (opsional)"
+														class="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+														/>
+												</div>
 											{/if}
 										</td>
 										<td class="px-5 py-4 text-right">

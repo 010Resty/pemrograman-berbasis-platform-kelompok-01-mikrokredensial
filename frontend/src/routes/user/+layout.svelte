@@ -5,8 +5,9 @@
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
-	import { homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
+	import { getCurrentUser, homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
+	import { fetchMyCertificates, fetchMyEnrollments } from '$lib/api/progress';
 	import { untrack } from 'svelte';
 
 	let { children } = $props();
@@ -21,6 +22,32 @@
 		if (!browser || started) return;
 		started = true;
 		untrack(() => void runVerify());
+	});
+
+	// Badge sidebar dari backend (bukan angka contoh): jumlah kursus diikuti
+	// + sertifikat terbit milik sendiri. Gagal dimuat = badge disembunyikan,
+	// halaman konten yang menampilkan error + retry.
+	let courseBadge = $state<string | undefined>(undefined);
+	let certBadge = $state<string | undefined>(undefined);
+	let badgesStarted = false;
+
+	async function loadBadges(): Promise<void> {
+		try {
+			const [enrollments, certs] = await Promise.all([
+				fetchMyEnrollments(),
+				fetchMyCertificates()
+			]);
+			courseBadge = String(enrollments.length);
+			certBadge = String(certs.filter((c) => c.status === 'issued').length);
+		} catch {
+			// Abaikan: navigasi tetap jalan tanpa badge.
+		}
+	}
+
+	$effect(() => {
+		if (!browser || badgesStarted) return;
+		badgesStarted = true;
+		untrack(() => void loadBadges());
 	});
 
 	async function runVerify(): Promise<void> {
@@ -58,12 +85,12 @@
 	);
 
 	// 4 menu utama sesuai kebutuhan user
-	const navItems: NavItem[] = [
+	const navItems = $derived<NavItem[]>([
 		{ label: 'Dashboard', icon: 'fa-house', href: '/user' },
-		{ label: 'Kursusku', icon: 'fa-book-open', href: '/user/kursusku', badge: '6' },
+		{ label: 'Kursusku', icon: 'fa-book-open', href: '/user/kursusku', badge: courseBadge },
 		{ label: 'Semua Kursus', icon: 'fa-layer-group', href: '/user/semua-kursus' },
-		{ label: 'Sertifikat', icon: 'fa-award', href: '/user/sertifikat', badge: '3' }
-	];
+		{ label: 'Sertifikat', icon: 'fa-award', href: '/user/sertifikat', badge: certBadge }
+	]);
 
 	function toggleProfileMenu() {
 		showProfileMenu = !showProfileMenu;
@@ -76,6 +103,14 @@
 	function handleWindowKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') closeProfileMenu();
 	}
+
+	// Profil dari sesi auth (bukan data dummy): nama/email milik akun yang login.
+	const session = $derived(getCurrentUser());
+	const displayName = $derived(session?.name ?? 'Pengguna');
+	const displayEmail = $derived(session?.email ?? '');
+	const displayInitials = $derived(
+		(displayName.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('') || 'PG').toUpperCase()
+	);
 </script>
 
 <svelte:window onkeydown={handleWindowKeydown} />
@@ -103,6 +138,7 @@
 				bind:isCollapsed
 				onClose={() => (sidebarOpen = false)}
 				onLogout={handleLogout}
+				profileName={displayName}
 			/>
 
 	<!-- Main column -->
@@ -190,7 +226,7 @@
 							type="button"
 							class="flex items-center gap-2.5 rounded-xl p-1.5 pr-3 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
 							onclick={toggleProfileMenu}
-							aria-label="Menu profil Ahmad Hidayat"
+							aria-label={`Menu profil ${displayName}`}
 							aria-expanded={showProfileMenu}
 							aria-haspopup="menu"
 						>
@@ -198,13 +234,13 @@
 								class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-bold text-white shadow-md"
 								aria-hidden="true"
 							>
-								AH
+								{displayInitials}
 							</span>
 							<span class="hidden text-left sm:block">
 								<span class="block text-sm leading-tight font-semibold text-slate-800"
-									>Ahmad Hidayat</span
+									>{displayName}</span
 								>
-								<span class="block text-xs leading-tight text-slate-500">2101020045</span>
+								<span class="block text-xs leading-tight text-slate-500">{displayEmail}</span>
 							</span>
 							<i class="fa-solid fa-chevron-down hidden text-xs text-slate-400 sm:block" aria-hidden="true"></i>
 						</button>
@@ -216,8 +252,8 @@
 								class="absolute top-full right-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-xl"
 							>
 								<div class="border-b border-slate-100 px-4 py-3">
-									<div class="text-sm font-semibold text-slate-800">Ahmad Hidayat</div>
-									<div class="text-xs text-slate-500">ahmad.hidayat@student.ac.id</div>
+									<div class="text-sm font-semibold text-slate-800">{displayName}</div>
+									<div class="text-xs text-slate-500">{displayEmail}</div>
 								</div>
 								<div class="p-1.5" role="none">
 									<a

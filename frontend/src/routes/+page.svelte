@@ -1,12 +1,94 @@
 <script lang="ts">
 	import '../app.css';
+	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import Logo from '$lib/components/Logo.svelte';
 	import { aristotelesLogo as logoUrl } from '$lib/assets/logo';
-	import { courses } from '$lib/data/courses';
-	import { getCourseMeta } from '$lib/data/course-meta';
+	import {
+		fetchCourseDetail,
+		fetchPublicCourseList,
+		type BackendCourse
+	} from '$lib/api/courses';
 
 	let menuOpen = $state(false);
+
+	/**
+	 * Sorotan pelatihan dari katalog publik (GET /courses?status=published).
+	 * Hanya kolom kontrak: judul/sampul/durasi/kategori/level/periode/harga.
+	 * Rating/ulasan/jumlah peserta & materi tidak ada endpointnya → tidak ditampilkan.
+	 * Nama pengampu hanya ada di detail kursus → dimuat per kartu lalu di-cache.
+	 */
+	const MODUL_CATEGORIES = [
+		'Pengembangan Web',
+		'Basis Data',
+		'Jaringan',
+		'Keamanan',
+		'AI & Data',
+		'Infrastruktur',
+		'Desain',
+		'Bisnis'
+	];
+	const COVER_FALLBACK =
+		'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80';
+
+	let modulCat = $state('Semua');
+	let modulCourses = $state<BackendCourse[]>([]);
+	let modulNames = $state(new Map<number, string>());
+	let modulLoading = $state(true);
+	let modulError = $state('');
+	let modulSeq = 0;
+
+	async function loadModul(): Promise<void> {
+		const my = ++modulSeq;
+		modulLoading = true;
+		modulError = '';
+		try {
+			const list = await fetchPublicCourseList({
+				category: modulCat === 'Semua' ? undefined : modulCat,
+				status: 'published',
+				limit: 4
+			});
+			if (my !== modulSeq) return;
+			modulCourses = list;
+			void ensureModulNames(list);
+		} catch (e) {
+			if (my !== modulSeq) return;
+			modulError = e instanceof Error ? e.message : 'Gagal memuat pelatihan.';
+		} finally {
+			if (my === modulSeq) modulLoading = false;
+		}
+	}
+
+	async function ensureModulNames(list: BackendCourse[]): Promise<void> {
+		const missing = list.filter((c) => !modulNames.has(c.id));
+		if (missing.length === 0) return;
+		const entries = await Promise.all(
+			missing.map(async (c) => {
+				try {
+					const d = await fetchCourseDetail(c.id);
+					return [c.id, (d.instructors ?? []).map((i) => i.name).join(', ') || '—'] as const;
+				} catch {
+					return [c.id, '—'] as const;
+				}
+			})
+		);
+		const next = new Map(modulNames);
+		for (const [id, names] of entries) next.set(id, names);
+		modulNames = next;
+	}
+
+	function periodShort(course: BackendCourse): string {
+		if (course.period === 'upcoming') return `Mulai ${course.startMonth ?? ''}`.trim();
+		if (course.period === 'ongoing') return 'Berjalan';
+		if (course.period === 'ended') return 'Selesai';
+		return '—';
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		void modulCat;
+		void loadModul();
+	});
 
 	const rankings = [
 		{
@@ -461,75 +543,96 @@
 				</p>
 			</div>
 
-			<!-- Category Filter Buttons -->
+			<!-- Category Filter Buttons (kategori resmi backend) -->
 			<div class="flex flex-wrap justify-center gap-3 mb-12">
-				<button
-					class="bg-blue-600 text-white px-6 py-3 rounded-xl font-bold text-xs shadow-md shadow-blue-600/20 flex items-center gap-2"
-					><i class="fa-solid fa-laptop-code"></i> Pemasaran Digital</button
-				>
-				<button
-					class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-3 rounded-xl font-bold text-xs transition flex items-center gap-2"
-					><i class="fa-solid fa-pen-nib"></i> Desain UI/UX</button
-				>
-				<button
-					class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-3 rounded-xl font-bold text-xs transition flex items-center gap-2"
-					><i class="fa-solid fa-chart-pie"></i> Desain Grafis</button
-				>
-				<button
-					class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-6 py-3 rounded-xl font-bold text-xs transition flex items-center gap-2"
-					><i class="fa-solid fa-code"></i> Pengembangan Web</button
-				>
-			</div>
-
-			<!-- Course Cards Grid -->
-			<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
-				{#each courses.slice(0, 4) as course (course.id)}
-					{@const meta = getCourseMeta(course.id)}
-					<article
-						class="relative bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-xl transition group flex flex-col"
+				{#each ['Semua', ...MODUL_CATEGORIES] as cat (cat)}
+					<button
+						type="button"
+						onclick={() => (modulCat = cat)}
+						aria-pressed={modulCat === cat}
+						class={`px-6 py-3 rounded-xl font-bold text-xs flex items-center gap-2 transition ${modulCat === cat ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20' : 'bg-slate-100 hover:bg-slate-200 text-slate-700'}`}
+					>{cat}</button
 					>
-						<div class="relative overflow-hidden" aria-hidden="true">
-							<img
-								src={course.image}
-								alt=""
-								class="w-full h-48 object-cover group-hover:scale-105 transition duration-500"
-								loading="lazy"
-							/>
-							<span
-								class="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-extrabold px-3 py-1 rounded-md uppercase"
-								>{course.duration}</span
-							>
-						</div>
-						<div class="p-6 flex-1 flex flex-col justify-between space-y-4">
-							<div>
-								<div class="flex items-center justify-between text-xs text-slate-500 mb-2">
-									<span class="flex items-center gap-1"
-										><i class="fa-regular fa-star text-amber-400"></i>
-										{meta.rating} ({meta.reviews})</span
-									>
-									<span class="flex items-center gap-1"
-										><i class="fa-regular fa-clock"></i> {course.totalMaterials} Materi</span
-									>
-								</div>
-								<h3 class="font-extrabold text-slate-900 text-base leading-snug">
-									<a
-										href={resolve(`/modules/${course.id}`)}
-										class="rounded transition group-hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600 after:absolute after:inset-0"
-										aria-label={`Lihat info singkat: ${course.title}`}>{course.title}</a
-									>
-								</h3>
-								<p class="mt-1 text-xs text-slate-500">
-									{course.modules.length} modul · {course.category}
-								</p>
-							</div>
-							<div class="pt-4 border-t border-slate-100 flex items-center justify-between">
-								<span class="text-xs font-semibold text-slate-700">{course.instructor}</span>
-								<span class="text-blue-600 font-extrabold text-sm">{meta.price}</span>
-							</div>
-						</div>
-					</article>
 				{/each}
 			</div>
+
+			<!-- Course Cards Grid (katalog publik) -->
+			{#if modulLoading}
+				<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8" aria-label="Memuat pelatihan">
+					{#each [1, 2, 3, 4] as i (i)}
+						<div class="rounded-2xl border border-slate-200 bg-white p-0 overflow-hidden">
+							<div class="h-48 animate-pulse bg-slate-100"></div>
+							<div class="space-y-2 p-6">
+								<div class="h-4 w-3/4 animate-pulse rounded bg-slate-100"></div>
+								<div class="h-3 w-1/2 animate-pulse rounded bg-slate-100"></div>
+							</div>
+						</div>
+					{/each}
+				</div>
+			{:else if modulError}
+				<div role="alert" class="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+					<p class="text-sm font-bold text-red-700">Pelatihan belum dapat dimuat</p>
+					<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{modulError}</p>
+					<button
+						type="button"
+						onclick={() => void loadModul()}
+						class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-red-600"
+					>
+						<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+					</button>
+				</div>
+			{:else if modulCourses.length === 0}
+				<div class="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
+					<p class="text-sm font-semibold text-slate-700">Belum ada pelatihan pada kategori ini.</p>
+				</div>
+			{:else}
+				<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+					{#each modulCourses as course (course.id)}
+						<article
+							class="relative bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm hover:shadow-xl transition group flex flex-col"
+						>
+							<div class="relative overflow-hidden" aria-hidden="true">
+								<img
+									src={course.image || COVER_FALLBACK}
+									alt=""
+									class="w-full h-48 object-cover group-hover:scale-105 transition duration-500"
+									loading="lazy"
+								/>
+								{#if course.duration}
+									<span
+										class="absolute top-3 left-3 bg-red-600 text-white text-[10px] font-extrabold px-3 py-1 rounded-md uppercase"
+										>{course.duration}</span
+									>
+								{/if}
+							</div>
+							<div class="p-6 flex-1 flex flex-col justify-between space-y-4">
+								<div>
+									<div class="flex items-center justify-between text-xs text-slate-500 mb-2">
+										<span class="font-bold text-blue-600 uppercase tracking-wide">{course.level}</span>
+										<span class="flex items-center gap-1"
+											><i class="fa-regular fa-clock"></i> {periodShort(course)}</span
+										>
+									</div>
+									<h3 class="font-extrabold text-slate-900 text-base leading-snug">
+										<a
+											href={resolve(`/modules/${course.id}`)}
+											class="rounded transition group-hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600 after:absolute after:inset-0"
+											aria-label={`Lihat info singkat: ${course.title}`}>{course.title}</a
+										>
+									</h3>
+									<p class="mt-1 text-xs text-slate-500">
+										{course.category ?? 'Umum'}
+									</p>
+								</div>
+								<div class="pt-4 border-t border-slate-100 flex items-center justify-between">
+									<span class="text-xs font-semibold text-slate-700">{modulNames.get(course.id) ?? '…'}</span>
+									<span class="text-blue-600 font-extrabold text-sm">{course.priceLabel}</span>
+								</div>
+							</div>
+						</article>
+					{/each}
+				</div>
+			{/if}
 
 			<!-- View All Courses Button -->
 			<div class="text-center mt-12">

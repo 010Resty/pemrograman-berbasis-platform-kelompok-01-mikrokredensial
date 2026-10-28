@@ -116,8 +116,9 @@ Uji: `enrollments.test.ts` (14 kasus: sukses, duplikat, semua penolakan, gating,
 | `POST /materials/:id/progress` | JWT + hak akses | 200 `{materialId,completed:true,alreadyCompleted}` (idempoten; baris kedua hanya refresh waktu) | 403 `NO_ACCESS`; 404 draft-asing/hilang/id buruk |
 | `DELETE /materials/:id/progress` | JWT + hak akses | 200 `data:null` (idempoten) | sama |
 | `GET /me/progress[?courseId=]` | JWT | 200 `number[]` milik sendiri | 400 `courseId` tak valid; 404 kursus asing/hilang |
+| `GET /me/progress/summary` | JWT | 200 `{totalCourses,totalMaterials,completedMaterials,percent,perCourse[]}` — persen = Σ selesai / Σ materi kursus yang diikuti × 100, **satu desimal** (mis. 63.9) | 401 tanpa token |
 
-Uji: `progress.test.ts` (401, id invalid, idempoten, filter, isolasi, draft, batalkan).
+Uji: `progress.test.ts` (401, id invalid, idempoten, filter, isolasi, draft, batalkan); `progress-summary.test.ts` (ringkasan kosong, persen desimal 63.9, per-kursus 75.0/100.0, isolasi antar-peserta).
 
 ---
 
@@ -164,9 +165,13 @@ Satu baris per (peserta, modul); `UNIQUE(userId,moduleId)` + transaksi = idempot
 | `GET /me/certificates` | JWT | 200 milik sendiri | 401 |
 | `GET /me/modules/:id/certificate-status` | JWT + hak akses | 200 `{eligible,requirements[],failReasons[],certificate?}` | 403/404 |
 | `GET /certificates/verify/:code` | **publik** | 200 minimal `{code,recipientName,courseTitle,moduleTitle,status,issuedAt,revokedAt}`; tanpa userId/email/nilai | 404 `CODE_NOT_FOUND` |
-| `GET /instructor/certificates?courseId=&moduleId=&status=issued\|revoked&q=&limit=&page=` | teacher/admin (scope kursus tanggung jawab) | 200 `{items,total}` (termasuk dicabut) | 403 luar scope |
-| `GET /instructor/certificates/:certId` | teacher/admin scope | 200 + `requirementsSnapshot`,`revokedBy` | 403/404 |
-| `POST /instructor/certificates/:certId/revoke` | teacher/admin scope | 200 `status:'revoked'` + `revokeReason/By/At` + audit; verify ikut `revoked` | 400 alasan (<5); 409 `ALREADY_REVOKED`; 403/404 |
+| `GET /instructor/certificates/summary` | teacher/admin (scope kursus tanggung jawab) | 200 `{eligibleCount,issuedActiveCount,notEligibleCount,revokedCount,perCourse[],recentlyEligible[]}` untuk tab ringkasan `instruktur/sertifikat` | 200 kosong bila belum mengampu |
+| `GET /instructor/modules/:id/certificate-status` | teacher/admin scope | 200 `{moduleId,moduleTitle,courseId,courseTitle,eligibleCount,issuedCount,notEligibleCount,revokedCount}` | 403/404 |
+| `GET /instructor/eligibility?courseId=&moduleId=&status=&q=` | teacher/admin scope | 200 `{items,total}` bentuk frontend `{id:"moduleId:userId",studentName,nim,courseId/Title,moduleId/Title,materialDone/Total,quizStatus,taskStatus,status}` | 400 query tak valid; 403 luar scope |
+| `GET /instructor/eligibility/:id` | teacher/admin scope | 200 rincian `{...entry,certificateId,failReasons,materials,quizzes,tasks}`; `id` gabungan `moduleId:userId` | 404 `ELIGIBILITY_NOT_FOUND`; 403/404 |
+| `GET /instructor/certificates?courseId=&moduleId=&status=aktif\|dicabut\|issued\|revoked&q=&from=YYYY-MM-DD&to=YYYY-MM-DD&limit=&page=` | teacher/admin (scope kursus tanggung jawab) | 200 `{items,total}` bentuk frontend `{id,code,studentName,printedName,recipientName,courseId/Title,moduleId/Title,issuedAt,status:aktif\|dicabut,revokedAt,revokeReason}` (termasuk dicabut) | 403 luar scope |
+| `GET /instructor/certificates/:certId` | teacher/admin scope | 200 bentuk frontend + `requirementsSnapshot`,`revokedBy` | 403/404 |
+| `POST /instructor/certificates/:certId/revoke` | teacher/admin scope | 200 `status:'dicabut'` + `revokeReason/By/At` + audit; verify publik tetap `revoked` | 400 alasan (<5); 409 `ALREADY_REVOKED`; 403/404 |
 | `GET /instructor/modules/:id/eligibility[?status=]` | teacher/admin scope | 200 `{items:[{userId,studentName,email,status: sudah_terbit\|memenuhi\|menunggu_penilaian\|belum_memenuhi,...}]}` | 403/404 |
 
 Tidak ada PDF server (keputusan: JSON + halaman printable). Re-issue pasca-revoke terminal (409).
@@ -193,7 +198,10 @@ Uji: `voucher-admin.test.ts` (11: create/validasi, redeem+redeemed, personal, mi
 
 | Endpoint | Role | Body | Sukses | Error |
 |---|---|---|---|---|
+| `GET /admin/overview` | admin | — | 200 `{totalStudents,totalTeachers,totalCourses,totalCertificates}` (4 agregat ringan untuk badge/kartu) | 403 |
+| `GET /admin/users/:id` | admin | — | 200 detail + `{enrollmentCount,certificateCount}` tanpa `passwordHash` | 403/404 |
 | `GET /admin/users?role=&isActive=&q=&limit=&page=` | admin | — | 200 `{items,total}` **tanpa `passwordHash`** | 403 |
+| `GET /admin/users/:id` | admin | — | 200 detail + `{enrollmentCount,certificateCount}` tanpa `passwordHash` | 403/404 |
 | `POST /admin/users` | admin | `{name 2–100, email, password 8–72}` (role dikunci `teacher`) | 201 + audit `user.create` | 400/409 `EMAIL_TAKEN` |
 | `PATCH /admin/users/:id` | admin | `{isActive}` | 200 + audit `user.enable/disable` | 400 ubah diri sendiri; 404 |
 | `POST /admin/courses/:id/instructors` | admin | `{userId\|email}` (target harus teacher/admin) | 201 + audit | 400 `NOT_TEACHER`; 404 |

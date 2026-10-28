@@ -1,6 +1,6 @@
-import { and, eq, inArray } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { db } from "../../db";
-import { materials, modules, progress } from "../../db/schema";
+import { courses, enrollments, materials, modules, progress } from "../../db/schema";
 
 /** Ambil satu baris progres milik pengguna untuk materi tertentu. */
 export const getProgress = async (userId: number, materialId: number) => {
@@ -69,4 +69,118 @@ export const listMine = async (
         : eq(progress.userId, userId)
     );
   return rows.map((r) => r.materialId);
+};
+
+/** Satu desimal, mis. 63.888… → 63.9. Nol bila penyebut nol. */
+const round1 = (done: number, total: number): number =>
+  total <= 0 ? 0 : Math.round((done / total) * 1000) / 10;
+
+export interface CourseProgressSummary {
+  courseId: number;
+  courseTitle: string;
+  totalMaterials: number;
+  completedMaterials: number;
+  /** Persen 0–100, satu desimal. */
+  percent: number;
+}
+
+export interface MyProgressSummary {
+  totalCourses: number;
+  totalMaterials: number;
+  completedMaterials: number;
+  /** Persen keseluruhan tertimbang = Σ selesai / Σ materi × 100, satu desimal. */
+  percent: number;
+  perCourse: CourseProgressSummary[];
+}
+
+/** Ringkasan progres keseluruhan milik sendiri ("Progres Keseluruhan" dasbor user).
+ * Rumus: persen = Σ materi selesai / Σ materi kursus yang diikuti × 100
+ * (satu desimal, mis. 63.9). Hanya kursus yang diikuti (enrollment
+ * active/completed); kursus tanpa materi = 0%. Empat query batch, tanpa N+1. */
+export const getMyProgressSummary = async (
+  userId: number
+): Promise<MyProgressSummary> => {
+  const enrolled = await db
+    .select({ courseId: enrollments.courseId, title: courses.title })
+    .from(enrollments)
+    .innerJoin(courses, eq(courses.id, enrollments.courseId))
+    .where(
+      and(
+        eq(enrollments.userId, userId),
+        inArray(enrollments.status, ["active", "completed"])
+      )
+    )
+    .orderBy(asc(courses.id));
+  if (enrolled.length === 0) {
+    return {
+      totalCourses: 0,
+      totalMaterials: 0,
+      completedMaterials: 0,
+      percent: 0,
+      perCourse: [],
+    };
+  }
+  const mods = await db
+    .select({ id: modules.id, courseId: modules.courseId })
+    .from(modules)
+    .where(
+      inArray(
+        modules.courseId,
+        enrolled.map((e) => e.courseId)
+      )
+    );
+  const modToCourse = new Map(mods.map((m) => [m.id, m.courseId]));
+  const matRows =
+    mods.length > 0
+      ? await db
+          .select({ id: materials.id, moduleId: materials.moduleId })
+          .from(materials)
+          .where(
+            inArray(
+              materials.moduleId,
+              mods.map((m) => m.id)
+            )
+          )
+      : [];
+  const matToCourse = new Map(
+    matRows.map((t) => [t.id, modToCourse.get(t.moduleId)] as const)
+  );
+  const doneRows =
+    matRows.length > 0
+      ? await db
+          .select({ materialId: progress.materialId })
+          .from(progress)
+          .where(
+            and(
+              eq(progress.userId, userId),
+              inArray(
+                progress.materialId,
+                matRows.map((t) => t.id)
+              )
+            )
+          )
+      : [];
+  const doneSet = new Set(doneRows.map((r) => r.materialId));
+  const perCourse: CourseProgressSummary[] = enrolled.map((e) => {
+    const ids = matRows
+      .filter((t) => matToCourse.get(t.id) === e.courseId)
+      .map((t) => t.id);
+    const done = ids.filter((id) => doneSet.has(id)).length;
+    return {
+      courseId: e.courseId,
+      courseTitle: e.title,
+      totalMaterials: ids.length,
+      completedMaterials: done,
+      percent: round1(done, ids.length),
+    };
+  });
+  const totalMaterials = perCourse.reduce((n, c) => n + c.totalMaterials, 0);
+  const completedMaterials = perCourse.reduce((n, c) => n + c.completedMaterials, 0);
+  return {
+    totalCourses: enrolled.length,
+    totalMaterials,
+    completedMaterials,
+    percent: round1(completedMaterials, totalMaterials),
+    perCourse,
+  };
 };

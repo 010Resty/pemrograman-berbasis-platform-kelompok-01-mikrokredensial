@@ -7,7 +7,7 @@
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "test": "tsx --test src/modules/courses/__tests__/material-pass-score.test.ts src/modules/progress/__tests__/progress.test.ts src/modules/quiz/__tests__/quiz.test.ts src/modules/enrollments/__tests__/enrollments.test.ts src/modules/submissions/__tests__/submissions.test.ts src/modules/certificates/__tests__/certificates.test.ts src/modules/vouchers/__tests__/voucher-admin.test.ts",
+    "test": "tsx --test src/modules/courses/__tests__/material-pass-score.test.ts src/modules/courses/__tests__/material-progress-kept.test.ts src/modules/progress/__tests__/progress.test.ts src/modules/progress/__tests__/progress-summary.test.ts src/modules/quiz/__tests__/quiz.test.ts src/modules/enrollments/__tests__/enrollments.test.ts src/modules/submissions/__tests__/submissions.test.ts src/modules/certificates/__tests__/certificates.test.ts src/modules/vouchers/__tests__/voucher-admin.test.ts src/modules/dashboard/__tests__/dashboard.test.ts src/modules/admin/__tests__/admin-overview.test.ts",
     "db:generate": "drizzle-kit generate:mysql",
     "db:migrate": "tsx src/db/migrate.ts",
     "db:push": "drizzle-kit push:mysql",

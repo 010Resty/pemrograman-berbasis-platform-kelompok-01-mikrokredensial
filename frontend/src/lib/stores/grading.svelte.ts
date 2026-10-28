@@ -2,6 +2,7 @@ import { SvelteMap } from 'svelte/reactivity';
 import type { ApiResult, AssignmentSubmission } from '$lib/types/submission';
 import { getCourseById } from '$lib/data/courses';
 import { resolveSubModules } from '$lib/data/training';
+import { getAccessToken } from '$lib/stores/auth.svelte';
 import type { ReviewItem } from '$lib/data/grading';
 
 /**
@@ -95,17 +96,33 @@ export function ensureGradingLoaded(): void {
 		});
 }
 
+/** Keputusan penilaian sesuai kontrak backend (tanpa mengarang rubrik). */
+export type GradeDecision = 'passed' | 'failed' | 'revision_requested';
+
 /** Simpan nilai 0–100 untuk satu pengumpulan. Mengembalikan pesan hasil. */
-export async function submitReviewScore(id: string, value: number): Promise<string> {
+export async function submitReviewScore(
+	id: string,
+	value: number,
+	opts: { decision?: GradeDecision; feedback?: string } = {}
+): Promise<string> {
 	const target = reviewMap.get(id);
 	if (!target) return 'Data tidak ditemukan.';
 	let savedRemote = false;
-	if (target.submissionId) {
+	const materialId = target.materialId ? Number(target.materialId) : NaN;
+	if (target.submissionId && Number.isInteger(materialId) && materialId > 0) {
 		try {
+			const headers: Record<string, string> = { 'content-type': 'application/json' };
+			const token = getAccessToken();
+			if (token) headers.authorization = `Bearer ${token}`;
 			const res = await fetch(`/api/assignments/grade/${encodeURIComponent(target.submissionId)}`, {
 				method: 'PATCH',
-				headers: { 'content-type': 'application/json' },
-				body: JSON.stringify({ score: value })
+				headers,
+				body: JSON.stringify({
+					score: value,
+					materialId,
+					decision: opts.decision ?? 'passed',
+					feedback: opts.feedback?.trim() ? opts.feedback.trim().slice(0, 2000) : undefined
+				})
 			});
 			if (!res.ok) throw new Error('backend offline');
 			savedRemote = true;
@@ -113,7 +130,8 @@ export async function submitReviewScore(id: string, value: number): Promise<stri
 			/* fallback: simpan lokal saja */
 		}
 	}
-	reviewMap.set(id, { ...target, score: value, status: 'Dinilai' });
+	const feedback = opts.feedback?.trim() ? opts.feedback.trim().slice(0, 2000) : (target.feedback ?? null);
+	reviewMap.set(id, { ...target, score: value, status: 'Dinilai', feedback });
 	if (savedRemote) return `Nilai ${value} tersimpan untuk ${target.student}.`;
 	return `Nilai ${value} tercatat lokal (simulasi) untuk ${target.student} — belum terkirim ke server.`;
 }

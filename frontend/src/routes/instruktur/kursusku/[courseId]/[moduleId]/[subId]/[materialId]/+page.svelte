@@ -42,6 +42,7 @@
 	import TaskBriefBuilder from '$lib/components/training/organisms/TaskBriefBuilder.svelte';
 	import TaskStepsList from '$lib/components/training/molecules/TaskStepsList.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
+	import { BackendRequestError } from '$lib/api/backend';
 
 	const courseId = $derived(Number(page.params.courseId));
 	const moduleId = $derived(page.params.moduleId ?? '');
@@ -243,7 +244,32 @@
 			invalidateCourseTree(courseId);
 			return true;
 		} catch (e) {
-			saveError = e instanceof Error ? e.message : 'Gagal menyimpan judul ke server.';
+			saveError = serverMessage(e, 'Gagal menyimpan judul ke server.');
+			return false;
+		}
+	}
+
+	/** Pesan error server + rincian field (agar "Data materi tidak valid" bisa ditindaklanjuti). */
+	function serverMessage(e: unknown, fallback: string): string {
+		if (e instanceof BackendRequestError) {
+			const details = (e.errors ?? []).map((x) => `${x.field}: ${x.message}`).join('; ');
+			return details ? `${e.message} (${details})` : e.message;
+		}
+		return e instanceof Error ? e.message : fallback;
+	}
+
+	/**
+	 * Sinkronkan isi materi (dokumen Tiptap → string JSON) ke server.
+	 * Tanpa ini, brief tugas / teks materi hanya menumpuk di localStorage
+	 * dan kolom `content` di database tetap NULL (laporan: materi tak tersimpan).
+	 */
+	async function pushContentToServer(content: JSONContent): Promise<boolean> {
+		if (!serverMode || !isServerId(materialId)) return true;
+		try {
+			await updateMaterial(Number(materialId), { content: JSON.stringify(content) });
+			return true;
+		} catch (e) {
+			saveError = serverMessage(e, 'Gagal menyimpan isi materi ke server.');
 			return false;
 		}
 	}
@@ -306,7 +332,7 @@
 			await loadServerQuiz(Number(materialId));
 			return true;
 		} catch (e) {
-			saveError = e instanceof Error ? e.message : 'Gagal menyimpan kuis ke server.';
+			saveError = serverMessage(e, 'Gagal menyimpan kuis ke server.');
 			return false;
 		} finally {
 			quizSavingServer = false;
@@ -361,6 +387,12 @@
 			saveError = 'Isi judul materi terlebih dahulu sebelum menyimpan draf.';
 			return;
 		}
+		// Cerminkan kontrak server (3–255 karakter) agar gagal di klien
+		// dengan pesan jelas, bukan 400 "Data materi tidak valid".
+		if (title.length < 3 || title.length > 255) {
+			saveError = 'Judul materi 3–255 karakter (aturan server).';
+			return;
+		}
 		const updatedAt = new Date().toISOString();
 		if (kind === 'tugas') {
 			const draft: TaskDraft = {
@@ -384,6 +416,8 @@
 			latestTask = null;
 			touchModule();
 			if (!(await pushTitleToServer(title))) return;
+			// Brief tugas wajib ada (lolos validateTaskDraft) → dorong ke server.
+			if (draft.brief && !(await pushContentToServer(draft.brief))) return;
 			saveCurriculumDraft(courseId, editableModules);
 			dirty = false;
 			lastSavedLabel = new Date(updatedAt).toLocaleString('id-ID', {
@@ -392,7 +426,7 @@
 				hour: '2-digit',
 				minute: '2-digit'
 			});
-			savedMessage = `Draf tugas tersimpan ${lastSavedLabel} (${countTaskPoints(draft)} poin).`;
+			savedMessage = `Tugas tersimpan ke server ${lastSavedLabel} (${countTaskPoints(draft)} poin).`;
 			goto(backHref);
 			return;
 		}
@@ -466,6 +500,8 @@
 		}
 		touchModule();
 		if (!(await pushTitleToServer(title))) return;
+		// Isi teks (Tiptap JSON) ikut didorong agar kolom content terisi di server.
+		if (content && !(await pushContentToServer(content))) return;
 		saveCurriculumDraft(courseId, editableModules);
 		dirty = false;
 		lastSavedLabel = new Date(updatedAt).toLocaleString('id-ID', {
@@ -474,7 +510,7 @@
 			hour: '2-digit',
 			minute: '2-digit'
 		});
-		savedMessage = `Draf tersimpan ${lastSavedLabel}. Judul materi ikut tersinkron ke daftar materi.`;
+		savedMessage = `Materi tersimpan ke server ${lastSavedLabel}. Judul materi ikut tersinkron ke daftar materi.`;
 		goto(backHref);
 	}
 </script>

@@ -258,6 +258,33 @@ export function publicVerifyHref(): string {
 	return '/#verifikasi';
 }
 
+/** Kelayakan sertifikat milik sendiri per modul (GET /api/v1/me/modules/:id/certificate-status). */
+export interface MyModuleRequirement {
+	materialId: number;
+	title: string;
+	type: string;
+	state: string;
+	extra: string | null;
+}
+
+export interface MyModuleCertificateStatus {
+	moduleId: number;
+	courseId: number;
+	eligible: boolean;
+	requirements: MyModuleRequirement[];
+	failReasons: string[];
+	certificate: { id: number; code: string; status: string } | null;
+}
+
+export async function fetchMyModuleCertificateStatus(
+	moduleId: number
+): Promise<MyModuleCertificateStatus> {
+	const data = await req<{ item?: MyModuleCertificateStatus } | MyModuleCertificateStatus>(
+		`/me/modules/${moduleId}/certificate-status`
+	);
+	return unwrapOne(data);
+}
+
 /** Label Indonesia untuk status kelayakan. */
 export function eligibilityLabel(s: EligibilityStatus): string {
 	switch (s) {

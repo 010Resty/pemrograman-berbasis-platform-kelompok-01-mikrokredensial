@@ -9,6 +9,7 @@ import certificateRoutes from "./modules/certificates/certificate.routes";
 import voucherRoutes from "./modules/vouchers/voucher.routes";
 import adminRoutes from "./modules/admin/admin.routes";
 import invitationRoutes from "./modules/invitations/invitation.routes";
+import dashboardRoutes from "./modules/dashboard/dashboard.routes";
 import { uploadsRouter, filesRouter } from "./modules/uploads/upload.routes";
 import express, { Application, Request, Response, NextFunction } from "express";
 import cors from "cors";
@@ -27,7 +28,7 @@ app.use(helmet());
 // CORS configuration
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    origin:"http://localhost:5173",
     credentials: true,
   })
 );
@@ -55,6 +56,8 @@ app.use("/api/v1/auth", authRoutes);
 // Course catalog & management
 app.use("/api/v1/courses", courseRoutes);
 app.use("/api/v1/instructor/courses", instructorRouter);
+// Dashboard ringkasan instruktur (agregat database, tanpa data contoh)
+app.use("/api/v1/instructor/dashboard", dashboardRoutes);
 // Curriculum tree (modules / sub-modules / materials)
 app.use("/api/v1", curriculaRoutes);
 // Learning progress per user (own only, JWT identity)

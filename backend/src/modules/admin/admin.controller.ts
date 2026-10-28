@@ -6,6 +6,8 @@ import {
   assignInstructorSchema,
   createTeacher,
   createTeacherSchema,
+  getAdminOverview,
+  getUserById,
   listUsers,
   setActiveSchema,
   setUserActive,
@@ -55,6 +57,26 @@ const num = (v: unknown): number | undefined => {
   if (typeof v !== "string" || v.trim() === "") return undefined;
   const n = Number(v);
   return Number.isInteger(n) && n > 0 ? n : undefined;
+};
+
+// GET /api/v1/admin/overview — hitungan badge sidebar admin.
+export const overviewHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAdmin(req, res);
+    if (userId === null) return;
+    void userId;
+    res.status(200).json({
+      status: "success",
+      message: "Ringkasan admin",
+      data: await getAdminOverview(),
+    });
+  } catch (e) {
+    next(e);
+  }
 };
 
 // GET /api/v1/admin/users — daftar pengguna (tanpa password hash).
@@ -113,6 +135,39 @@ export const createTeacherHandler = async (
         status: "success",
         message: "Akun instruktur berhasil dibuat.",
         data: user,
+      });
+    } catch (e) {
+      if (!adminError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// GET /api/v1/admin/users/:id — detail satu pengguna (tanpa password hash).
+export const userDetailHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const adminId = needAdmin(req, res);
+    if (adminId === null) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(404).json({
+        status: "error",
+        message: "Pengguna tidak ditemukan",
+        code: "USER_NOT_FOUND",
+        data: null,
+      });
+      return;
+    }
+    try {
+      res.status(200).json({
+        status: "success",
+        message: "Detail pengguna",
+        data: await getUserById(id),
       });
     } catch (e) {
       if (!adminError(res, e)) throw e;

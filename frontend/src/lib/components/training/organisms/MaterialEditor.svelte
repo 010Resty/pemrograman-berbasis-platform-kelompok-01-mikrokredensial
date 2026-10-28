@@ -5,7 +5,8 @@
 	import type { JSONContent } from '@tiptap/core';
 	import '$lib/tiptap/content.css';
 	import { createEditorExtensions, toEmbedUrl } from '$lib/tiptap/extensions';
-	import { formatFileSize, readFileAsDataUrl } from '$lib/stores/material-docs';
+	import { formatFileSize } from '$lib/stores/material-docs';
+	import { uploadFile } from '$lib/api/uploads';
 
 	/**
 	 * Editor dokumen materi (Tiptap, gaya Word/Docs): heading, paragraf,
@@ -48,6 +49,8 @@
 	let urlValue = $state('');
 	let dialogError = $state('');
 	let dialogInput = $state<HTMLInputElement>();
+	/** Unggah berkas ke server sedang berjalan (nonaktifkan input file). */
+	let uploading = $state(false);
 
 	/* Fokus otomatis ke kolom URL saat dialog dibuka (pengganti autofocus). */
 	$effect(() => {
@@ -226,22 +229,28 @@
 		const input = event.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
 		input.value = '';
-		if (!file || !editor) return;
-		if (!file.type.startsWith('audio/')) {
+		if (!file || !editor || uploading) return;
+		const audioMime = file.type === 'audio/mp3' ? 'audio/mpeg' : file.type;
+		if (!['audio/mpeg', 'audio/ogg', 'audio/wav', 'audio/x-wav'].includes(audioMime)) {
 			dialogError = 'Berkas harus berupa audio (MP3/OGG/WAV).';
 			return;
 		}
 		if (file.size > 8 * 1024 * 1024) {
-			dialogError = 'Ukuran audio maksimal 8 MB agar draf lokal tetap tersimpan.';
+			dialogError = 'Ukuran audio maksimal 8 MB (batas server).';
 			return;
 		}
+		uploading = true;
+		dialogError = '';
 		try {
-			const dataUrl = await readFileAsDataUrl(file);
-			editor.chain().focus().insertAudio({ src: dataUrl, title: file.name }).run();
+			// Unggah dulu ke backend → sisipkan URL server (bukan dataURL yang ditolak server).
+			const uploaded = await uploadFile(file, 'audio', audioMime);
+			editor.chain().focus().insertAudio({ src: uploaded.url, title: file.name }).run();
 			tick++;
 			closeDialog();
-		} catch {
-			dialogError = 'Gagal membaca berkas audio.';
+		} catch (e) {
+			dialogError = e instanceof Error ? e.message : 'Gagal mengunggah audio.';
+		} finally {
+			uploading = false;
 		}
 	}
 
@@ -249,22 +258,27 @@
 		const input = event.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
 		input.value = '';
-		if (!file || !editor) return;
-		if (!file.type.startsWith('image/')) {
+		if (!file || !editor || uploading) return;
+		if (!['image/jpeg', 'image/png', 'image/webp', 'image/gif'].includes(file.type)) {
 			dialogError = 'Berkas harus berupa gambar (JPG/PNG/WebP/GIF).';
 			return;
 		}
 		if (file.size > 4 * 1024 * 1024) {
-			dialogError = 'Ukuran gambar maksimal 4 MB agar draf lokal tetap tersimpan.';
+			dialogError = 'Ukuran gambar maksimal 4 MB (batas server).';
 			return;
 		}
+		uploading = true;
+		dialogError = '';
 		try {
-			const dataUrl = await readFileAsDataUrl(file);
-			editor.chain().focus().setImage({ src: dataUrl, alt: file.name }).run();
+			// Unggah dulu ke backend → sisipkan URL server (bukan dataURL yang ditolak server).
+			const uploaded = await uploadFile(file, 'image');
+			editor.chain().focus().setImage({ src: uploaded.url, alt: file.name }).run();
 			tick++;
 			closeDialog();
-		} catch {
-			dialogError = 'Gagal membaca berkas gambar.';
+		} catch (e) {
+			dialogError = e instanceof Error ? e.message : 'Gagal mengunggah gambar.';
+		} finally {
+			uploading = false;
 		}
 	}
 
@@ -272,26 +286,31 @@
 		const input = event.currentTarget as HTMLInputElement;
 		const file = input.files?.[0];
 		input.value = '';
-		if (!file || !editor) return;
+		if (!file || !editor || uploading) return;
 		if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
 			dialogError = 'Berkas harus berupa PDF.';
 			return;
 		}
 		if (file.size > 8 * 1024 * 1024) {
-			dialogError = 'Ukuran PDF maksimal 8 MB agar draf lokal tetap tersimpan.';
+			dialogError = 'Ukuran PDF maksimal 8 MB.';
 			return;
 		}
+		uploading = true;
+		dialogError = '';
 		try {
-			const dataUrl = await readFileAsDataUrl(file);
+			// Unggah dulu ke backend → kartu unduh menaut ke URL server.
+			const uploaded = await uploadFile(file, 'pdf', 'application/pdf');
 			editor
 				.chain()
 				.focus()
-				.insertPdf({ name: file.name, url: dataUrl, size: formatFileSize(file.size) })
+				.insertPdf({ name: file.name, url: uploaded.url, size: formatFileSize(uploaded.sizeBytes) })
 				.run();
 			tick++;
 			closeDialog();
-		} catch {
-			dialogError = 'Gagal membaca berkas PDF.';
+		} catch (e) {
+			dialogError = e instanceof Error ? e.message : 'Gagal mengunggah PDF.';
+		} finally {
+			uploading = false;
 		}
 	}
 
@@ -722,16 +741,18 @@
 							<span id="dlg-img-up" class="mb-1 block text-xs font-bold text-slate-700">Unggah dari perangkat</span>
 							<label
 								for="dlg-img-file"
-								class="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-blue-300 bg-blue-50/60 px-4 py-2.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+								class={`flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-blue-300 bg-blue-50/60 px-4 py-2.5 text-xs font-bold text-blue-700 transition-colors hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600 ${uploading ? 'pointer-events-none opacity-60' : ''}`}
+								aria-disabled={uploading}
 							>
-								<i class="fa-solid fa-upload" aria-hidden="true"></i> Pilih gambar (maks 4 MB)
+								<i class={`fa-solid ${uploading ? 'fa-circle-notch fa-spin' : 'fa-upload'}`} aria-hidden="true"></i> {uploading ? 'Mengunggah…' : 'Pilih gambar (maks 4 MB)'}
 							</label>
 							<input
 								id="dlg-img-file"
 								type="file"
-								accept="image/*"
+								accept="image/jpeg,image/png,image/webp,image/gif,.jpg,.jpeg,.png,.webp,.gif"
 								aria-labelledby="dlg-img-up"
 								onchange={handleImageFile}
+								disabled={uploading}
 								class="sr-only"
 							/>
 						</div>
@@ -774,16 +795,18 @@
 							>
 							<label
 								for="dlg-aud-file"
-								class="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-cyan-300 bg-cyan-50/60 px-4 py-2.5 text-xs font-bold text-cyan-700 transition-colors hover:bg-cyan-50 focus-visible:outline-2 focus-visible:outline-cyan-600"
+								class={`flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-cyan-300 bg-cyan-50/60 px-4 py-2.5 text-xs font-bold text-cyan-700 transition-colors hover:bg-cyan-50 focus-visible:outline-2 focus-visible:outline-cyan-600 ${uploading ? 'pointer-events-none opacity-60' : ''}`}
+								aria-disabled={uploading}
 							>
-								<i class="fa-solid fa-upload" aria-hidden="true"></i> Pilih audio (maks 8 MB)
+								<i class={`fa-solid ${uploading ? 'fa-circle-notch fa-spin' : 'fa-upload'}`} aria-hidden="true"></i> {uploading ? 'Mengunggah…' : 'Pilih audio (maks 8 MB)'}
 							</label>
 							<input
 								id="dlg-aud-file"
 								type="file"
-								accept="audio/*"
+								accept="audio/mpeg,audio/ogg,audio/wav,.mp3,.ogg,.wav"
 								aria-labelledby="dlg-aud-up"
 								onchange={handleAudioFile}
+								disabled={uploading}
 								class="sr-only"
 							/>
 						</div>
@@ -807,20 +830,22 @@
 						</div>
 					{:else}
 						<p class="text-xs text-slate-500">
-							PDF tersisip sebagai kartu unduhan di posisi kursor (maks 8 MB, tersimpan lokal).
+							PDF tersisip sebagai kartu unduhan di posisi kursor (maks 8 MB, tersimpan di server).
 						</p>
 						<div>
 							<label
 								for="dlg-pdf-file"
-								class="flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-red-300 bg-red-50/60 px-4 py-2.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-500"
+								class={`flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-red-300 bg-red-50/60 px-4 py-2.5 text-xs font-bold text-red-700 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-500 ${uploading ? 'pointer-events-none opacity-60' : ''}`}
+								aria-disabled={uploading}
 							>
-								<i class="fa-solid fa-upload" aria-hidden="true"></i> Pilih berkas PDF
+								<i class={`fa-solid ${uploading ? 'fa-circle-notch fa-spin' : 'fa-upload'}`} aria-hidden="true"></i> {uploading ? 'Mengunggah…' : 'Pilih berkas PDF'}
 							</label>
 							<input
 								id="dlg-pdf-file"
 								type="file"
 								accept="application/pdf,.pdf"
 								onchange={handlePdfFile}
+								disabled={uploading}
 								class="sr-only"
 							/>
 						</div>

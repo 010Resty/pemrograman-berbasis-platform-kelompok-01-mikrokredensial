@@ -6,7 +6,7 @@
 	 * (instruktur/peserta). Dibuat generik agar dapat dipakai ulang di
 	 * dashboard Peserta dan Instruktur dengan isi berbeda.
 	 *
-	 * Contoh pakai:
+	 * Contoh pakai (semua tertutup saat pertama dibuka; klik untuk membuka):
 	 * ```svelte
 	 * <FeatureFlowCard flows={[
 	 *   {
@@ -68,8 +68,9 @@
 
 	let { flows }: { flows: FeatureFlow[] } = $props();
 
-	/* Indeks alur yang terbuka. Alur pertama terbuka sebagai contoh. */
-	let open = $state<Record<number, boolean>>({ 0: true });
+	/* Semua panduan tertutup saat pertama dibuka; pengguna membuka manual
+	 * per kebutuhan (tidak ada yang terbuka otomatis). */
+	let open = $state<Record<number, boolean>>({});
 
 	function slug(title: string): string {
 		return title.toLowerCase().replace(/[^a-z0-9]+/g, '-');

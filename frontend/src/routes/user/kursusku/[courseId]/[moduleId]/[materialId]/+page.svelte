@@ -1,29 +1,236 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { SvelteSet } from 'svelte/reactivity';
+	import type { JSONContent } from '@tiptap/core';
+	import { generateHTML } from '@tiptap/html';
+	import '$lib/tiptap/content.css';
+	import { createEditorExtensions, toEmbedUrl } from '$lib/tiptap/extensions';
 	import {
-		getCourseById,
 		getModuleMaterials,
 		isMaterialLocked,
-		isSubModuleLocked
+		isSubModuleLocked,
+		type Course,
+		type CourseModule
 	} from '$lib/data/courses';
 	import { resolveSubModules } from '$lib/data/training';
-	import { doneMaterials, ensureSeeded, markDone } from '$lib/stores/progress.svelte';
-	import { getCourseMeta } from '$lib/data/course-meta';
-	import { canAccessCourse, isPeriodLocked } from '$lib/stores/enrollment.svelte';
+	import {
+		fetchCourseDetail,
+		fetchCourseTree,
+		fetchCourseAccess,
+		fetchMaterialDetail,
+		enrollCourse,
+		toCourseView,
+		fileUrl,
+		type BackendCourse,
+		type BackendMaterial,
+		type CourseAccessState
+	} from '$lib/api/courses';
+	import { fetchMyProgressIds, markMaterialComplete } from '$lib/api/progress';
 	import { resolve } from '$app/paths';
-	import MaterialRenderer from '$lib/components/materials/MaterialRenderer.svelte';
+	import QuizMaterial from '$lib/components/materials/QuizMaterial.svelte';
+	import AssignmentMaterial from '$lib/components/materials/AssignmentMaterial.svelte';
+	import type { AssignmentDetail } from '$lib/data/material-details';
+
+	// Singleton ekstensi Tiptap: mahal, dibuat sekali (bukan tiap render).
+	let cachedExtensions: ReturnType<typeof createEditorExtensions> | null = null;
+	function getExtensions(): ReturnType<typeof createEditorExtensions> {
+		if (!cachedExtensions) cachedExtensions = createEditorExtensions('');
+		return cachedExtensions;
+	}
+
+	function escapeHtml(s: string): string {
+		return s
+			.replaceAll('&', '&amp;')
+			.replaceAll('<', '&lt;')
+			.replaceAll('>', '&gt;')
+			.replaceAll('"', '&quot;');
+	}
+
+	/** Samakan URL berkas relatif (/api/...) ke absolut backend + normalkan URL tonton YouTube/Vimeo ke embed. Tanpa ini foto/file 404 saat origin frontend ≠ backend (dev :5173 vs :3000), dan link watch YouTube gagal diputar. */
+	function normalizeContentUrls(node: unknown): void {
+		if (Array.isArray(node)) {
+			node.forEach(normalizeContentUrls);
+			return;
+		}
+		if (!node || typeof node !== 'object') return;
+		const rec = node as Record<string, unknown>;
+		if (rec.type === 'videoEmbed') {
+			const attrs = rec.attrs as Record<string, unknown> | undefined;
+			if (attrs && typeof attrs.src === 'string') attrs.src = toEmbedUrl(attrs.src);
+		}
+		const attrs = rec.attrs as Record<string, unknown> | undefined;
+		if (attrs) {
+			for (const key of ['src', 'url', 'href'] as const) {
+				const v = attrs[key];
+				if (typeof v === 'string' && v.startsWith('/api/')) attrs[key] = fileUrl(v);
+			}
+		}
+		const marks = rec.marks;
+		if (Array.isArray(marks)) {
+			for (const m of marks) {
+				const ma = (m as { attrs?: Record<string, unknown> }).attrs;
+				const href = ma?.href;
+				if (ma && typeof href === 'string' && href.startsWith('/api/')) ma.href = fileUrl(href);
+			}
+		}
+		if (Array.isArray(rec.content)) normalizeContentUrls(rec.content);
+	}
+
+	/** Tiptap JSON → HTML; non-JSON dirender sebagai teks polos (aman). */
+	function tiptapToHtml(raw: string | null | undefined): string {
+		if (!raw) return '';
+		try {
+			const json = JSON.parse(raw) as JSONContent;
+			if (json && typeof json === 'object' && json.type === 'doc') {
+				normalizeContentUrls(json);
+				return generateHTML(json, getExtensions());
+			}
+		} catch {
+			/* bukan JSON Tiptap — fallback teks di bawah */
+		}
+		return `<p>${escapeHtml(raw).replaceAll('\n', '<br>')}</p>`;
+	}
+
+	/** Tiptap JSON → teks polos (untuk brief tugas). */
+	function tiptapToText(raw: string | null | undefined): string {
+		if (!raw) return '';
+		try {
+			const json = JSON.parse(raw) as JSONContent;
+			if (json && typeof json === 'object' && Array.isArray(json.content)) {
+				const parts: string[] = [];
+				const walk = (nodes: JSONContent[]): void => {
+					for (const n of nodes) {
+						if (typeof n.text === 'string' && n.text.trim()) parts.push(n.text.trim());
+						if (Array.isArray(n.content)) walk(n.content as JSONContent[]);
+					}
+				};
+				walk(json.content as JSONContent[]);
+				if (parts.length > 0) return parts.join(' ');
+			}
+		} catch {
+			/* bukan JSON — pakai mentah */
+		}
+		return raw;
+	}
 
 	const courseId = $derived(Number(page.params.courseId));
-	const course = $derived(getCourseById(courseId));
-	const paidLocked = $derived(course ? !canAccessCourse(course.id) : false);
-	const periodLocked = $derived(course ? !paidLocked && isPeriodLocked(course.id) : false);
-	const paidPrice = $derived(course ? getCourseMeta(course.id).price : '');
-	const startMonth = $derived(course ? (getCourseMeta(course.id).startMonth ?? '') : '');
-	const module = $derived(course?.modules.find((m) => m.id === page.params.moduleId));
-	const moduleIndex = $derived(
-		course?.modules.findIndex((m) => m.id === page.params.moduleId) ?? -1
+	const moduleParam = $derived(page.params.moduleId);
+	const materialParam = $derived(page.params.materialId);
+
+	let detail = $state<BackendCourse | null>(null);
+	let tree = $state<CourseModule[]>([]);
+	let access = $state<CourseAccessState | null>(null);
+	let matDetail = $state<BackendMaterial | null>(null);
+	let doneIds = $state(new SvelteSet<string>());
+	let loading = $state(true);
+	let loadError = $state('');
+	let notFound = $state(false);
+	let started = false;
+	let loadSeq = 0;
+	let enrolling = $state(false);
+	let enrollError = $state('');
+
+	/** Struktur kursus server dalam bentuk Course agar logika hierarki dapat dipakai ulang. */
+	const course = $derived<Course | null>(
+		detail ? { ...toCourseView(detail), modules: tree } : null
 	);
+	const module = $derived(tree.find((m) => m.id === moduleParam));
+	const moduleIndex = $derived(tree.findIndex((m) => m.id === moduleParam));
+
+	async function load(): Promise<void> {
+		const my = ++loadSeq;
+		loading = true;
+		loadError = '';
+		notFound = false;
+		if (
+			!Number.isInteger(courseId) ||
+			courseId <= 0 ||
+			!/^\d+$/.test(moduleParam ?? '') ||
+			!/^\d+$/.test(materialParam ?? '')
+		) {
+			notFound = true;
+			loading = false;
+			return;
+		}
+		try {
+			// Paralel (skill svelte5): struktur + akses + progres + isi materi sekaligus.
+			const [d, t, a, done, m] = await Promise.all([
+				fetchCourseDetail(courseId),
+				fetchCourseTree(courseId),
+				fetchCourseAccess(courseId).catch(() => null),
+				fetchMyProgressIds(courseId).catch((): number[] => []),
+				fetchMaterialDetail(Number(materialParam)).catch(() => null)
+			]);
+			if (my !== loadSeq) return;
+			detail = d;
+			tree = t;
+			access = a;
+			matDetail = m;
+			doneIds = new SvelteSet(done.map(String));
+		} catch (e) {
+			if (my !== loadSeq) return;
+			if (e instanceof Error && /tidak ditemukan|404/.test(e.message)) {
+				notFound = true;
+			} else {
+				loadError = e instanceof Error ? e.message : 'Gagal memuat materi.';
+			}
+		} finally {
+			if (my === loadSeq) loading = false;
+		}
+	}
+
+	$effect(() => {
+		if (!browser || started) return;
+		started = true;
+		void load();
+	});
+
+	/** Tandai selesai ke server (optimistis, batal bila gagal). */
+	async function serverMarkDone(id: string): Promise<void> {
+		if (!/^\d+$/.test(id) || doneIds.has(id)) return;
+		doneIds.add(id);
+		try {
+			await markMaterialComplete(Number(id));
+		} catch {
+			doneIds.delete(id);
+		}
+	}
+
+	async function enrollNow(): Promise<void> {
+		if (enrolling) return;
+		enrolling = true;
+		enrollError = '';
+		try {
+			await enrollCourse(courseId);
+			const a = await fetchCourseAccess(courseId).catch(() => null);
+			access = a;
+		} catch (e) {
+			enrollError = e instanceof Error ? e.message : 'Gagal mendaftar kursus.';
+		} finally {
+			enrolling = false;
+		}
+	}
+
+	const hasAccess = $derived(access !== null && (access.hasAccess || access.isManager));
+	const isPaid = $derived((detail?.priceNominal ?? 0) > 0);
+	const isUpcoming = $derived(detail?.period === 'upcoming');
+	const showPaywall = $derived(!loading && !loadError && !notFound && !!course && !hasAccess && isPaid);
+	const showPeriodLock = $derived(!loading && !loadError && !notFound && !!course && hasAccess && isUpcoming);
+	const showEnroll = $derived(!loading && !loadError && !notFound && !!course && !hasAccess && !isPaid);
+	const paidPrice = $derived(detail?.priceLabel ?? '');
+	const startMonth = $derived(detail?.startMonth ?? '');
+	const quizPass = $derived(
+		typeof matDetail?.passScore === 'number' ? matDetail.passScore : 70
+	);
+	const contentHtml = $derived(tiptapToHtml(matDetail?.content ?? null));
+	const taskAssignment = $derived<AssignmentDetail>({
+		brief: tiptapToText(matDetail?.content ?? null) || matDetail?.title || 'Tugas',
+		objectives: [],
+		steps: [],
+		deliverable: '-',
+		deadline: '-'
+	});
 
 	// Flatten materi modul (urut antar sub-modul) — sumber kebenaran urutan belajar.
 	const flat = $derived(module ? getModuleMaterials(module) : []);
@@ -53,7 +260,7 @@
 		!course || !module || currentSubInfo.subIndex < 0
 			? false
 			: isSubModuleLocked(course.modules, moduleIndex, currentSubInfo.subIndex, (id) =>
-					doneMaterials.has(id)
+					doneIds.has(id)
 				)
 	);
 
@@ -61,12 +268,12 @@
 	const locked = $derived(
 		matIndex < 0
 			? false
-			: moduleLocked || subLocked || isMaterialLocked(flat, matIndex, (id) => doneMaterials.has(id))
+			: moduleLocked || subLocked || isMaterialLocked(flat, matIndex, (id) => doneIds.has(id))
 	);
 
 	/** Materi berikutnya terkunci? (untuk tombol navigasi) */
 	const nextLocked = $derived(
-		!next ? false : isMaterialLocked(flat, matIndex + 1, (id) => doneMaterials.has(id))
+		!next ? false : isMaterialLocked(flat, matIndex + 1, (id) => doneIds.has(id))
 	);
 
 	/** Modul setelah modul saat ini (untuk tombol lanjut di akhir modul) */
@@ -78,12 +285,7 @@
 	const nextModuleFirst = $derived(nextModule ? getModuleMaterials(nextModule)[0] : undefined);
 
 	/** Materi pertama yang belum selesai dalam modul ini */
-	const firstUnfinished = $derived(flat.find((m) => !doneMaterials.has(m.id)));
-
-	// Sinkron status awal dari data (sekali per kursus)
-	$effect(() => {
-		if (course) ensureSeeded(course);
-	});
+	const firstUnfinished = $derived(flat.find((m) => !doneIds.has(m.id)));
 
 	// Sidebar hierarki: modul terbuka + sub terbuka mengikuti posisi saat ini
 	let sidebarOpenModules = new SvelteSet<string>();
@@ -205,7 +407,27 @@
 </svelte:head>
 
 <div class="min-h-screen">
-	{#if !course || !module || !material}
+	{#if loading}
+		<div class="mx-auto max-w-3xl p-4 sm:p-6" aria-label="Memuat materi">
+			<div class="h-8 w-2/3 animate-pulse rounded-xl bg-slate-200"></div>
+			<div class="mt-4 h-64 animate-pulse rounded-2xl bg-slate-200"></div>
+		</div>
+	{:else if loadError}
+		<div class="mx-auto max-w-lg p-4 sm:p-6">
+			<div role="alert" class="rounded-2xl border border-red-200 bg-red-50 p-10 text-center">
+				<i class="fa-solid fa-triangle-exclamation mb-3 text-3xl text-red-400" aria-hidden="true"></i>
+				<h1 class="text-xl font-bold text-slate-900">Materi belum dapat dimuat</h1>
+				<p class="mx-auto mt-1 max-w-md text-sm text-red-600">{loadError}</p>
+				<button
+					type="button"
+					onclick={() => void load()}
+					class="mt-5 inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-red-600"
+				>
+					<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+				</button>
+			</div>
+		</div>
+	{:else if !course || !module || !material || notFound}
 		<div class="mx-auto max-w-lg p-4 sm:p-6">
 			<div class="rounded-2xl border border-slate-200 bg-white p-10 text-center">
 				<i class="fa-solid fa-triangle-exclamation mb-3 text-3xl text-amber-500" aria-hidden="true"
@@ -222,7 +444,7 @@
 				</a>
 			</div>
 		</div>
-	{:else if paidLocked && course}
+	{:else if showPaywall && course}
 		<div class="mx-auto max-w-lg p-4 sm:p-6">
 			<div
 				class="overflow-hidden rounded-2xl border border-slate-200 bg-white text-center shadow-xl"
@@ -258,7 +480,7 @@
 				</div>
 			</div>
 		</div>
-	{:else if periodLocked && course}
+	{:else if showPeriodLock && course}
 		<div class="mx-auto max-w-lg p-4 sm:p-6">
 			<div
 				class="overflow-hidden rounded-2xl border border-slate-200 bg-white text-center shadow-xl"
@@ -292,6 +514,53 @@
 						class="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 					>
 						<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Kembali ke detail kursus
+					</a>
+				</div>
+			</div>
+		</div>
+	{:else if showEnroll && course}
+		<div class="mx-auto max-w-lg p-4 sm:p-6">
+			<div
+				class="overflow-hidden rounded-2xl border border-slate-200 bg-white text-center shadow-xl"
+			>
+				<div class="bg-blue-800 px-6 py-8 text-white">
+					<span
+						class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/10"
+						aria-hidden="true"
+					>
+						<i class="fa-solid fa-user-plus text-2xl text-cyan-300"></i>
+					</span>
+					<p class="mt-4 text-[11px] font-extrabold tracking-[0.16em] text-blue-200 uppercase">
+						Kursus Gratis
+					</p>
+					<h1 class="mt-1 text-xl font-extrabold">{course.title}</h1>
+					<p class="mt-1 text-xs text-slate-300">
+						Daftar dulu untuk membuka seluruh materi kursus ini.
+					</p>
+				</div>
+				<div class="space-y-2 p-6">
+					{#if enrollError}
+						<p role="alert" class="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700">
+							{enrollError}
+						</p>
+					{/if}
+					<button
+						type="button"
+						onclick={() => void enrollNow()}
+						disabled={enrolling}
+						class="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 text-sm font-bold text-white shadow-lg shadow-blue-600/25 transition-all hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-blue-400 focus-visible:outline-2 focus-visible:outline-blue-600"
+					>
+						{#if enrolling}
+							<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Mendaftar…
+						{:else}
+							<i class="fa-solid fa-check" aria-hidden="true"></i> Ikuti Kursus Ini
+						{/if}
+					</button>
+					<a
+						href={`/user/kursusku/${course.id}`}
+						class="flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+					>
+						<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Kembali
 					</a>
 				</div>
 			</div>
@@ -452,7 +721,7 @@
 													{@const isCurrentSub =
 														isCurrentModule && sub.id === currentSubInfo.sub?.id}
 													{@const sLocked = isSubModuleLocked(course.modules, mi, si, (id) =>
-														doneMaterials.has(id)
+														doneIds.has(id)
 													)}
 													{@const sOpen = sidebarOpenSubs.has(sub.id)}
 													<div
@@ -496,12 +765,12 @@
 																{#each sub.materials as mat (mat.id)}
 																	{@const flatIdx = modFlat.findIndex((f) => f.id === mat.id)}
 																	{@const isCurrent = mat.id === material.id}
-																	{@const matDone = doneMaterials.has(mat.id)}
+																	{@const matDone = doneIds.has(mat.id)}
 																	{@const lockedItem =
 																		modLocked ||
 																		sLocked ||
 																		isMaterialLocked(modFlat, flatIdx, (id) =>
-																			doneMaterials.has(id)
+																			doneIds.has(id)
 																		)}
 																	<li>
 																		{#if lockedItem && !isCurrent}
@@ -641,13 +910,30 @@
 							</div>
 						{:else}
 							{#key material.id}
-								<MaterialRenderer
-									{material}
-									{course}
-									moduleTitle={module.title}
-									moduleId={module.id}
-									onComplete={markDone}
-								/>
+								{#if material.type === 'kuis'}
+									<QuizMaterial
+										questions={[]}
+										materialId={material.id}
+										courseId={String(course.id)}
+										moduleId={module.id}
+										passScore={quizPass}
+										onPass={() => void serverMarkDone(material.id)}
+									/>
+								{:else if material.type === 'tugas'}
+									<AssignmentMaterial
+										assignment={taskAssignment}
+										materialId={material.id}
+										courseId={String(course.id)}
+										moduleId={module.id}
+										moduleTitle={module.title}
+										courseTitle={course.title}
+										onSubmit={() => void serverMarkDone(material.id)}
+									/>
+								{:else if contentHtml}
+									<div class="tiptap">{@html contentHtml}</div>
+								{:else}
+									<p class="text-sm text-slate-500">Konten materi belum tersedia.</p>
+								{/if}
 							{/key}
 						{/if}
 					</article>
@@ -675,7 +961,7 @@
 						{#if next}
 							<a
 								href={`/user/kursusku/${course.id}/${module.id}/${next.id}`}
-								onclick={() => markDone(material.id)}
+								onclick={() => void serverMarkDone(material.id)}
 								class="group flex items-center justify-end gap-3 rounded-2xl bg-blue-600 p-4 text-right text-white shadow-lg shadow-blue-600/25 transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 								aria-label={nextLocked
 									? `Lanjutkan dan buka: ${next.title}`
@@ -695,7 +981,7 @@
 						{:else if nextModule && nextModuleFirst}
 							<a
 								href={`/user/kursusku/${course.id}/${nextModule.id}/${nextModuleFirst.id}`}
-								onclick={() => markDone(material.id)}
+								onclick={() => void serverMarkDone(material.id)}
 								class="group flex items-center justify-end gap-3 rounded-2xl bg-indigo-600 p-4 text-right text-white shadow-lg shadow-indigo-600/25 transition-colors hover:bg-indigo-700 focus-visible:outline-2 focus-visible:outline-indigo-600"
 								aria-label={`Lanjut ke Modul ${(moduleIndex ?? 0) + 2}: ${nextModuleFirst.title}`}
 							>
@@ -713,7 +999,7 @@
 						{:else}
 							<a
 								href={`/user/kursusku/${course.id}`}
-								onclick={() => markDone(material.id)}
+								onclick={() => void serverMarkDone(material.id)}
 								class="flex items-center justify-end gap-3 rounded-2xl bg-emerald-600 p-4 text-right text-white shadow-lg shadow-emerald-600/25 transition-colors hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600"
 							>
 								<span class="min-w-0">

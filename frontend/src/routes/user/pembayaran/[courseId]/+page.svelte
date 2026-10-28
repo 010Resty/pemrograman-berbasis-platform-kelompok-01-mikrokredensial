@@ -19,6 +19,7 @@
 	} from '$lib/data/payment';
 	import { canAccessCourse, isCoursePaid, purchaseCourse } from '$lib/stores/enrollment.svelte';
 	import { saveReceipt } from '$lib/stores/payment';
+	import { getCurrentUser } from '$lib/stores/auth.svelte';
 
 	const courseId = $derived(Number(page.params.courseId));
 	const course = $derived(getCourseById(courseId));
@@ -28,10 +29,11 @@
 	type Stage = 'checkout' | 'instruction' | 'verifying' | 'success';
 	let stage = $state<Stage>('checkout');
 
-	// Data peserta (terisi otomatis — WCAG 3.3.7 hindari entri berulang)
-	let fullName = $state('Ahmad Hidayat');
-	let email = $state('ahmad.hidayat@student.ac.id');
-	let nim = $state('2101020045');
+	// Data peserta (terisi otomatis dari sesi login — WCAG 3.3.7 hindari entri berulang)
+	const me = getCurrentUser();
+	let fullName = $state(me?.name ?? '');
+	let email = $state(me?.email ?? '');
+	let nim = $state('');
 
 	// Pembayaran
 	let method = $state<PaymentMethodId>('qris');
@@ -45,7 +47,7 @@
 
 	// Kartu
 	let cardNumber = $state('');
-	let cardName = $state('AHMAD HIDAYAT');
+	let cardName = $state((me?.name ?? '').toUpperCase());
 	let cardExpiry = $state('');
 	let cardCvv = $state('');
 

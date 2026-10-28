@@ -4,8 +4,9 @@
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
-	import { homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
+	import { getCurrentUser, homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
+	import { fetchAdminOverview } from '$lib/api/admin';
 	import { untrack } from 'svelte';
 
 	let { children } = $props();
@@ -30,6 +31,7 @@
 				goto(homeFor(res.session.role));
 				return;
 			}
+			void loadBadges();
 			phase = 'ready';
 			return;
 		}
@@ -49,14 +51,41 @@
 	let isCollapsed = $state(false);
 	let showProfileMenu = $state(false);
 
-	const navItems: NavItem[] = [
+	// Badge sidebar dari backend (GET /admin/overview): total peserta,
+	// instruktur, dan kursus. Gagal = badge disembunyikan.
+	let studentBadge = $state<string | undefined>(undefined);
+	let teacherBadge = $state<string | undefined>(undefined);
+	let courseBadge = $state<string | undefined>(undefined);
+
+	const fmtCount = (n: number): string => n.toLocaleString('id-ID');
+
+	async function loadBadges(): Promise<void> {
+		try {
+			const overview = await fetchAdminOverview();
+			studentBadge = fmtCount(overview.totalStudents);
+			teacherBadge = fmtCount(overview.totalTeachers);
+			courseBadge = fmtCount(overview.totalCourses);
+		} catch {
+			// Abaikan: navigasi tetap jalan tanpa badge.
+		}
+	}
+
+	// Profil dari sesi auth (bukan data dummy): nama/email milik akun yang login.
+	const session = $derived(getCurrentUser());
+	const displayName = $derived(session?.name ?? 'Administrator');
+	const displayEmail = $derived(session?.email ?? '');
+	const displayInitials = $derived(
+		(displayName.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('') || 'AD').toUpperCase()
+	);
+
+	const navItems = $derived<NavItem[]>([
 		{ label: 'Dasbor', icon: 'fa-house', href: '/admin' },
-		{ label: 'Peserta', icon: 'fa-users', href: '/admin/peserta', badge: '1.2k' },
+		{ label: 'Peserta', icon: 'fa-users', href: '/admin/peserta', badge: studentBadge },
 		{ label: 'Undangan', icon: 'fa-envelope-open-text', href: '/admin/invitations' },
-		{ label: 'Instruktur', icon: 'fa-chalkboard-user', href: '/admin/instrukturs', badge: '48' },
-		{ label: 'Kursus', icon: 'fa-layer-group', href: '/admin/courses', badge: '120' },
+		{ label: 'Instruktur', icon: 'fa-chalkboard-user', href: '/admin/instrukturs', badge: teacherBadge },
+		{ label: 'Kursus', icon: 'fa-layer-group', href: '/admin/courses', badge: courseBadge },
 		{ label: 'Voucher', icon: 'fa-ticket', href: '/admin/vouchers' }
-	];
+	]);
 
 	function toggleProfileMenu() {
 		showProfileMenu = !showProfileMenu;
@@ -91,9 +120,9 @@
 		brandHref="/admin"
 		brandLabel="Aristoteles Platform - Dasbor admin"
 		navAriaLabel="Navigasi admin"
-		profileName="ADMIN ARISTOTELES"
+		profileName={displayName}
 		profileRole="Administrator"
-		profileAlt="Foto profil admin Aristoteles"
+		profileAlt={`Foto profil ${displayName}`}
 	/>
 
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -157,7 +186,7 @@
 							type="button"
 							class="flex items-center gap-2.5 rounded-xl p-1.5 pr-3 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
 							onclick={toggleProfileMenu}
-							aria-label="Menu profil admin"
+							aria-label={`Menu profil ${displayName}`}
 							aria-expanded={showProfileMenu}
 							aria-haspopup="menu"
 						>
@@ -165,10 +194,10 @@
 								class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-sm font-bold text-white shadow-md"
 								aria-hidden="true"
 							>
-								AD
+								{displayInitials}
 							</span>
 							<span class="hidden text-left sm:block">
-								<span class="block text-sm leading-tight font-semibold text-slate-800">Admin Aristoteles</span>
+								<span class="block text-sm leading-tight font-semibold text-slate-800">{displayName}</span>
 								<span class="block text-xs leading-tight text-slate-500">Administrator</span>
 							</span>
 							<i class="fa-solid fa-chevron-down hidden text-xs text-slate-400 sm:block" aria-hidden="true"></i>
@@ -181,8 +210,8 @@
 								class="absolute top-full right-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-xl"
 							>
 								<div class="border-b border-slate-100 px-4 py-3">
-									<div class="text-sm font-semibold text-slate-800">Admin Aristoteles</div>
-									<div class="text-xs text-slate-500">admin@aristoteles.ac.id</div>
+									<div class="text-sm font-semibold text-slate-800">{displayName}</div>
+									<div class="text-xs text-slate-500">{displayEmail}</div>
 								</div>
 								<div class="p-1.5" role="none">
 									<a

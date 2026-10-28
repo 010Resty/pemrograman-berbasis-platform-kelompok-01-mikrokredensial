@@ -104,8 +104,10 @@
 	let modulesError = $state<Record<number, string>>({});
 	let modulesLoading = $state<Record<number, boolean>>({});
 
+	let coursesPending: Promise<void> | null = null;
 	async function loadCourses(): Promise<void> {
 		if (courses.length > 0 || coursesError) return;
+		if (coursesPending) return coursesPending;
 		if (useMock) {
 			courses = [
 				{ id: 1, title: 'Pengembangan Web Frontend' },
@@ -113,52 +115,75 @@
 			];
 			return;
 		}
-		try {
-			const list = await fetchMyCourses();
-			courses = list.map((c) => ({ id: c.id, title: c.title }));
-			if (courses.length === 0) coursesError = '';
-		} catch (e) {
-			coursesError = e instanceof Error ? e.message : 'Gagal memuat kursus.';
-		}
-	}
-
-	async function loadModules(courseId: number): Promise<void> {
-		if (modulesByCourse[courseId] || modulesLoading[courseId]) return;
-		modulesLoading[courseId] = true;
-		try {
-			if (useMock) {
-				modulesByCourse[courseId] =
-					courseId === 1
-						? [
-								{ id: 11, courseId: 1, title: 'Dasar HTML & CSS' },
-								{ id: 12, courseId: 1, title: 'JavaScript Interaktif' }
-							]
-						: [{ id: 21, courseId: 2, title: 'Desain Skema Relasional' }];
-			} else {
-				const mods = await fetchModules(courseId);
-				modulesByCourse[courseId] = mods.map((m) => ({
-					id: m.id,
-					courseId: m.courseId,
-					title: m.title
-				}));
+		const task = (async () => {
+			try {
+				const list = await fetchMyCourses();
+				courses = list.map((c) => ({ id: c.id, title: c.title }));
+				if (courses.length === 0) coursesError = '';
+			} catch (e) {
+				coursesError = e instanceof Error ? e.message : 'Gagal memuat kursus.';
 			}
-		} catch (e) {
-			modulesError[courseId] = e instanceof Error ? e.message : 'Gagal memuat modul.';
+		})();
+		coursesPending = task;
+		try {
+			await task;
 		} finally {
-			modulesLoading[courseId] = false;
+			if (coursesPending === task) coursesPending = null;
 		}
 	}
 
-	// ---------- A. Ringkasan ----------
+	let modulesPending = new Map<number, Promise<void>>();
+	async function loadModules(courseId: number): Promise<void> {
+		if (modulesByCourse[courseId]) return;
+		const existing = modulesPending.get(courseId);
+		if (existing) return existing;
+		modulesLoading[courseId] = true;
+		const task = (async () => {
+			try {
+				if (useMock) {
+					modulesByCourse[courseId] =
+						courseId === 1
+							? [
+									{ id: 11, courseId: 1, title: 'Dasar HTML & CSS' },
+									{ id: 12, courseId: 1, title: 'JavaScript Interaktif' }
+								]
+							: [{ id: 21, courseId: 2, title: 'Desain Skema Relasional' }];
+				} else {
+					const mods = await fetchModules(courseId);
+					modulesByCourse[courseId] = mods.map((m) => ({
+						id: m.id,
+						courseId: m.courseId,
+						title: m.title
+					}));
+				}
+			} catch (e) {
+				modulesError[courseId] = e instanceof Error ? e.message : 'Gagal memuat modul.';
+			} finally {
+				modulesLoading[courseId] = false;
+			}
+		})();
+		modulesPending.set(courseId, task);
+		try {
+			await task;
+		} finally {
+			if (modulesPending.get(courseId) === task) modulesPending.delete(courseId);
+		}
+	}
+
+	// ---------- A. Ringkasan (stale-guard: respons lama tidak menimpa state baru) ----------
 	const summary = new LoadState<CertificateSummary>();
+	let summaryReq = 0;
 	async function loadSummary(): Promise<void> {
+		const my = ++summaryReq;
 		summary.phase = 'loading';
 		summary.error = '';
 		try {
 			const data = useMock ? await mockSummary() : await apiSummary();
+			if (my !== summaryReq) return;
 			summary.data = data;
 			summary.phase = 'ready';
 		} catch (e) {
+			if (my !== summaryReq) return;
 			summary.error = e instanceof Error ? e.message : 'Gagal memuat ringkasan.';
 			summary.phase = 'error';
 		}
@@ -179,16 +204,22 @@
 		if (typeof selCourseId === 'number') void loadModules(selCourseId);
 	});
 
+	let moduleStatusReq = 0;
 	async function loadModuleStatus(): Promise<void> {
 		if (selModuleId === '') return;
+		const my = ++moduleStatusReq;
+		const target = selModuleId;
 		moduleStatus.phase = 'loading';
 		moduleStatus.error = '';
 		try {
-			moduleStatus.data = useMock
-				? await mockModuleStatus(selModuleId)
-				: await apiModuleStatus(selModuleId);
+			const data = useMock
+				? await mockModuleStatus(target)
+				: await apiModuleStatus(target);
+			if (my !== moduleStatusReq || target !== selModuleId) return;
+			moduleStatus.data = data;
 			moduleStatus.phase = 'ready';
 		} catch (e) {
+			if (my !== moduleStatusReq || target !== selModuleId) return;
 			moduleStatus.error = e instanceof Error ? e.message : 'Gagal memuat status modul.';
 			moduleStatus.phase = 'error';
 		}
@@ -209,7 +240,9 @@
 	const eligibility = new LoadState<EligibilityEntry[]>();
 	const kModules = $derived(kCourseId === '' ? [] : (modulesByCourse[kCourseId] ?? []));
 
+	let eligibilityReq = 0;
 	async function loadEligibility(): Promise<void> {
+		const my = ++eligibilityReq;
 		eligibility.phase = 'loading';
 		eligibility.error = '';
 		try {
@@ -226,9 +259,11 @@
 						status: kStatus,
 						q: kQuery
 					});
+			if (my !== eligibilityReq) return;
 			eligibility.data = rows;
 			eligibility.phase = rows.length === 0 ? 'empty' : 'ready';
 		} catch (e) {
+			if (my !== eligibilityReq) return;
 			eligibility.error = e instanceof Error ? e.message : 'Gagal memuat kelayakan.';
 			eligibility.phase = 'error';
 		}
@@ -244,7 +279,9 @@
 	const history = new LoadState<CertificateRecord[]>();
 	const rModules = $derived(rCourseId === '' ? [] : (modulesByCourse[rCourseId] ?? []));
 
+	let historyReq = 0;
 	async function loadHistory(): Promise<void> {
+		const my = ++historyReq;
 		history.phase = 'loading';
 		history.error = '';
 		try {
@@ -265,9 +302,11 @@
 						from: rFrom || undefined,
 						to: rTo || undefined
 					});
+			if (my !== historyReq) return;
 			history.data = rows;
 			history.phase = rows.length === 0 ? 'empty' : 'ready';
 		} catch (e) {
+			if (my !== historyReq) return;
 			history.error = e instanceof Error ? e.message : 'Gagal memuat riwayat.';
 			history.phase = 'error';
 		}
@@ -282,12 +321,10 @@
 			if (selCourseId === '' && courses.length > 0) selCourseId = courses[0].id;
 		}
 		if (t === 'kelayakan') {
-			await loadCourses();
-			await loadEligibility();
+			await Promise.all([loadCourses(), loadEligibility()]);
 		}
 		if (t === 'riwayat') {
-			await loadCourses();
-			await loadHistory();
+			await Promise.all([loadCourses(), loadHistory()]);
 		}
 	}
 

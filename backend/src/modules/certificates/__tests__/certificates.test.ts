@@ -460,7 +460,7 @@ describe("kelola instruktur & pencabutan", () => {
       { reason: "Kecurangan terverifikasi panitia" }
     );
     assert.equal(r.http, 200);
-    assert.equal(r.json.data.status, "revoked");
+    assert.equal(r.json.data.status, "dicabut");
 
     const logs = await db
       .select()

@@ -37,12 +37,30 @@ if (browser) {
 
 /** True bila course berlabel harga (bukan GRATIS). */
 export function isCoursePaid(courseId: number): boolean {
+	const server = serverFlags.get(courseId);
+	if (server) return server.paid;
 	return getCourseMeta(courseId).price.trim().toUpperCase() !== 'GRATIS';
 }
 
 /** True bila batch course belum mulai (periode upcoming). */
 export function isPeriodLocked(courseId: number): boolean {
+	const server = serverFlags.get(courseId);
+	if (server) return server.upcoming;
 	return getCourseMeta(courseId).period === 'upcoming';
+}
+
+/**
+ * Bendera server per kursus (diisi halaman katalog/pratinjau dari baris backend).
+ * Tanpa ini, course backend yang tak ada di meta statis selalu dianggap
+ * gratis + berjalan. Registri sesi saja; static fallback tetap untuk id lama.
+ */
+const serverFlags = new Map<number, { paid: boolean; upcoming: boolean }>();
+
+export function setServerCourseFlags(
+	courseId: number,
+	flags: { paid: boolean; upcoming: boolean }
+): void {
+	serverFlags.set(courseId, flags);
 }
 
 /** True bila user boleh membuka materi course ini. */

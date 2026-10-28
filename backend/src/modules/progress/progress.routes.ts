@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { authenticate } from "../../middlewares/auth.middleware";
-import { listHandler, markHandler, unmarkHandler } from "./progress.controller";
+import { listHandler, markHandler, summaryHandler, unmarkHandler } from "./progress.controller";
 
 const router = Router();
 
@@ -8,6 +8,7 @@ const router = Router();
 // selalu dari token — tidak ada userId dari klien.
 router.post("/materials/:id/progress", authenticate, markHandler);
 router.delete("/materials/:id/progress", authenticate, unmarkHandler);
+router.get("/me/progress/summary", authenticate, summaryHandler);
 router.get("/me/progress", authenticate, listHandler);
 
 export default router;

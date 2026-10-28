@@ -16,10 +16,18 @@
 		title: string;
 	} = $props();
 
+	// Singleton ekstensi: createEditorExtensions() mahal (StarterKit+Image+Link+Video+Audio+PDF).
+	// Dibuat sekali, bukan tiap keystroke/re-render.
+	let cachedExtensions: ReturnType<typeof createEditorExtensions> | null = null;
+	function getExtensions(): ReturnType<typeof createEditorExtensions> {
+		if (!cachedExtensions) cachedExtensions = createEditorExtensions('');
+		return cachedExtensions;
+	}
+
 	const html = $derived.by(() => {
 		if (!content) return '';
 		try {
-			return generateHTML(content, createEditorExtensions(''));
+			return generateHTML(content, getExtensions());
 		} catch {
 			return '';
 		}

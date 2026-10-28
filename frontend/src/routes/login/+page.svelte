@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { goto, preloadCode } from '$app/navigation';
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import { uniraLogo } from '$lib/assets/logo';
@@ -9,6 +9,7 @@
 		homeFor,
 		loadSession,
 		loginWithBackend,
+		logout,
 		verifySession,
 		type Role
 	} from '$lib/stores/auth.svelte';
@@ -56,7 +57,31 @@
 		email = '';
 		password = '';
 		errorMessage = '';
+		warmPortal(role);
 	}
+
+	// Hangatkan chunk JS portal tab aktif selagi user mengetik, agar navigasi
+	// pasca-login tidak menunggu unduhan chunk. Hanya kode (preloadCode),
+	// bukan data: tidak memicu fetch dashboard/verify tambahan.
+	let preloadedFor: Role | null = null;
+	function warmPortal(role: Role): void {
+		if (typeof window === 'undefined' || preloadedFor === role) return;
+		preloadedFor = role;
+		void preloadCode(homeFor(role)).catch(() => {
+			preloadedFor = null;
+		});
+	}
+
+	// Prefetch saat idle setelah render awal (jangan berebut bandwidth dengan form).
+	$effect(() => {
+		const role = activeTab;
+		if (typeof window === 'undefined') return;
+		if (typeof window.requestIdleCallback === 'function') {
+			const id = window.requestIdleCallback(() => warmPortal(role));
+			return () => window.cancelIdleCallback(id);
+		}
+		warmPortal(role);
+	});
 
 	/** Login nyata via backend. Gagal = tetap di halaman ini dengan pesan error. */
 	async function handleSubmit(event: Event) {
@@ -71,14 +96,24 @@
 			const result = await loginWithBackend(email, password, rememberMe);
 			if (!result.ok) {
 				errorMessage = result.error;
+				isLoading = false;
 				return;
 			}
+			// Sukses: tahan status loading (tombol disabled + spinner) sampai
+			// navigasi chunk portal selesai dan halaman ini unmount.
+			// Tanpa await, finally langsung mengaktifkan tombol sebelum render portal.
 			if (result.user.role !== activeTab) {
-				goto(homeFor(result.user.role));
+				// Portal salah = tidak boleh masuk: cabut sesi yang terlanjur
+				// tersimpan loginWithBackend (token + cache + storage), lalu tolak
+				// di halaman ini. Tanpa logout, token valid tertinggal dan efek
+				// auto-login di bawah akan tetap meloloskan user.
+				logout();
+				errorMessage = `Akun ini terdaftar sebagai ${ROLE_LABEL[result.user.role]}. Silakan masuk melalui Portal ${ROLE_LABEL[result.user.role]}.`;
+				isLoading = false;
 				return;
 			}
-			goto(account.home);
-		} finally {
+			await goto(account.home);
+		} catch {
 			isLoading = false;
 		}
 	}

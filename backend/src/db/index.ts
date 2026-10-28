@@ -34,7 +34,17 @@ export function buildDatabaseUrl(): string {
 
 const databaseUrl = buildDatabaseUrl();
 
-const pool = mysql.createPool(databaseUrl);
+// Pool disetel eksplisit agar fan-out paralel (Promise.all) tidak antre/exhaust:
+// 10 koneksi cukup untuk beban instruktur, antre 50, idle 30 dtk, timeout 10 dtk.
+const pool = mysql.createPool({
+  uri: databaseUrl,
+  connectionLimit: 10,
+  queueLimit: 50,
+  idleTimeout: 30000,
+  connectTimeout: 10000,
+  enableKeepAlive: true,
+  keepAliveInitialDelay: 10000,
+});
 
 export const db = drizzle(pool, {
   schema,

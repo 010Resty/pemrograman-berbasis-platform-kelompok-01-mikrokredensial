@@ -22,6 +22,8 @@ export interface BackendCourse {
 	tools: string[] | null;
 	createdBy: number | null;
 	instructors?: Array<{ id: number; name: string }>;
+	createdAt?: string;
+	updatedAt?: string;
 }
 
 export interface BackendModule {
@@ -86,9 +88,69 @@ export async function fetchMyCourses(): Promise<BackendCourse[]> {
 	return Array.isArray(data) ? data : (data.courses ?? []);
 }
 
+/** Katalog publik (tanpa login): kursus published + archived. */
+export async function fetchPublicCourses(limit = 100): Promise<BackendCourse[]> {
+	const data = await apiRequest<{ courses?: BackendCourse[] } | BackendCourse[]>(
+		`/courses?limit=${limit}`
+	);
+	return Array.isArray(data) ? data : (data.courses ?? []);
+}
+
+export interface PublicCourseListParams {
+	q?: string;
+	category?: string;
+	period?: string;
+	status?: 'published' | 'archived';
+	limit?: number;
+}
+
+/**
+ * Katalog publik dengan filter server (tanpa login).
+ * Tanpa `status` → published + archived (default server); draft tidak bocor.
+ */
+export async function fetchPublicCourseList(
+	params: PublicCourseListParams = {}
+): Promise<BackendCourse[]> {
+	const sp = new URLSearchParams();
+	if (params.q?.trim()) sp.set('q', params.q.trim());
+	if (params.category) sp.set('category', params.category);
+	if (params.period) sp.set('period', params.period);
+	if (params.status) sp.set('status', params.status);
+	sp.set('limit', String(params.limit ?? 20));
+	sp.set('sort', 'newest');
+	const data = await apiRequest<{ courses?: BackendCourse[] } | BackendCourse[]>(
+		`/courses?${sp.toString()}`
+	);
+	return Array.isArray(data) ? data : (data.courses ?? []);
+}
+
 export async function fetchCourseDetail(id: number): Promise<BackendCourse> {
 	const data = await req<{ course?: BackendCourse } | BackendCourse>(`/courses/${id}`);
 	return (data as { course?: BackendCourse }).course ?? (data as BackendCourse);
+}
+
+/** Ikut kursus (POST /api/v1/courses/:id/enroll). Gratis → aktif; berbayar/arsip/draf ditolak server. */
+export async function enrollCourse(courseId: number): Promise<{
+	courseId: number;
+	status: string;
+	source: string;
+	reactivated: boolean;
+}> {
+	return req<{ courseId: number; status: string; source: string; reactivated: boolean }>(
+		`/courses/${courseId}/enroll`,
+		{ method: 'POST' }
+	);
+}
+
+/** Status akses belajar milik sendiri (GET /api/v1/courses/:id/access). */
+export interface CourseAccessState {
+	hasAccess: boolean;
+	isManager: boolean;
+	enrollment: { status: string; source: string; enrolledAt: string } | null;
+}
+
+export async function fetchCourseAccess(courseId: number): Promise<CourseAccessState> {
+	return req<CourseAccessState>(`/courses/${courseId}/access`);
 }
 
 export async function createCourse(input: CreateCourseInput): Promise<BackendCourse> {
@@ -224,56 +286,62 @@ function toMaterialType(t: unknown): MaterialType {
 /** Bangun pohon CourseModule UI dari endpoint tree backend. */
 export async function fetchCourseTree(courseId: number): Promise<CourseModule[]> {
 	const modules = await fetchModules(courseId);
-	const out: CourseModule[] = [];
-	for (const m of modules) {
-		const subs = await fetchSubModules(m.id);
-		const subModules = [];
-		for (const s of subs) {
-			const mats = await fetchMaterialsBySub(s.id);
-			subModules.push({
-				id: String(s.id),
-				title: s.title,
-				description: s.description ?? '',
-				materials: mats.map((t) => ({
-					id: String(t.id),
-					title: t.title,
-					type: toMaterialType(t.type),
-					duration: t.duration ?? '',
-					completed: false
-				}))
-			});
-		}
-		// Materi langsung di modul (tanpa sub) ikut sebagai sub sintetis agar UI konsisten.
-		const direct = await req<{ materials?: BackendMaterial[] } | BackendMaterial[]>(
-			`/modules/${m.id}/materials`
-		).then((d) => (Array.isArray(d) ? d : (d.materials ?? [])));
-		const directMats = direct.filter((t) => t.subModuleId === null);
-		const allSubs =
-			directMats.length > 0
-				? [
-						...subModules,
-						{
-							id: `${m.id}-direct`,
-							title: 'Materi langsung',
-							description: '',
-							materials: directMats.map((t) => ({
-								id: String(t.id),
-								title: t.title,
-								type: toMaterialType(t.type),
-								duration: t.duration ?? '',
-								completed: false
-							}))
-						}
-					]
-				: subModules;
-		out.push({
-			id: String(m.id),
-			title: m.title,
-			description: m.description ?? '',
-			materials: allSubs.flatMap((s) => s.materials),
-			subModules: allSubs
-		});
-	}
+	// Paralel per modul (hindari waterfall N+1): submodul + materi langsung jalan bersamaan.
+	const out = await Promise.all(
+		modules.map(async (m) => {
+			const [subs, direct] = await Promise.all([
+				fetchSubModules(m.id),
+				req<{ materials?: BackendMaterial[] } | BackendMaterial[]>(
+					`/modules/${m.id}/materials`
+				).then((d) => (Array.isArray(d) ? d : (d.materials ?? [])))
+			]);
+			// Materi per sub juga paralel, bukan sekuensial.
+			const subModules = await Promise.all(
+				subs.map(async (s) => {
+					const mats = await fetchMaterialsBySub(s.id);
+					return {
+						id: String(s.id),
+						title: s.title,
+						description: s.description ?? '',
+						materials: mats.map((t) => ({
+							id: String(t.id),
+							title: t.title,
+							type: toMaterialType(t.type),
+							duration: t.duration ?? '',
+							completed: false
+						}))
+					};
+				})
+			);
+			// Materi langsung di modul (tanpa sub) ikut sebagai sub sintetis agar UI konsisten.
+			const directMats = direct.filter((t) => t.subModuleId === null);
+			const allSubs =
+				directMats.length > 0
+					? [
+							...subModules,
+							{
+								id: `${m.id}-direct`,
+								title: 'Materi langsung',
+								description: '',
+								materials: directMats.map((t) => ({
+									id: String(t.id),
+									title: t.title,
+									type: toMaterialType(t.type),
+									duration: t.duration ?? '',
+									completed: false
+								}))
+							}
+						]
+					: subModules;
+			return {
+				id: String(m.id),
+				title: m.title,
+				description: m.description ?? '',
+				materials: allSubs.flatMap((s) => s.materials),
+				subModules: allSubs
+			};
+		})
+	);
 	return out;
 }
 

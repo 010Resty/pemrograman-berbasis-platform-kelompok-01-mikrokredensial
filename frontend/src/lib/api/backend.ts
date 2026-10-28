@@ -78,6 +78,12 @@ export interface ApiRequestOptions {
 	timeoutMs?: number;
 }
 
+/** Dedup GET in-flight: request identik yang bersamaan hanya 1 fetch (hindari N× modul ganda). */
+const inflightGet = new Map<string, Promise<unknown>>();
+function inflightKey(url: string, token: string | null | undefined): string {
+	return `${url}::${token ?? ''}`;
+}
+
 /** Base URL API tanpa trailing slash. Prioritas: PUBLIC_API_BASE_URL, fallback dev lokal. */
 export function getApiBase(): string {
 	const raw = (env.PUBLIC_API_BASE_URL || '').trim() || 'http://localhost:3000/api/v1';
@@ -123,6 +129,10 @@ export async function apiRequest<T>(
 	options: ApiRequestOptions = {}
 ): Promise<T> {
 	const url = `${getApiBase()}${path.startsWith('/') ? path : `/${path}`}`;
+	const method = (options.method || 'GET').toUpperCase();
+	const isGet = method === 'GET' && options.body === undefined;
+	// Default timeout aman untuk GET agar $effect race tidak gantung (login tetap 15 dtk).
+	const timeoutMs = options.timeoutMs ?? (isGet ? 15000 : undefined);
 	const headers: Record<string, string> = { accept: 'application/json' };
 	let payload: string | undefined;
 	if (options.body !== undefined) {
@@ -134,43 +144,58 @@ export async function apiRequest<T>(
 	if (auth) headers.authorization = auth;
 
 	const init: RequestInit = {
-		method: options.method || 'GET',
+		method,
 		headers,
 		body: payload
 	};
 
-	let res: Response;
-	try {
-		res =
-			options.timeoutMs !== undefined && options.timeoutMs > 0
-				? await fetchWithTimeout(fetch, url, init, options.timeoutMs)
-				: await fetch(url, init);
-	} catch (err) {
-		if (err instanceof RequestTimeoutError) {
-			const seconds = Math.max(1, Math.round(err.timeoutMs / 1000));
+	const doFetch = async (): Promise<T> => {
+		let res: Response;
+		try {
+			res =
+				timeoutMs !== undefined && timeoutMs > 0
+					? await fetchWithTimeout(fetch, url, init, timeoutMs)
+					: await fetch(url, init);
+		} catch (err) {
+			if (err instanceof RequestTimeoutError) {
+				const seconds = Math.max(1, Math.round(err.timeoutMs / 1000));
+				throw new BackendRequestError(
+					`Waktu permintaan habis (melebihi ${seconds} detik). Periksa koneksi internet lalu coba lagi.`,
+					0,
+					null,
+					'timeout'
+				);
+			}
 			throw new BackendRequestError(
-				`Waktu permintaan habis (melebihi ${seconds} detik). Periksa koneksi internet lalu coba lagi.`,
-				0,
-				null,
-				'timeout'
+				'Backend tidak terjangkau. Periksa server Express (default http://localhost:3000) dan PUBLIC_API_BASE_URL.',
+				0
 			);
 		}
-		throw new BackendRequestError(
-			'Backend tidak terjangkau. Periksa server Express (default http://localhost:3000) dan PUBLIC_API_BASE_URL.',
-			0
-		);
-	}
 
-	const envelope = await parseEnvelope<T>(res);
-	if (!res.ok || envelope.status !== 'success') {
-		const failure = envelope as BackendFailure;
-		throw new BackendRequestError(
-			failure.message || `Permintaan gagal (HTTP ${res.status}).`,
-			res.status,
-			failure.errors ?? null
-		);
+		const envelope = await parseEnvelope<T>(res);
+		if (!res.ok || envelope.status !== 'success') {
+			const failure = envelope as BackendFailure;
+			throw new BackendRequestError(
+				failure.message || `Permintaan gagal (HTTP ${res.status}).`,
+				res.status,
+				failure.errors ?? null
+			);
+		}
+		return (envelope as BackendSuccess<T>).data;
+	};
+
+	// Hanya GET yang didedup; mutasi tetap jalan tiap panggil.
+	if (!isGet) return doFetch();
+	const key = inflightKey(`${method}:${url}`, options.token ?? '');
+	const pending = inflightGet.get(key);
+	if (pending) return pending as Promise<T>;
+	const p = doFetch();
+	inflightGet.set(key, p);
+	try {
+		return await p;
+	} finally {
+		if (inflightGet.get(key) === p) inflightGet.delete(key);
 	}
-	return (envelope as BackendSuccess<T>).data;
 }
 
 export function loginRequest(

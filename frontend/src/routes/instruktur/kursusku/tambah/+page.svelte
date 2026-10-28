@@ -49,7 +49,8 @@
 	);
 	const descCount = $derived(description.trim().length);
 	const validOutcomes = $derived(outcomes.filter((o) => o.trim().length >= 10));
-	const validTools = $derived(tools.filter((t) => t.trim().length >= 5));
+	/** Server menerima alat ≥ 1 karakter; samakan agar tidak ada yang terbuang diam-diam. */
+	const validTools = $derived(tools.filter((t) => t.trim().length >= 1));
 
 	const durationNum = $derived(Number(durationMonths));
 	const durationLabel = $derived(
@@ -109,6 +110,8 @@
 		if (!category) next['category'] = 'Pilih kategori pelatihan.';
 		if (!Number.isInteger(durationNum) || durationNum < 1)
 			next['duration'] = 'Isi durasi dalam bulan, angka bulat minimal 1 (cth: 6).';
+		if (Number.isInteger(durationNum) && durationNum > 36)
+			next['duration'] = 'Durasi maksimal 36 bulan (server menolak di atas itu).';
 		if (descCount < 30)
 			next['description'] = `Deskripsi masih ${descCount} karakter, minimal 30 karakter.`;
 		if (description.trim().length > 1000) next['description'] = 'Deskripsi maksimal 1000 karakter.';
@@ -240,10 +243,11 @@
 				>
 					<i class="fa-solid fa-circle-check text-2xl"></i>
 				</span>
-				<h1 class="mt-4 text-xl font-extrabold sm:text-2xl">Pelatihan masuk daftar upcoming!</h1>
+				<h1 class="mt-4 text-xl font-extrabold sm:text-2xl">Pelatihan tersimpan sebagai draf!</h1>
 				<p class="mx-auto mt-1.5 max-w-md text-sm text-emerald-50">
-					“{title.trim()}” otomatis terjadwal mulai {startMonthLabel}. Susun modul dan materinya
-					dari halaman Kelola Kurikulum.
+					“{title.trim()}” terjadwal mulai {startMonthLabel} (periode Akan Datang), tetapi
+					masih berstatus Draf — terbitkan dari halaman Kelola Kurikulum agar tampil di katalog.
+					Susun modul dan materinya dari halaman Kelola Kurikulum.
 				</p>
 			</div>
 			<dl class="grid grid-cols-2 gap-3 p-5 text-left sm:grid-cols-4">

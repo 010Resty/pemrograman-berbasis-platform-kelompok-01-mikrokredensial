@@ -37,6 +37,13 @@
 
 	const currentPath = $derived(page.url.pathname);
 
+	// Inisial lokal untuk avatar sidebar — tanpa request jaringan.
+	// Sebelumnya memakai placehold.co eksternal (DNS+TLS+transfer pihak ketiga
+	// di jalur kritis dashboard statis). Pola sama seperti tombol profil header.
+	const profileInitials = $derived(
+		(profileName.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('') || 'PG').toUpperCase()
+	);
+
 	function isActive(href: string): boolean {
 		if (href === '/user' || href === '/admin' || href === '/instruktur')
 			return currentPath === href || currentPath === href + '/';
@@ -140,12 +147,12 @@
 				aria-hidden="true"
 			></div>
 			<div class="relative shrink-0">
-				<img
-					src="https://placehold.co/120x120/e2e8f0/475569?text=FA"
-					alt={profileAlt}
-					class="h-12 w-12 rounded-xl border border-blue-200 object-cover"
-					loading="lazy"
-				/>
+				<span
+					class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-bold text-white shadow-md"
+					aria-hidden="true"
+				>
+					{profileInitials}
+				</span>
 				<span
 					class="absolute right-0 bottom-0 h-3 w-3 rounded-full border-2 border-slate-50 bg-emerald-500"
 					aria-hidden="true"

@@ -1,12 +1,17 @@
 import { Response, NextFunction } from "express";
+import { z } from "zod";
 import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import {
   CertificateError,
   getCertificateDetail,
+  getGlobalEligibilityDetail,
+  getModuleCertificateStatus,
+  getCertificateSummary,
   getModuleEligibility,
   issueCertificate,
   issueInputSchema,
   listCertificates,
+  listGlobalEligibility,
   listModuleEligibility,
   listMyCertificates,
   revokeCertificate,
@@ -193,23 +198,83 @@ export const verifyHandler = async (
   }
 };
 
+const certificateListQuerySchema = z
+  .object({
+    courseId: z.coerce.number().int().positive().optional(),
+    moduleId: z.coerce.number().int().positive().optional(),
+    status: z.enum(["issued", "revoked", "aktif", "dicabut"]).optional(),
+    q: z.string().trim().max(100).optional(),
+    from: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal from YYYY-MM-DD")
+      .optional(),
+    to: z
+      .string()
+      .trim()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Format tanggal to YYYY-MM-DD")
+      .optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+    page: z.coerce.number().int().min(1).max(1000).optional(),
+  })
+  .strict();
+
+const eligibilityQuerySchema = z
+  .object({
+    courseId: z.coerce.number().int().positive().optional(),
+    moduleId: z.coerce.number().int().positive().optional(),
+    status: z
+      .enum(["belum_memenuhi", "menunggu_penilaian", "memenuhi", "sudah_terbit"])
+      .optional(),
+    q: z.string().trim().max(100).optional(),
+  })
+  .strict();
+
 const parseListQuery = (req: AuthenticatedRequest) => {
-  const q = req.query;
-  const num = (v: unknown): number | undefined => {
-    if (typeof v !== "string" || v.trim() === "") return undefined;
-    const n = Number(v);
-    return Number.isInteger(n) && n > 0 ? n : undefined;
-  };
-  const statusRaw: unknown = q.status;
-  const status: "issued" | "revoked" | undefined =
-    statusRaw === "issued" || statusRaw === "revoked" ? statusRaw : undefined;
+  const parsed = certificateListQuerySchema.safeParse(req.query ?? {});
+  if (!parsed.success) {
+    // Fallback aman: abaikan query tak valid kecuali status yang dikenali.
+    const q = req.query as Record<string, unknown>;
+    const num = (v: unknown): number | undefined => {
+      if (typeof v !== "string" || v.trim() === "") return undefined;
+      const n = Number(v);
+      return Number.isInteger(n) && n > 0 ? n : undefined;
+    };
+    const statusRaw: unknown = q.status;
+    const status: "issued" | "revoked" | "aktif" | "dicabut" | undefined =
+      statusRaw === "issued" ||
+      statusRaw === "revoked" ||
+      statusRaw === "aktif" ||
+      statusRaw === "dicabut"
+        ? statusRaw
+        : undefined;
+    const dateRe = /^\d{4}-\d{2}-\d{2}$/;
+    const dateOrUndef = (v: unknown): string | undefined =>
+      typeof v === "string" && dateRe.test(v.trim()) ? v.trim() : undefined;
+    return {
+      courseId: num(q.courseId),
+      moduleId: num(q.moduleId),
+      status,
+      q:
+        typeof q.q === "string" && q.q.trim() !== ""
+          ? q.q.trim().slice(0, 100)
+          : undefined,
+      from: dateOrUndef(q.from),
+      to: dateOrUndef(q.to),
+      limit: num(q.limit),
+      page: num(q.page),
+    };
+  }
+  const d = parsed.data;
   return {
-    courseId: num(q.courseId),
-    moduleId: num(q.moduleId),
-    status,
-    q: typeof q.q === "string" && q.q.trim() !== "" ? q.q.trim().slice(0, 100) : undefined,
-    limit: num(q.limit),
-    page: num(q.page),
+    courseId: d.courseId,
+    moduleId: d.moduleId,
+    status: d.status,
+    q: d.q && d.q.trim() !== "" ? d.q.trim() : undefined,
+    from: d.from,
+    to: d.to,
+    limit: d.limit,
+    page: d.page,
   };
 };
 
@@ -356,6 +421,135 @@ export const eligibilityHandler = async (
             onlyStatus
           ),
         },
+      });
+    } catch (e) {
+      if (!certError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// GET /api/v1/instructor/certificates/summary — ringkasan tab ringkasan.
+export const instructorSummaryHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    try {
+      res.status(200).json({
+        status: "success",
+        message: "Ringkasan sertifikat instruktur",
+        data: await getCertificateSummary(userId, req.user?.role ?? ""),
+      });
+    } catch (e) {
+      if (!certError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// GET /api/v1/instructor/modules/:id/certificate-status — angka satu modul.
+export const moduleCertificateStatusHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    const moduleId = validModuleId(req, res);
+    if (moduleId === null) return;
+    try {
+      res.status(200).json({
+        status: "success",
+        message: "Status sertifikat modul",
+        data: await getModuleCertificateStatus(
+          userId,
+          req.user?.role ?? "",
+          moduleId
+        ),
+      });
+    } catch (e) {
+      if (!certError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// GET /api/v1/instructor/eligibility — kelayakan lintas modul/kursus.
+export const globalEligibilityHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    const parsed = eligibilityQuerySchema.safeParse(req.query ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        status: "error",
+        message: "Parameter filter kelayakan tidak valid",
+        errors: toFieldErrors(parsed.error.issues),
+        data: null,
+      });
+      return;
+    }
+    const d = parsed.data;
+    try {
+      const items = await listGlobalEligibility(userId, req.user?.role ?? "", {
+        courseId: d.courseId,
+        moduleId: d.moduleId,
+        status: d.status,
+        q: d.q && d.q.trim() !== "" ? d.q.trim() : undefined,
+      });
+      res.status(200).json({
+        status: "success",
+        message: "Kelayakan peserta",
+        data: { items, total: items.length },
+      });
+    } catch (e) {
+      if (!certError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// GET /api/v1/instructor/eligibility/:id — rincian satu kelayakan.
+export const globalEligibilityDetailHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    const id = typeof req.params.id === "string" ? req.params.id : "";
+    if (!id) {
+      res.status(404).json({
+        status: "error",
+        message: "Data kelayakan tidak ditemukan",
+        code: "ELIGIBILITY_NOT_FOUND",
+        data: null,
+      });
+      return;
+    }
+    try {
+      res.status(200).json({
+        status: "success",
+        message: "Detail kelayakan peserta",
+        data: await getGlobalEligibilityDetail(
+          userId,
+          req.user?.role ?? "",
+          decodeURIComponent(id)
+        ),
       });
     } catch (e) {
       if (!certError(res, e)) throw e;

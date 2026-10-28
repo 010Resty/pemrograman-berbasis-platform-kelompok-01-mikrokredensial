@@ -2,7 +2,6 @@
 	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import { getCourseById, type Course, type CourseModule } from '$lib/data/courses';
-	import { getCourseMeta } from '$lib/data/course-meta';
 	import { getTrainingStats } from '$lib/data/training';
 	import {
 		loadCurriculumDraft,
@@ -63,7 +62,12 @@
 	});
 
 	const course = $derived(serverMode ? serverCourse : staticCourse);
-	const meta = $derived(course ? getCourseMeta(course.id) : undefined);
+	/** Nama pengampu dari server (detail memuat `instructors[]`); fallback nama tunggal. */
+	const instructorNames = $derived(
+		serverMode && serverCourse
+			? serverCourse.instructorNames || serverCourse.instructor
+			: (staticCourse?.instructor ?? '—')
+	);
 
 	let editableModules = $state<CourseModule[]>([]);
 	let isPublished = $state(true);
@@ -154,9 +158,7 @@
 	async function verifySaved(): Promise<void> {
 		try {
 			const remote = await fetchModules(courseId);
-			markSaved(
-				`Tersinkron ke server: ${remote.length} modul tercatat (draf lokal ikut tersimpan otomatis).`
-			);
+			markSaved(`Tersinkron ke server: ${remote.length} modul tercatat.`);
 		} catch (e) {
 			markSaved(e instanceof Error ? e.message : 'Gagal memeriksa simpanan server.');
 		}
@@ -168,6 +170,15 @@
 		}
 		return c.id !== 4;
 	}
+
+	/** Label badge status 3 nilai server; arsip tidak boleh tampil sebagai Draft. */
+	const publishLabel = $derived.by((): 'Terbit' | 'Draft' | 'Diarsipkan' => {
+		const s = serverMode && serverCourse ? serverCourse.publishState : undefined;
+		if (s === 'published') return 'Terbit';
+		if (s === 'archived') return 'Diarsipkan';
+		if (s === 'draft') return 'Draft';
+		return isPublished ? 'Terbit' : 'Draft';
+	});
 
 	async function togglePublish(): Promise<void> {
 		if (serverMode && serverCourse) {
@@ -237,15 +248,15 @@
 					<span class="rounded-full bg-blue-600 px-3 py-1 text-[11px] font-bold text-white uppercase">{course.category}</span>
 					<span class="rounded-full bg-white/20 px-3 py-1 text-[11px] font-bold text-white uppercase backdrop-blur">{course.level}</span>
 					<span
-						class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-bold uppercase {isPublished ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-white/30 bg-white/15 text-white backdrop-blur'}"
+						class="inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-bold uppercase {publishLabel === 'Terbit' ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : publishLabel === 'Diarsipkan' ? 'border-white/30 bg-slate-500/40 text-white backdrop-blur' : 'border-white/30 bg-white/15 text-white backdrop-blur'}"
 					>
-						<i class="fa-solid {isPublished ? 'fa-eye' : 'fa-pen'}" aria-hidden="true"></i>
-						{isPublished ? 'Terbit' : 'Draft'}
+						<i class="fa-solid {publishLabel === 'Terbit' ? 'fa-eye' : publishLabel === 'Diarsipkan' ? 'fa-box-archive' : 'fa-pen'}" aria-hidden="true"></i>
+						{publishLabel}
 					</span>
 				</div>
 				<div class="relative p-4 pt-1 sm:px-6 sm:pb-5">
 					<h1 class="text-xl leading-snug font-extrabold text-white sm:text-2xl">{course.title}</h1>
-					<p class="mt-1 text-xs text-slate-200 sm:text-sm">Oleh {course.instructor} · {course.duration} · {meta?.students.toLocaleString('id-ID') ?? '-'} peserta · ★ {meta?.rating ?? '-'}</p>
+					<p class="mt-1 text-xs text-slate-200 sm:text-sm">Oleh {instructorNames} · {course.duration}</p>
 					<p class="mt-1 text-[11px] font-semibold tracking-wide text-blue-200 uppercase">
 						Kelola · {editableModules.length} modul · {totalSubs} sub-modul · {totalMats} materi
 					</p>
@@ -314,7 +325,7 @@
 		<div class="mt-6 flex flex-col gap-3 rounded-2xl border border-slate-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between">
 			<div>
 				<p class="text-sm font-bold text-slate-900">
-					{serverMode ? 'Kurikulum tersimpan otomatis ke server' : 'Kurikulum tersimpan sebagai draf lokal'}
+					{serverMode ? 'Perubahan struktur kurikulum tersimpan langsung ke server' : 'Kurikulum tersimpan sebagai draf lokal'}
 				</p>
 				<p class="text-xs text-slate-500">
 					Total {editableModules.length} modul · {totalSubs} sub-modul · {totalMats} materi. {serverMode

@@ -13,6 +13,8 @@ export interface ReviewItem {
 	date: string;
 	status: 'Menunggu' | 'Dinilai';
 	score: number | null;
+	/** Umpan balik instruktur (tersimpan bila backend terjangkau). */
+	feedback?: string | null;
 	driveLink?: string;
 	fileName?: string;
 	submissionId?: string;
