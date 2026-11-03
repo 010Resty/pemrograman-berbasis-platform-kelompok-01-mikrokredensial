@@ -6,6 +6,7 @@
 	import {
 		PORTALS,
 		ROLE_LABEL,
+		getAccessToken,
 		homeFor,
 		loadSession,
 		loginWithBackend,
@@ -95,6 +96,11 @@
 		try {
 			const result = await loginWithBackend(email, password, rememberMe);
 			if (!result.ok) {
+				// Email belum diverifikasi: lanjutkan ke halaman verifikasi OTP.
+				if (result.needsVerification) {
+					await goto(`/verify-email?email=${encodeURIComponent(result.needsVerification)}`);
+					return;
+				}
 				errorMessage = result.error;
 				isLoading = false;
 				return;
@@ -119,10 +125,11 @@
 	}
 
 	// Sudah login (terverifikasi server) → langsung ke portal perannya.
-	// Tidak memakai loadSession mentah agar sesi palsu tidak lolos.
+	// Tidak memakai loadSession mentah agar sesi palsu tidak lolos:
+	// tanpa token valid tidak ada verifikasi, dan peran ikut hasil /me.
 	$effect(() => {
 		let cancelled = false;
-		if (!loadSession()) return;
+		if (!loadSession() || !getAccessToken()) return;
 		(void (async () => {
 			const res = await verifySession();
 			if (!cancelled && res.ok) goto(homeFor(res.session.role));
@@ -307,7 +314,7 @@
 								Kata Sandi
 							</label>
 							<a
-								href="/verify"
+								href="/lupa-password"
 								class="rounded text-xs font-semibold text-blue-600 transition-colors hover:text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
 								Lupa Kata Sandi?

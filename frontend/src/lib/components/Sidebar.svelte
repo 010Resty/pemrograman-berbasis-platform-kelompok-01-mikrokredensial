@@ -18,9 +18,13 @@
 		brandHref = '/user',
 		brandLabel = 'Aristoteles Platform - Dashboard pengguna',
 		navAriaLabel = 'Navigasi pengguna',
-		profileName = 'AHMAD FARIZI',
-		profileRole = 'Mahasiswa',
-		profileAlt = 'Foto profil Ahmad Farizi'
+		profileName = 'Pengguna',
+		profileRole = 'Pengguna',
+		profileAlt = 'Foto profil pengguna',
+		/** URL foto profil opsional. Backend belum punya field avatar — bila
+		 * diisi kelak, hanya URL aman yang dirender (relatif `/...` atau
+		 * `https:`); selain itu fallback inisial. Tanpa ini = inisial. */
+		profileAvatarUrl = null
 	}: {
 		navItems?: NavItem[];
 		isCollapsed?: boolean;
@@ -33,6 +37,7 @@
 		profileName?: string;
 		profileRole?: string;
 		profileAlt?: string;
+		profileAvatarUrl?: string | null;
 	} = $props();
 
 	const currentPath = $derived(page.url.pathname);
@@ -43,6 +48,19 @@
 	const profileInitials = $derived(
 		(profileName.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('') || 'PG').toUpperCase()
 	);
+
+	/**
+	 * Hanya render <img> untuk URL avatar yang aman: relatif same-origin
+	 * (`/...`) atau `https:`. Tolak `javascript:`, `data:` non-gambar,
+	 * `http:`, dan string kosong — fallback ke inisial.
+	 */
+	const safeAvatarUrl = $derived.by((): string | null => {
+		const raw = (profileAvatarUrl ?? '').trim();
+		if (!raw || raw.length > 2048 || /[\s<>"]/.test(raw)) return null;
+		if (raw.startsWith('/')) return raw.startsWith('//') ? null : raw;
+		if (raw.startsWith('https://')) return raw;
+		return null;
+	});
 
 	function isActive(href: string): boolean {
 		if (href === '/user' || href === '/admin' || href === '/instruktur')
@@ -147,12 +165,22 @@
 				aria-hidden="true"
 			></div>
 			<div class="relative shrink-0">
-				<span
-					class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-bold text-white shadow-md"
-					aria-hidden="true"
-				>
-					{profileInitials}
-				</span>
+				{#if safeAvatarUrl}
+					<img
+						src={safeAvatarUrl}
+						alt={profileAlt}
+						class="h-12 w-12 rounded-xl border border-blue-200 object-cover shadow-md"
+						loading="lazy"
+						referrerpolicy="no-referrer"
+					/>
+				{:else}
+					<span
+						class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-bold text-white shadow-md"
+						aria-hidden="true"
+					>
+						{profileInitials}
+					</span>
+				{/if}
 				<span
 					class="absolute right-0 bottom-0 h-3 w-3 rounded-full border-2 border-slate-50 bg-emerald-500"
 					aria-hidden="true"

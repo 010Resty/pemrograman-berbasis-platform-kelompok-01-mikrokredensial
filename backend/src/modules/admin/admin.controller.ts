@@ -9,9 +9,9 @@ import {
   getAdminOverview,
   getUserById,
   listUsers,
-  setActiveSchema,
-  setUserActive,
   unassignInstructor,
+  updateUser,
+  updateUserSchema,
 } from "./admin.service";
 
 const uid = (req: AuthenticatedRequest): number | null => {
@@ -177,8 +177,8 @@ export const userDetailHandler = async (
   }
 };
 
-// PATCH /api/v1/admin/users/:id — aktif/nonaktif akun.
-export const setActiveHandler = async (
+// PATCH /api/v1/admin/users/:id — ubah nama/email/status akun.
+export const updateUserHandler = async (
   req: AuthenticatedRequest,
   res: Response,
   next: NextFunction
@@ -196,11 +196,11 @@ export const setActiveHandler = async (
       });
       return;
     }
-    const parsed = setActiveSchema.safeParse(req.body);
+    const parsed = updateUserSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({
         status: "error",
-        message: "Data status tidak valid",
+        message: "Data perubahan tidak valid",
         errors: toFieldErrors(parsed.error.issues),
         data: null,
       });
@@ -209,8 +209,8 @@ export const setActiveHandler = async (
     try {
       res.status(200).json({
         status: "success",
-        message: parsed.data.isActive ? "Akun diaktifkan." : "Akun dinonaktifkan.",
-        data: await setUserActive(actorId, targetId, parsed.data.isActive),
+        message: "Perubahan akun disimpan.",
+        data: await updateUser(actorId, targetId, parsed.data),
       });
     } catch (e) {
       if (!adminError(res, e)) throw e;

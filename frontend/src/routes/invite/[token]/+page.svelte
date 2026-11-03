@@ -1,16 +1,24 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
+	import { onMount } from 'svelte';
 	import { page } from '$app/state';
 	import {
-		acceptInvitation,
-		findByToken,
-		type InvitationView
-	} from '$lib/stores/invitations';
+		acceptBackendInvitation,
+		validateBackendInvitation,
+		type ValidateInvitationResult
+	} from '$lib/api/invitations';
+	import { BackendRequestError } from '$lib/api/backend';
+
+	/**
+	 * Aktivasi akun instruktur — validasi + aktivasi 100% backend.
+	 * Token dicek ke GET /invitations/validate, akun dibuat via
+	 * POST /invitations/accept. Sukses TIDAK auto-login — user masuk
+	 * manual dengan password baru (pola sama seperti reset-password).
+	 */
 
 	type State =
 		| { kind: 'checking' }
-		| { kind: 'valid'; invitation: InvitationView }
-		| { kind: 'invalid' }
+		| { kind: 'valid'; invitation: ValidateInvitationResult }
+		| { kind: 'invalid'; message: string }
 		| { kind: 'expired' }
 		| { kind: 'used' }
 		| { kind: 'cancelled' };
@@ -24,18 +32,38 @@
 	let acceptedEmail = $state('');
 	let pwInput: HTMLInputElement | null = $state(null);
 
+	let inviteState = $state<State>({ kind: 'checking' });
+
 	const token = $derived(page.params.token ?? '');
 
-	/* Validasi token hanya di klien terhadap penyimpanan lokal (demo).
-	   Backend wajib memvalidasi ulang token, masa berlaku, dan sekali pakai. */
-	const inviteState = $derived.by((): State => {
-		if (!browser || !token) return { kind: 'checking' };
-		const inv = findByToken(token);
-		if (!inv) return { kind: 'invalid' };
-		if (inv.status === 'Cancelled') return { kind: 'cancelled' };
-		if (inv.status === 'Accepted') return { kind: 'used' };
-		if (inv.status === 'Expired') return { kind: 'expired' };
-		return { kind: 'valid', invitation: inv };
+	function statusOf(e: unknown): number | null {
+		return e instanceof BackendRequestError ? e.httpStatus : null;
+	}
+
+	async function checkInvitation(t: string): Promise<void> {
+		inviteState = { kind: 'checking' };
+		if (!t) {
+			inviteState = { kind: 'invalid', message: 'Tautan tidak lengkap.' };
+			return;
+		}
+		try {
+			const invitation = await validateBackendInvitation(t);
+			inviteState = { kind: 'valid', invitation };
+		} catch (e) {
+			const http = statusOf(e);
+			const message = e instanceof Error ? e.message : '';
+			if (http === 409) inviteState = { kind: 'used' };
+			else if (http === 410) inviteState = { kind: 'expired' };
+			else inviteState = { kind: 'invalid', message };
+		}
+	}
+
+	onMount(() => {
+		void checkInvitation(page.params.token ?? '');
+	});
+
+	$effect(() => {
+		if (inviteState.kind === 'valid' && !done) pwInput?.focus();
 	});
 
 	const done = $derived(acceptedEmail !== '');
@@ -78,7 +106,11 @@
 						: 'Sangat kuat'
 	);
 
-	function handleSubmit(event: Event) {
+	function messageOf(e: unknown, fallback: string): string {
+		return e instanceof Error && e.message ? e.message : fallback;
+	}
+
+	async function handleSubmit(event: Event) {
 		event.preventDefault();
 		errorMessage = '';
 		if (inviteState.kind !== 'valid') return;
@@ -86,35 +118,37 @@
 			errorMessage = 'Kata sandi tidak cocok. Periksa kembali kedua kolom.';
 			return;
 		}
-		if (password.length < 7) {
-			errorMessage = 'Kata sandi minimal 7 karakter.';
+		if (password.length < 8) {
+			errorMessage = 'Kata sandi minimal 8 karakter (mengikuti aturan backend).';
 			return;
 		}
 		isLoading = true;
-		// Simulasi lokal: tandai token terpakai TANPA membuat/mengaktifkan akun
-		// dan TANPA menyimpan password di mana pun.
-		setTimeout(() => {
-			isLoading = false;
-			const result = acceptInvitation(token);
+		try {
+			const result = await acceptBackendInvitation({ token, password });
 			password = '';
 			confirmPassword = '';
 			showPw = false;
 			showPw2 = false;
-			if (!result.ok) {
-				errorMessage =
-					result.reason === 'expired'
-						? 'Tautan sudah kedaluwarsa. Minta admin mengirim undangan baru.'
-						: 'Tautan tidak dapat dipakai. Minta admin memeriksa status undangan.';
-				return;
-			}
-			acceptedEmail = result.invitation.email;
-		}, 500);
+			// Sukses = akun instruktur aktif di server. TIDAK auto-login —
+			// user masuk manual dengan password baru.
+			acceptedEmail = result.user.email;
+		} catch (e) {
+			const http = statusOf(e);
+			errorMessage =
+				http === 410
+					? 'Tautan sudah kedaluwarsa. Minta admin mengirim undangan baru.'
+					: messageOf(e, 'Tautan tidak dapat dipakai. Minta admin memeriksa status undangan.');
+			// Token mungkin berubah status di server — cek ulang.
+			void checkInvitation(token);
+		} finally {
+			isLoading = false;
+		}
 	}
 </script>
 
 <svelte:head>
 	<title>Aktivasi Akun Instruktur — Aristoteles</title>
-	<meta name="description" content="Halaman aktivasi akun instruktur melalui undangan admin (simulasi lokal)." />
+	<meta name="description" content="Halaman aktivasi akun instruktur melalui undangan resmi admin." />
 </svelte:head>
 
 <div class="invite-page">
@@ -128,8 +162,8 @@
 				<span>Aristoteles &middot; Surat Penunjukan Instruktur</span>
 			</p>
 			<span class="invite-sim-badge">
-				<i class="fa-solid fa-flask" aria-hidden="true"></i>
-				<span>Simulasi lokal</span>
+				<i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
+				<span>Undangan resmi</span>
 			</span>
 		</header>
 
@@ -147,7 +181,7 @@
 			<section class="letter rise" style="--d: 80ms" aria-labelledby="invite-title">
 				<div class="seal" aria-hidden="true"><i class="fa-solid fa-award"></i></div>
 				<p class="letter-eyebrow">Kepada Yth.</p>
-				<h1 id="invite-title" class="letter-title">{inv.name}</h1>
+				<h1 id="invite-title" class="letter-title">{inv.name ?? 'Calon Instruktur'}</h1>
 				<p class="letter-sub">
 					Anda diundang sebagai <strong>Instruktur Aristoteles</strong> untuk alamat
 					<strong>{inv.email}</strong>. Buat kata sandi untuk menyelesaikan aktivasi.
@@ -184,9 +218,9 @@
 								bind:this={pwInput}
 								bind:value={password}
 								autocomplete="new-password"
-								minlength={7}
+								minlength={8}
 								required
-								placeholder="Minimal 7 karakter"
+								placeholder="Minimal 8 karakter"
 								aria-describedby={pwLabel ? 'pw-strength' : undefined}
 								aria-invalid={errorMessage ? true : undefined}
 							/>
@@ -218,7 +252,7 @@
 								type={showPw2 ? 'text' : 'password'}
 								bind:value={confirmPassword}
 								autocomplete="new-password"
-								minlength={7}
+								minlength={8}
 								required
 								placeholder="Ulangi kata sandi"
 								aria-invalid={errorMessage ? true : undefined}
@@ -254,11 +288,11 @@
 		{:else if done}
 			<section class="letter rise" style="--d: 80ms" aria-labelledby="invite-title">
 				<div class="seal seal-ok" aria-hidden="true"><i class="fa-solid fa-check"></i></div>
-				<p class="letter-eyebrow">Simulasi selesai</p>
-				<h1 id="invite-title" class="letter-title">Surat tersegel.</h1>
+				<p class="letter-eyebrow">Aktivasi berhasil</p>
+				<h1 id="invite-title" class="letter-title">Akun instruktur aktif.</h1>
 				<p class="letter-sub">
-					Undangan untuk <strong>{acceptedEmail}</strong> telah ditandai terpakai di browser ini.
-					Akun <strong>belum aktif</strong> &mdash; penerbitan akun nyata membutuhkan backend.
+					Akun untuk <strong>{acceptedEmail}</strong> telah diaktifkan oleh sistem.
+					Silakan masuk dengan kata sandi yang baru dibuat.
 				</p>
 				<ol class="steps" aria-label="Langkah aktivasi">
 					<li class="step is-done">
@@ -276,7 +310,7 @@
 				</ol>
 				<a href="/login" class="cta cta-ghost">
 					<i class="fa-solid fa-arrow-right-to-bracket" aria-hidden="true"></i>
-					<span>Kembali ke halaman masuk</span>
+					<span>Masuk Sekarang</span>
 				</a>
 			</section>
 		{:else if inviteState.kind === 'expired'}
@@ -313,11 +347,13 @@
 				</a>
 			</section>
 		{:else}
+			{@const invalidMsg =
+				inviteState.kind === 'invalid' && inviteState.message ? inviteState.message : ''}
 			<section class="letter rise" style="--d: 80ms" aria-labelledby="invite-title">
 				<div class="seal seal-muted" aria-hidden="true"><i class="fa-solid fa-triangle-exclamation"></i></div>
 				<p class="letter-eyebrow">Tidak dikenali</p>
 				<h1 id="invite-title" class="letter-title">Undangan tidak valid.</h1>
-				<p class="letter-sub">Tautan tidak dikenal. Pastikan Anda membuka tautan lengkap dari admin.</p>
+				<p class="letter-sub">{invalidMsg || 'Tautan tidak dikenal. Pastikan Anda membuka tautan lengkap dari admin.'}</p>
 				<a href="/login" class="cta cta-ghost">
 					<i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
 					<span>Kembali ke halaman masuk</span>
@@ -326,10 +362,10 @@
 		{/if}
 
 		<footer class="invite-foot rise" style="--d: 160ms">
-			<i class="fa-solid fa-flask" aria-hidden="true"></i>
+			<i class="fa-solid fa-shield-halved" aria-hidden="true"></i>
 			<span>
-				Halaman simulasi lokal &mdash; kata sandi tidak disimpan dan tidak ada akun yang diaktifkan di
-				sini. Penerbitan akun nyata membutuhkan backend.
+				Undangan resmi Aristoteles &mdash; token diverifikasi server dan hanya berlaku satu
+				kali. Setelah aktivasi, masuk dengan kata sandi yang baru dibuat.
 			</span>
 		</footer>
 	</main>

@@ -128,8 +128,8 @@ Materi harus `type:'kuis'` (selain itu 400). Penilaian 100% server; skor klien d
 
 | Endpoint | Auth/Role | Sukses | Error |
 |---|---|---|---|
-| `PUT /materials/:id/quiz` | teacher/admin pengelola | 200 bank baru `{isCorrect,explanation}` (ganti atomik; snapshot lama utuh) | 400 (0/2 kunci, <2 opsi, 0 soal); 403 siswa; 400 non-kuis |
-| `GET /materials/:id/quiz` | JWT + hak akses | 200 soal **tanpa** `isCorrect`/`explanation` | 400 non-kuis; 404; 403 `NO_ACCESS`; 401 |
+| `PUT /materials/:id/quiz` | teacher/admin pengelola | 200 bank baru `{isCorrect,explanation,imageUrl/audioUrl/fileUrl/fileName?}` (lampiran opsional, wajib URL berkas server `/api/v1/files/...`; ganti atomik; snapshot lama utuh) | 400 (0/2 kunci, <2 opsi, 0 soal, URL lampiran asing); 403 siswa; 400 non-kuis |
+| `GET /materials/:id/quiz` | JWT + hak akses | 200 soal **tanpa** `isCorrect`/`explanation` (dengan lampiran bila ada) | 400 non-kuis; 404; 403 `NO_ACCESS`; 401 |
 | `POST /materials/:id/quiz-attempts` | JWT + hak akses | 201 `{attemptId,score,total,correct,passScore,passed,bestScore,attempts,overallPassed}`; `score=round(correct/total*100)`; `passScore` = snapshot materi; append-only | 400 (skor buatan, duplikat `questionId`, id asing, opsi lintas soal, kuis kosong) |
 | `GET /materials/:id/quiz-attempts` | JWT + hak akses | 200 riwayat milik sendiri (tanpa kunci/snapshot/answers) | 403/404 |
 | `GET /materials/:id/quiz-best` | JWT + hak akses | 200 `{attempts,bestScore,effectivePassScore,passed}`; lulus **menempel** (OR atas snapshot tiap percobaan) | 403/404 |
@@ -149,6 +149,7 @@ Alur: `POST /api/v1/uploads` (`kind:"assignment"`, PDF ≤10MB, magic-bytes) →
 | `GET /materials/:id/submissions[?userId=]` | JWT | — | 200 `{manager,rows[]}` (peserta: milik sendiri; pengelola: semua + saring) | 403/404 |
 | `GET /materials/:id/submissions/status` | JWT + hak akses | — | 200 `{attempts,graded,passed,lastStatus,bestScore,lastSubmission}`; lulus menempel (`EXISTS passed`) | 403/404 |
 | `GET /materials/:id/submissions/:subId` | JWT | — | 200 (milik sendiri/pengelola; asing → 404) | 403/404 |
+| `GET /instructor/review-queue` | teacher/admin | — | 200 agregat `{courses[{tasks[{pending,graded,total,avgScore}]}],pendingTotal,gradedTotal,avgScore}` (kursus kelola; admin = semua) | 401/403 |
 | `POST /materials/:id/submissions/:subId/grade` | teacher/admin pengelola | strict `{score 0–100 **wajib**, decision passed\|failed\|revision_requested **wajib**, feedback?(≤2000)}` | 200 + `gradedBy/gradedAt` + audit `submission.grade` (transaksi) | 400 Zod; 403 `NOT_MANAGER`/role; 404 |
 
 Uji: `submissions.test.ts` (submit×N, validasi berkas, isolasi, revision→lulus, sticky-pass, proteksi berkas 6 skenario).
@@ -203,7 +204,7 @@ Uji: `voucher-admin.test.ts` (11: create/validasi, redeem+redeemed, personal, mi
 | `GET /admin/users?role=&isActive=&q=&limit=&page=` | admin | — | 200 `{items,total}` **tanpa `passwordHash`** | 403 |
 | `GET /admin/users/:id` | admin | — | 200 detail + `{enrollmentCount,certificateCount}` tanpa `passwordHash` | 403/404 |
 | `POST /admin/users` | admin | `{name 2–100, email, password 8–72}` (role dikunci `teacher`) | 201 + audit `user.create` | 400/409 `EMAIL_TAKEN` |
-| `PATCH /admin/users/:id` | admin | `{isActive}` | 200 + audit `user.enable/disable` | 400 ubah diri sendiri; 404 |
+| `PATCH /admin/users/:id` | admin | `{name? 2–100, email?, expertise? ≤100 ("" = hapus), isActive?}` (min. 1 field; ganti status diri sendiri dilarang) | 200 + audit `user.update` | 400 validasi/ubah-status-diri; 404; 409 `EMAIL_TAKEN` |
 | `POST /admin/courses/:id/instructors` | admin | `{userId\|email}` (target harus teacher/admin) | 201 + audit | 400 `NOT_TEACHER`; 404 |
 | `DELETE /admin/courses/:id/instructors/:userId` | admin | — | 200 + audit | 404 `ASSIGNMENT_NOT_FOUND` |
 
@@ -217,9 +218,10 @@ Token `randomBytes(32).hex`, hanya hash SHA-256 disimpan; default kedaluwarsa 7 
 
 | Endpoint | Auth | Sukses | Error |
 |---|---|---|---|
-| `POST /admin/invitations` | admin | 201 `{token}` **plaintext sekali saja** + audit | 400 validasi; 409 `EMAIL_TAKEN` |
+| `POST /admin/invitations` | admin | 201 `{token}` **plaintext sekali saja** + `inviteUrl` + `emailSent` (email SMTP; gagal kirim tidak menggagalkan pembuatan) + audit | 400 validasi; 409 `EMAIL_TAKEN` |
 | `GET /admin/invitations[?status=]` | admin | 200 `{items}` (tanpa hash) | — |
 | `POST /admin/invitations/:id/revoke` | admin | 200 `revoked` + audit | 404/409 `STATUS_FINAL` |
+| `POST /admin/invitations/:id/reissue` | admin | 200 token baru + `inviteUrl` + `emailSent` (hash lama hangus, berlaku 7 hari) + audit `invitation.reissue` | 404/409 `STATUS_FINAL` |
 | `GET /invitations/validate?token=` | publik | 200 `{email,name,expiresAt}`; kedaluwarsa → tandai `expired` | 404/410 `INVITATION_EXPIRED` |
 | `POST /invitations/accept` | publik | 201 `{accessToken,user{role:'teacher'}}` (transaksi: buat akun + `accepted` + audit) | 400; 404; 409 `ALREADY_ACCEPTED`/`EMAIL_TAKEN`; 410 |
 
@@ -227,7 +229,7 @@ Token `randomBytes(32).hex`, hanya hash SHA-256 disimpan; default kedaluwarsa 7 
 
 ## 13. Upload & berkas — `POST /api/v1/uploads`, `GET /api/v1/files/:id/content`
 
-- Upload: JWT semua peran; `{filename 1–255, mimeType 1–100, kind, data base64 ≤20MB}`; MIME dicek vs klaim + **magic-bytes**; batas `image/cover` 4MB, `audio` 8MB, `pdf`/`assignment` 10MB (assignment wajib PDF); limit JSON global 15MB. → 201 `{id,url,mimeType,sizeBytes}`.
+- Upload: JWT semua peran; `{filename 1–255, mimeType 1–100, kind, data base64 ≤20MB}`; MIME dicek vs klaim + **magic-bytes**; batas `image/cover` 4MB, `audio` 8MB, `pdf`/`assignment` 10MB (assignment wajib PDF); limit JSON global 15MB. → 201 `{id,url,mimeType,sizeBytes}`. Kind aset kursus (`image/audio/pdf/cover`) hanya teacher/admin (siswa → 403); `assignment` + berkas pelamar boleh semua peran terautentikasi.
 - Serve: aset kursus publik (`Cache-Control: public, immutable`); `assignment` privat (`private, no-store`): pemilik, admin, atau **teacher pengampu kursus yang punya submission menautkan berkas** (teacher asing → 403; anon → 403).
 
 ---

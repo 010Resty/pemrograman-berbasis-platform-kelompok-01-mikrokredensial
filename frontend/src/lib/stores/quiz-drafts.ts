@@ -35,6 +35,13 @@ export function blankQuizDraft(title = ''): QuizDraft {
 	return { title, intro: '', questions: [blankQuizQuestion()], passScore: DEFAULT_PASS_SCORE, updatedAt: '' };
 }
 
+/** Terima hanya URL berkas server; sisanya dibuang (anti-XSS lokal). */
+function pickServerFile(v: unknown): string | undefined {
+	if (typeof v !== 'string') return undefined;
+	const s = v.trim().slice(0, 500);
+	return s.startsWith('/api/v1/files/') ? s : undefined;
+}
+
 /** Muat draf kuis. Null bila belum ada / SSR / rusak. */
 export function loadQuizDraft(
 	courseId: number,
@@ -54,7 +61,14 @@ export function loadQuizDraft(
 				question: String(q.question ?? ''),
 				options: Array.from({ length: 4 }, (_, i) => String(q.options?.[i] ?? '')),
 				answer: Number.isInteger(q.answer) && q.answer >= 0 && q.answer < 4 ? q.answer : 0,
-				explanation: String(q.explanation ?? '')
+				explanation: String(q.explanation ?? ''),
+				imageUrl: pickServerFile(q.imageUrl),
+				audioUrl: pickServerFile(q.audioUrl),
+				fileUrl: pickServerFile(q.fileUrl),
+				fileName:
+					typeof q.fileName === 'string' && q.fileName.trim()
+						? q.fileName.trim().slice(0, 255)
+						: undefined
 			}));
 		return {
 			title: String(parsed.title ?? ''),

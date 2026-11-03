@@ -3,6 +3,7 @@ import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import {
   SubmissionError,
   createSubmission,
+  getInstructorReviewQueue,
   getSubmission,
   getTaskStatus,
   gradeInputSchema,
@@ -254,6 +255,26 @@ export const gradeHandler = async (
     } catch (e) {
       if (!submissionError(res, e)) throw e;
     }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// GET /api/v1/instructor/review-queue — agregat antrean penilaian
+// (satu respons; pengganti kipas N request kursus × materi di klien).
+export const queueHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    res.status(200).json({
+      status: "success",
+      message: "Antrean penilaian instruktur",
+      data: await getInstructorReviewQueue(userId, req.user?.role ?? ""),
+    });
   } catch (e) {
     next(e);
   }

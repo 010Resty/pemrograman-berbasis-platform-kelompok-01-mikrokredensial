@@ -12,7 +12,8 @@ const DECISIONS = ['passed', 'failed', 'revision_requested'] as const;
  * PATCH /api/assignments/grade/:id { score, materialId, decision?, feedback? }
  * → POST /api/v1/materials/:materialId/submissions/:id/grade (backend Express).
  * Meneruskan header Authorization agar backend dapat mengotorisasi peran
- * teacher/admin. Tanpa token backend menjawab 401 dan dinilai lokal saja.
+ * teacher/admin. Tanpa token = 401 di sini (fail-closed, tanpa fallback
+ * sukses palsu); backend offline = 502 jujur (nilai TIDAK disimpan lokal).
  */
 export const PATCH: RequestHandler = async ({ params, request, fetch }) => {
 	let body: unknown;
@@ -43,10 +44,20 @@ export const PATCH: RequestHandler = async ({ params, request, fetch }) => {
 			: 'passed';
 	const feedback =
 		typeof b.feedback === 'string' && b.feedback.trim() !== '' ? b.feedback.slice(0, 2000) : undefined;
+	const authorization = request.headers.get('authorization');
+	if (!authorization) {
+		return json(
+			{
+				status: false,
+				message: 'Token autentikasi diperlukan. Masuk kembali lalu coba lagi.',
+				data: null
+			},
+			{ status: 401 }
+		);
+	}
 	try {
 		const headers: Record<string, string> = { 'content-type': 'application/json' };
-		const authorization = request.headers.get('authorization');
-		if (authorization) headers.authorization = authorization;
+		headers.authorization = authorization;
 		const upstream = await fetch(
 			`${backendBase()}/api/v1/materials/${materialId}/submissions/${encodeURIComponent(params.id)}/grade`,
 			{ method: 'POST', headers, body: JSON.stringify({ score, decision, feedback }) }
@@ -55,7 +66,7 @@ export const PATCH: RequestHandler = async ({ params, request, fetch }) => {
 		return json(data, { status: upstream.status });
 	} catch {
 		return json(
-			{ status: false, message: 'Backend offline — nilai disimpan lokal saja.', data: null },
+			{ status: false, message: 'Backend offline — nilai BELUM tersimpan. Coba lagi saat backend online.', data: null },
 			{ status: 502 }
 		);
 	}

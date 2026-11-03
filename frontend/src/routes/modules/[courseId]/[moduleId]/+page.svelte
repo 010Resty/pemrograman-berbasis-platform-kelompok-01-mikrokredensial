@@ -7,6 +7,8 @@
 	import { getCourseMeta } from '$lib/data/course-meta';
 	import { resolveSubModules, subModuleHref } from '$lib/data/training';
 	import { locateModule, moduleCredentialId } from '$lib/data/certificates';
+	import SeoHead from '$lib/components/SeoHead.svelte';
+	import { canonicalPath } from '$lib/seo/site';
 
 	const courseId = $derived(Number(page.params.courseId));
 	const moduleId = $derived(page.params.moduleId);
@@ -28,21 +30,41 @@
 	);
 
 	let menuOpen = $state(false);
+
+	const modulPath = $derived(`/modules/${page.params.courseId}/${page.params.moduleId}`);
 </script>
 
-<svelte:head>
-	<title>
-		{course && module
-			? `Modul ${moduleIndex + 1}: ${module.title} — ${course.title}`
-			: 'Modul tidak ditemukan'} — Aristoteles Platform
-	</title>
-	<meta
-		name="description"
-		content={course && module
-			? `Detail Modul ${moduleIndex + 1} ${module.title}: ${subs.length} sub-modul, ${mats.length} materi, 1 sertifikat modul (${cred}).`
-			: 'Detail modul pelatihan.'}
-	/>
-</svelte:head>
+<SeoHead
+	title={course && module
+		? `Modul ${moduleIndex + 1}: ${module.title} — ${course.title}`.slice(0, 60)
+		: 'Modul tidak ditemukan — ARISTOTELES'}
+	description={course && module
+		? `Pelajari Modul ${moduleIndex + 1} ${module.title} (${course.title}): ${subs.length} sub-modul, ${mats.length} materi, 1 sertifikat modul. Masuk untuk belajar.`.slice(0, 160)
+		: 'Detail modul pelatihan ARISTOTELES: sub-modul, materi, dan sertifikat modul.'}
+	path={modulPath}
+	jsonLd={[
+		{
+			'@context': 'https://schema.org',
+			'@type': 'BreadcrumbList',
+			itemListElement: [
+				{ '@type': 'ListItem', position: 1, name: 'Beranda', item: canonicalPath('/') },
+				{ '@type': 'ListItem', position: 2, name: 'Semua Pelatihan', item: canonicalPath('/modules') },
+				{
+					'@type': 'ListItem',
+					position: 3,
+					name: course?.title ?? 'Pelatihan',
+					item: canonicalPath(`/modules/${page.params.courseId}`)
+				},
+				{
+					'@type': 'ListItem',
+					position: 4,
+					name: module ? `Modul ${moduleIndex + 1}: ${module.title}` : 'Modul',
+					item: canonicalPath(modulPath)
+				}
+			]
+		}
+	]}
+/>
 
 <header class="sticky top-0 z-50 bg-white shadow-sm">
 	<div class="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
@@ -97,7 +119,7 @@
 
 		<header class="mb-6 overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
 			<div class="relative flex min-h-48 flex-col justify-end overflow-hidden sm:min-h-56">
-				<img src={course.image} alt="" aria-hidden="true" class="absolute inset-0 h-full w-full object-cover" />
+				<img src={course.image} alt={`Sampul kursus ${course.title} — Modul ${moduleIndex + 1} ${module.title}`} class="absolute inset-0 h-full w-full object-cover" />
 				<div class="absolute inset-0 bg-gradient-to-t from-slate-900/85 via-slate-900/40 to-slate-900/10" aria-hidden="true"></div>
 				<div class="relative p-4 pt-14 sm:px-6 sm:pt-16">
 					<p class="flex flex-wrap items-center gap-2 text-[11px] font-bold tracking-widest text-blue-300 uppercase">

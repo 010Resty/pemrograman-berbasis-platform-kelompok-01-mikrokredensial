@@ -2,7 +2,7 @@
 	import { goto } from '$app/navigation';
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
-	import { homeFor, registerWithBackend, type Role } from '$lib/stores/auth.svelte';
+	import { registerWithBackend, type Role } from '$lib/stores/auth.svelte';
 
 	let showPassword = $state(false);
 	let showConfirmPassword = $state(false);
@@ -82,12 +82,14 @@
 		}
 		isLoading = true;
 		try {
-			const result = await registerWithBackend(fullName, email, password, true);
+			// Langkah 1: minta kode OTP. Akun BELUM dibuat di langkah ini —
+			// akun permanen dibuat server hanya setelah kode diverifikasi.
+			const result = await registerWithBackend(fullName, email, password);
 			if (!result.ok) {
 				errorMessage = result.error;
 				return;
 			}
-			goto(homeFor(result.user.role));
+			goto(`/verify-email?email=${encodeURIComponent(result.email)}`);
 		} finally {
 			isLoading = false;
 		}
@@ -462,6 +464,11 @@
 							<i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
 						{/if}
 					</button>
+
+					<p class="mt-3 text-center text-[11px] leading-relaxed text-slate-500">
+						Kode verifikasi 6 digit dikirim ke email Anda. Akun dibuat setelah kode tersebut
+						diverifikasi.
+					</p>
 
 				</form>
 

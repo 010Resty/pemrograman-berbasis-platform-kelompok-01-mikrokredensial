@@ -94,6 +94,7 @@ before(async () => {
     name: "Guru Uji",
     email: "guru@uji.io",
     passwordHash: hash,
+    emailVerifiedAt: new Date(),
     role: "teacher",
   });
   const teacherId = Number((tH as unknown as { insertId: number }).insertId);
@@ -103,6 +104,7 @@ before(async () => {
       name: `Siswa ${i + 1}`,
       email,
       passwordHash: hash,
+      emailVerifiedAt: new Date(),
       role: "student",
     });
     studentIds.push(Number((h as unknown as { insertId: number }).insertId));

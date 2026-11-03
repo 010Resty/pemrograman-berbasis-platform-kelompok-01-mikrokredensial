@@ -111,7 +111,7 @@ before(async () => {
 
   const hash = await bcrypt.hash(TEST_PASSWORD, 4);
   const mkUser = async (name: string, email: string, role: "admin" | "teacher" | "student") => {
-    const [h] = await db.insert(schema.users).values({ name, email, passwordHash: hash, role });
+    const [h] = await db.insert(schema.users).values({ name, email, passwordHash: hash, role, emailVerifiedAt: new Date() });
     return Number((h as unknown as { insertId: number }).insertId);
   };
   ids.admin = await mkUser("Admin Uji", "admin@uji.io", "admin");
@@ -269,7 +269,9 @@ describe("pengumpulan tugas", () => {
     assert.equal(foreign.http, 403);
     assert.equal(foreign.json.code, "FILE_FORBIDDEN");
 
-    const pdfKind = await uploadPdf(tokens.s1, "salah-kind.pdf", "pdf");
+    // Berkas kind pdf diunggah teacher (siswa ditolak 403 di /uploads);
+    // submit s1 tetap 400 INVALID_FILE_KIND (kind dicek sebelum pemilik).
+    const pdfKind = await uploadPdf(tokens.teacher, "salah-kind.pdf", "pdf");
     const wrongKind = await api(
       "POST",
       `/api/v1/materials/${ids.matTugas}/submissions`,
@@ -496,5 +498,101 @@ describe("proteksi berkas assignment", () => {
     assert.equal(await as(tokens.teacher2), 403);
     assert.equal(await as(tokens.s2), 403);
     assert.equal(await as(undefined), 403);
+  });
+});
+
+describe("GET /instructor/review-queue — agregat antrean", () => {
+  let queueMat = 0;
+
+  it("401 anonim; 403 siswa", async () => {
+    assert.equal((await api("GET", "/api/v1/instructor/review-queue")).http, 401);
+    assert.equal(
+      (await api("GET", "/api/v1/instructor/review-queue", tokens.s1)).http,
+      403
+    );
+  });
+
+  it("guru tanpa antrean menerima struktur kosong", async () => {
+    const { http, json } = await api<{
+      courses: unknown[];
+      pendingTotal: number;
+      gradedTotal: number;
+      avgScore: number | null;
+    }>("GET", "/api/v1/instructor/review-queue", tokens.teacher2);
+    assert.equal(http, 200);
+    assert.deepEqual(json.data.courses, []);
+    assert.deepEqual(
+      { p: json.data.pendingTotal, g: json.data.gradedTotal, a: json.data.avgScore },
+      { p: 0, g: 0, a: null }
+    );
+  });
+
+  it("agregat hitungan + rata-rata berbobot per tugas kelola", async () => {
+    const [h] = await db.insert(schema.materials).values({
+      moduleId: ids.modFree,
+      title: "Tugas Antrean Uji Cukup Panjang",
+      type: "tugas",
+      content: "{}",
+      position: 9,
+    });
+    queueMat = Number((h as unknown as { insertId: number }).insertId);
+    for (const [tok, name] of [
+      [tokens.s1, "antre-s1.pdf"],
+      [tokens.s2, "antre-s2.pdf"],
+    ] as const) {
+      const f = await uploadPdf(tok, name);
+      const sub = await api<{ id: number }>(
+        "POST",
+        `/api/v1/materials/${queueMat}/submissions`,
+        tok,
+        { fileId: f.id }
+      );
+      assert.equal(sub.http, 201);
+      if (tok === tokens.s1) {
+        const g = await api(
+          "POST",
+          `/api/v1/materials/${queueMat}/submissions/${sub.json.data.id}/grade`,
+          tokens.teacher,
+          { score: 80, decision: "passed" }
+        );
+        assert.equal(g.http, 200);
+      }
+    }
+    const { http, json } = await api<{
+      courses: Array<{
+        id: number;
+        title: string;
+        tasks: Array<{
+          materialId: number;
+          title: string;
+          moduleTitle: string;
+          moduleIndex: number;
+          pending: number;
+          graded: number;
+          total: number;
+          avgScore: number | null;
+        }>;
+        pending: number;
+        graded: number;
+        total: number;
+      }>;
+      pendingTotal: number;
+      gradedTotal: number;
+      avgScore: number | null;
+    }>("GET", "/api/v1/instructor/review-queue", tokens.teacher);
+    assert.equal(http, 200);
+    const course = json.data.courses.find((c) => c.id === ids.freePub);
+    assert.ok(course);
+    const task = course.tasks.find((t) => t.materialId === queueMat);
+    assert.ok(task);
+    assert.equal(task.title, "Tugas Antrean Uji Cukup Panjang");
+    assert.equal(task.moduleTitle, "Modul Tugas Uji Cukup Panjang");
+    assert.deepEqual(
+      { p: task.pending, g: task.graded, t: task.total, a: task.avgScore },
+      { p: 1, g: 1, t: 2, a: 80 }
+    );
+    assert.ok(course.pending >= 1 && course.total >= 2);
+    assert.ok(json.data.pendingTotal >= 1 && json.data.gradedTotal >= 1);
+    assert.equal(typeof json.data.avgScore, "number");
   });
 });

@@ -4,6 +4,7 @@ import {
   acceptHandler,
   createHandler,
   listHandler,
+  reissueHandler,
   revokeHandler,
   validateHandler,
 } from "./invitation.controller";
@@ -15,6 +16,7 @@ const admin = [authenticate, requireRole("admin")];
 router.post("/admin/invitations", ...admin, createHandler);
 router.get("/admin/invitations", ...admin, listHandler);
 router.post("/admin/invitations/:id/revoke", ...admin, revokeHandler);
+router.post("/admin/invitations/:id/reissue", ...admin, reissueHandler);
 
 // Alur aktivasi (publik).
 router.get("/invitations/validate", validateHandler);

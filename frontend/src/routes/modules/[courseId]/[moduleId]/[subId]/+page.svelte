@@ -6,6 +6,8 @@
 	import { getCourseById } from '$lib/data/courses';
 	import { adjacentSubs, locateSubModule, resolveSubModules } from '$lib/data/training';
 	import { locateModule, moduleCredentialId } from '$lib/data/certificates';
+	import SeoHead from '$lib/components/SeoHead.svelte';
+	import { canonicalPath } from '$lib/seo/site';
 
 	const courseId = $derived(Number(page.params.courseId));
 	const moduleId = $derived(page.params.moduleId);
@@ -32,21 +34,49 @@
 		if (t === 'tugas') return 'Tugas';
 		return 'Materi';
 	}
+
+	const subPath = $derived(
+		`/modules/${page.params.courseId}/${page.params.moduleId}/${page.params.subId}`
+	);
 </script>
 
-<svelte:head>
-	<title>
-		{course && module && sub
-			? `Sub-modul ${moduleIndex + 1}.${subIndex + 1}: ${sub.title} — ${course.title}`
-			: 'Sub-modul tidak ditemukan'} — Aristoteles Platform
-	</title>
-	<meta
-		name="description"
-		content={course && module && sub
-			? `Kumpulan materi Sub-modul ${moduleIndex + 1}.${subIndex + 1} ${sub.title}: ${sub.materials.length} materi, bagian dari Sertifikat Modul ${moduleIndex + 1} (${cred}).`
-			: 'Kumpulan materi sub-modul pelatihan.'}
-	/>
-</svelte:head>
+<SeoHead
+	title={course && module && sub
+		? `Sub-modul ${moduleIndex + 1}.${subIndex + 1}: ${sub.title} — ${course.title}`.slice(0, 60)
+		: 'Sub-modul tidak ditemukan — ARISTOTELES'}
+	description={course && module && sub
+		? `Kumpulan materi Sub-modul ${moduleIndex + 1}.${subIndex + 1} ${sub.title}: ${sub.materials.length} materi, bagian Sertifikat Modul ${moduleIndex + 1}. Masuk untuk belajar.`.slice(0, 160)
+		: 'Kumpulan materi sub-modul pelatihan ARISTOTELES.'}
+	path={subPath}
+	jsonLd={[
+		{
+			'@context': 'https://schema.org',
+			'@type': 'BreadcrumbList',
+			itemListElement: [
+				{ '@type': 'ListItem', position: 1, name: 'Beranda', item: canonicalPath('/') },
+				{ '@type': 'ListItem', position: 2, name: 'Semua Pelatihan', item: canonicalPath('/modules') },
+				{
+					'@type': 'ListItem',
+					position: 3,
+					name: course?.title ?? 'Pelatihan',
+					item: canonicalPath(`/modules/${page.params.courseId}`)
+				},
+				{
+					'@type': 'ListItem',
+					position: 4,
+					name: module ? `Modul ${moduleIndex + 1}: ${module.title}` : 'Modul',
+					item: canonicalPath(`/modules/${page.params.courseId}/${page.params.moduleId}`)
+				},
+				{
+					'@type': 'ListItem',
+					position: 5,
+					name: sub ? `Sub-modul ${moduleIndex + 1}.${subIndex + 1}: ${sub.title}` : 'Sub-modul',
+					item: canonicalPath(subPath)
+				}
+			]
+		}
+	]}
+/>
 
 <header class="sticky top-0 z-50 bg-white shadow-sm">
 	<div class="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">

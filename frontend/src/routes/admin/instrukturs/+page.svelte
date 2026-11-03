@@ -6,13 +6,11 @@
 	/**
 	 * Daftar instruktur dari backend (GET /api/v1/admin/users?role=teacher).
 	 * Pencarian, filter status, dan paginasi berjalan di server.
-	 * Kartu hanya memakai kolom kontrak backend (nama/email/status/bergabung):
-	 * keahlian, jumlah kursus/siswa, dan peringkat tidak ada endpointnya
+	 * Kartu memakai kolom kontrak backend (nama/email/keahlian/status/bergabung):
+	 * jumlah kursus/siswa dan peringkat tidak ada endpointnya
 	 * sehingga tidak ditampilkan (jangan mengarang).
 	 * Akun teacher baru hanya via undangan admin (K-01) — tombol di bawah
-	 * mengarah ke /admin/invitations. Tombol Ubah per baris dihapus:
-	 * belum ada kontrak API untuk ubah nama/email/keahlian
-	 * (PATCH /admin/users/:id hanya mendukung isActive).
+	 * mengarah ke /admin/invitations. Ubah per akun via halaman Profil.
 	 */
 
 	type Status = 'all' | 'Aktif' | 'Nonaktif';
@@ -190,6 +188,9 @@
 								<div class="min-w-0">
 									<h2 class="truncate text-sm font-bold text-slate-900">{u.name}</h2>
 									<p class="truncate text-xs text-slate-500">{u.email}</p>
+									{#if u.expertise}
+										<p class="mt-0.5 truncate text-[11px] font-semibold text-violet-600">{u.expertise}</p>
+									{/if}
 								</div>
 							</div>
 							<span class={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${statusClass(u.isActive)}`}>

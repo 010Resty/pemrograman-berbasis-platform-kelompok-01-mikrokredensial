@@ -8,7 +8,14 @@ export interface ServerQuizOption {
 	optionText: string;
 }
 
-export interface ServerQuizQuestion {
+export interface ServerQuizMedia {
+	imageUrl: string | null;
+	audioUrl: string | null;
+	fileUrl: string | null;
+	fileName: string | null;
+}
+
+export interface ServerQuizQuestion extends ServerQuizMedia {
 	id: number;
 	position: number;
 	questionText: string;
@@ -20,7 +27,7 @@ export interface ServerQuizOptionKeyed extends ServerQuizOption {
 	isCorrect: boolean;
 }
 
-export interface ServerQuizQuestionKeyed {
+export interface ServerQuizQuestionKeyed extends ServerQuizMedia {
 	id: number;
 	position: number;
 	questionText: string;
@@ -69,6 +76,10 @@ export interface QuizSetInput {
 	questions: Array<{
 		questionText: string;
 		explanation?: string | null;
+		imageUrl?: string;
+		audioUrl?: string;
+		fileUrl?: string;
+		fileName?: string;
 		position?: number;
 		options: Array<{ optionText: string; isCorrect: boolean; position?: number }>;
 	}>;

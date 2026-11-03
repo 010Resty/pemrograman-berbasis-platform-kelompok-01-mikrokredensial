@@ -105,8 +105,9 @@
 	let modulesLoading = $state<Record<number, boolean>>({});
 
 	let coursesPending: Promise<void> | null = null;
+	let coursesLoaded = $state(false);
 	async function loadCourses(): Promise<void> {
-		if (courses.length > 0 || coursesError) return;
+		if (coursesLoaded) return;
 		if (coursesPending) return coursesPending;
 		if (useMock) {
 			courses = [
@@ -122,6 +123,8 @@
 				if (courses.length === 0) coursesError = '';
 			} catch (e) {
 				coursesError = e instanceof Error ? e.message : 'Gagal memuat kursus.';
+			} finally {
+				coursesLoaded = true;
 			}
 		})();
 		coursesPending = task;
@@ -595,6 +598,7 @@
 						onclick={() => {
 							coursesError = '';
 							courses = [];
+							coursesLoaded = false;
 							void loadCourses();
 						}}
 						class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-red-600"
@@ -602,12 +606,41 @@
 						<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
 					</button>
 				</div>
-			{:else if courses.length === 0}
+			{:else if !coursesLoaded}
 				<div class="rounded-2xl border border-slate-200 bg-white p-8 text-center">
 					<p class="flex items-center justify-center gap-2 text-sm font-bold text-slate-700">
 						<i class="fa-solid fa-circle-notch fa-spin text-slate-400" aria-hidden="true"></i>
 						Memuat kursus…
 					</p>
+				</div>
+			{:else if courses.length === 0}
+				<div class="rounded-2xl border border-slate-200 bg-white p-8 text-center">
+					<p class="flex items-center justify-center gap-2 text-sm font-bold text-slate-700">
+						<i class="fa-solid fa-layer-group text-slate-400" aria-hidden="true"></i>
+						Belum ada kursus yang Anda kelola
+					</p>
+					<p class="mx-auto mt-1 max-w-md text-xs text-slate-500">
+						Belum ada data kursus. Pastikan Anda tercatat sebagai pengampu kursus, lalu buat
+						kursus pertama Anda.
+					</p>
+					<div class="mt-4 flex flex-col items-center justify-center gap-2 sm:flex-row">
+						<a
+							href="/instruktur/kursusku/tambah"
+							class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+						>
+							<i class="fa-solid fa-plus" aria-hidden="true"></i> Tambah kursus
+						</a>
+						<button
+							type="button"
+							onclick={() => {
+								coursesLoaded = false;
+								void loadCourses();
+							}}
+							class="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 px-5 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+						>
+							<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Muat ulang
+						</button>
+					</div>
 				</div>
 			{:else}
 				<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">

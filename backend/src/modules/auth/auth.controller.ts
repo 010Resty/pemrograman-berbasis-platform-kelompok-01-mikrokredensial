@@ -3,7 +3,14 @@ import { Request, Response, NextFunction } from "express";
 import { eq } from "drizzle-orm";
 import { db } from "../../db";
 import { users } from "../../db/schema";
-import { registerUser, loginUser } from "./auth.service";
+import {
+  loginUser,
+  registerUser,
+  requestPasswordReset,
+  resendVerification,
+  resetPassword,
+  verifyEmail,
+} from "./auth.service";
 
 export const register = async (
   req: Request,
@@ -15,7 +22,79 @@ export const register = async (
 
     res.status(201).json({
       status: "success",
-      message: "Registrasi berhasil",
+      message: "Kode verifikasi telah dikirim",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const verifyEmailHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await verifyEmail(req.body);
+
+    res.status(200).json({
+      status: "success",
+      message: "Email terverifikasi",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resendVerificationHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await resendVerification(req.body);
+
+    res.status(200).json({
+      status: "success",
+      message: "Kode verifikasi baru telah dikirim",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const forgotPasswordHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await requestPasswordReset(req.body);
+
+    res.status(200).json({
+      status: "success",
+      message: "Permintaan reset password diproses",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const resetPasswordHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await resetPassword(req.body);
+
+    res.status(200).json({
+      status: "success",
+      message: "Password berhasil diganti",
       data: result,
     });
   } catch (error) {

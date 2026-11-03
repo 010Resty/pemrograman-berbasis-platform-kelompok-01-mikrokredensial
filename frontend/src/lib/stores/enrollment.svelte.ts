@@ -1,13 +1,17 @@
 import { browser } from '$app/environment';
 import { SvelteSet } from 'svelte/reactivity';
 import { getCourseMeta } from '$lib/data/course-meta';
+import { fetchMyEnrollments, type MyEnrollment } from '$lib/api/progress';
 
 /**
- * Kepemilikan course berbayar (simulasi sisi klien).
+ * Kepemilikan course: server backend adalah sumber kebenaran
+ * (GET /me/enrollments, status active/completed), localStorage hanya
+ * cache offline agar gerbang materi tetap jalan saat backend tidak terjangkau.
+ * Sinkronkan via `syncEnrollmentsFromServer()` setelah login/masuk portal
+ * dan setiap ada pendaftaran baru (gratis/voucher/hibah).
  * Course GRATIS selalu terbuka; course berlabel harga terkunci
- * sampai user menyelesaikan pembayaran di /user/pembayaran/[courseId].
- * Course berbayar yang belum dibayar TIDAK tampil di Kursusku.
- * Daftar milik tersimpan di localStorage.
+ * sampai ada enrollment aktif di server (atau pembayaran simulasi lokal
+ * yang dicatat `purchaseCourse` — tanpa gateway, bukan akses resmi).
  */
 const KEY = 'aristoteles:owned-courses:v2';
 
@@ -75,6 +79,49 @@ export function canAccessCourse(courseId: number): boolean {
  */
 export function canOpenMaterials(courseId: number): boolean {
 	return canAccessCourse(courseId) && !isPeriodLocked(courseId);
+}
+
+/** Single-flight: pemanggilan bersamaan berbagi satu request. */
+let syncInFlight: Promise<number> | null = null;
+let lastSyncedAt = 0;
+
+/**
+ * Tarik enrollment aktif/completed milik sendiri dari server ke
+ * `ownedCourses` (gerbang materi). Tanpa token/sesi = 0 dan cache lokal
+ * dipertahankan (bukan sukses palsu). Terima daftar yang sudah diambil
+ * (mis. badge layout) agar tidak dobel request.
+ */
+export function syncEnrollmentsFromServer(prefetched?: MyEnrollment[]): Promise<number> {
+	if (syncInFlight) return syncInFlight;
+	syncInFlight = (async () => {
+		let list: MyEnrollment[];
+		try {
+			list = prefetched ?? (await fetchMyEnrollments());
+		} catch {
+			return 0;
+		}
+		let added = 0;
+		for (const e of list) {
+			if (
+				(e.status === 'active' || e.status === 'completed') &&
+				!ownedCourses.has(e.courseId)
+			) {
+				ownedCourses.add(e.courseId);
+				added++;
+			}
+		}
+		if (added > 0) persist();
+		lastSyncedAt = Date.now();
+		return added;
+	})().finally(() => {
+		syncInFlight = null;
+	});
+	return syncInFlight;
+}
+
+/** Waktu sinkronisasi terakhir (0 = belum pernah). */
+export function lastEnrollmentsSyncAt(): number {
+	return lastSyncedAt;
 }
 
 /** Simulasi pembayaran: langsung membuka akses + menyimpan bukti milik. */

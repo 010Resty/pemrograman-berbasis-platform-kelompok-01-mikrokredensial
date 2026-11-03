@@ -7,9 +7,11 @@
 		validateQuizDraft
 	} from '$lib/stores/quiz-drafts';
 	import type { QuizQuestion } from '$lib/data/material-details';
+	import { uploadFile } from '$lib/api/uploads';
 
 	/**
 	 * Pembuat kuis instruktur: susun soal pilihan ganda (4 opsi + kunci)
+	 * + lampiran per soal (foto/audio/PDF via backend, seperti editor materi)
 	 * + pengaturan nilai minimum kelulusan (0–100).
 	 * Murni permukaan sunting — penyimpanan ditangani halaman via `onupdate`.
 	 */
@@ -40,7 +42,11 @@
 						question: q.question,
 						options: [...q.options],
 						answer: q.answer,
-						explanation: q.explanation ?? ''
+						explanation: q.explanation ?? '',
+						imageUrl: q.imageUrl,
+						audioUrl: q.audioUrl,
+						fileUrl: q.fileUrl,
+						fileName: q.fileName
 					}))
 				: [blankQuizQuestion()];
 		loadedFor = draftKey;
@@ -59,7 +65,11 @@
 				question: q.question,
 				options: [...q.options],
 				answer: q.answer,
-				explanation: q.explanation ?? ''
+				explanation: q.explanation ?? '',
+				imageUrl: q.imageUrl,
+				audioUrl: q.audioUrl,
+				fileUrl: q.fileUrl,
+				fileName: q.fileName
 			})),
 			updatedAt: ''
 		};
@@ -87,6 +97,80 @@
 		questions = questions.map((q, x) =>
 			x === qi ? { ...q, options: q.options.map((o, y) => (y === oi ? v : o)) } : q
 		);
+	}
+
+	type MediaKind = 'image' | 'audio' | 'pdf';
+
+	const MEDIA_ACCEPT: Record<MediaKind, string> = {
+		image: 'image/jpeg,image/png,image/webp,image/gif',
+		audio: 'audio/mpeg,audio/ogg,audio/wav,audio/x-wav',
+		pdf: 'application/pdf'
+	};
+
+	/** Batas klien selaras backend (gambar 4MB, audio 8MB, PDF 8MB dari 10MB server). */
+	const MEDIA_MAX_BYTES: Record<MediaKind, number> = {
+		image: 4 * 1024 * 1024,
+		audio: 8 * 1024 * 1024,
+		pdf: 8 * 1024 * 1024
+	};
+
+	let mediaTarget = $state<{ qi: number; kind: MediaKind } | null>(null);
+	let mediaBusy = $state<number | null>(null);
+	let mediaError = $state('');
+	let imageInput: HTMLInputElement | null = $state(null);
+	let audioInput: HTMLInputElement | null = $state(null);
+	let pdfInput: HTMLInputElement | null = $state(null);
+
+	function setMedia(
+		qi: number,
+		patch: Partial<Pick<QuizQuestion, 'imageUrl' | 'audioUrl' | 'fileUrl' | 'fileName'>>
+	) {
+		questions = questions.map((q, x) => (x === qi ? { ...q, ...patch } : q));
+	}
+
+	function pickMedia(qi: number, kind: MediaKind) {
+		mediaError = '';
+		mediaTarget = { qi, kind };
+		(kind === 'image' ? imageInput : kind === 'audio' ? audioInput : pdfInput)?.click();
+	}
+
+	async function handleMediaFile(event: Event) {
+		const input = event.currentTarget as HTMLInputElement;
+		const file = input.files?.[0];
+		input.value = '';
+		const target = mediaTarget;
+		mediaTarget = null;
+		if (!file || !target || mediaBusy !== null) return;
+		const { qi, kind } = target;
+		const mime =
+			kind === 'audio' && file.type === 'audio/mp3' ? 'audio/mpeg' : file.type || undefined;
+		if (kind === 'pdf' && file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+			mediaError = `Soal ${qi + 1}: berkas harus berupa PDF.`;
+			return;
+		}
+		if (file.size > MEDIA_MAX_BYTES[kind]) {
+			mediaError = `Soal ${qi + 1}: ukuran maksimal ${MEDIA_MAX_BYTES[kind] / 1024 / 1024} MB (batas server).`;
+			return;
+		}
+		mediaBusy = qi;
+		mediaError = '';
+		try {
+			// Unggah dulu ke backend → simpan URL server (bukan dataURL).
+			const uploaded = await uploadFile(file, kind, mime);
+			if (kind === 'image') setMedia(qi, { imageUrl: uploaded.url });
+			else if (kind === 'audio') setMedia(qi, { audioUrl: uploaded.url });
+			else setMedia(qi, { fileUrl: uploaded.url, fileName: file.name.slice(0, 255) });
+		} catch (e) {
+			mediaError = `Soal ${qi + 1}: ${e instanceof Error ? e.message : 'gagal mengunggah berkas.'}`;
+		} finally {
+			mediaBusy = null;
+		}
+	}
+
+	function removeMedia(qi: number, kind: MediaKind) {
+		if (kind === 'image') setMedia(qi, { imageUrl: undefined });
+		else if (kind === 'audio') setMedia(qi, { audioUrl: undefined });
+		else setMedia(qi, { fileUrl: undefined, fileName: undefined });
 	}
 </script>
 
@@ -306,6 +390,90 @@
 							class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-600 placeholder:text-slate-400 focus:border-amber-500 focus:outline-none"
 						/>
 					</div>
+
+					<div class="rounded-xl border border-slate-200 bg-slate-50/60 p-3">
+						<p class="mb-2 text-xs font-bold text-slate-700">
+							Lampiran soal <span class="font-normal text-slate-400">(opsional — foto/audio/PDF)</span>
+						</p>
+						{#if mediaError && mediaBusy === null}
+							<p role="alert" class="mb-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-[11px] font-semibold text-red-700">
+								{mediaError}
+							</p>
+						{/if}
+						<div class="grid gap-2 sm:grid-cols-3">
+							<div class="rounded-lg border border-slate-200 bg-white p-2">
+								{#if q.imageUrl}
+									<img src={q.imageUrl} alt={`Lampiran foto soal ${qi + 1}`} class="mb-1.5 max-h-28 w-full rounded-lg object-cover" loading="lazy" />
+									<button
+										type="button"
+										onclick={() => removeMedia(qi, 'image')}
+										class="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] font-bold text-slate-500 hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500"
+									>
+										Hapus foto
+									</button>
+								{:else}
+									<button
+										type="button"
+										onclick={() => pickMedia(qi, 'image')}
+										disabled={mediaBusy !== null}
+										class="flex w-full flex-col items-center gap-1 rounded-lg border border-dashed border-slate-300 px-2 py-3 text-[11px] font-bold text-slate-500 hover:border-amber-400 hover:text-amber-700 focus-visible:outline-2 focus-visible:outline-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+									>
+										<i class="fa-solid fa-image" aria-hidden="true"></i> Tambah foto
+									</button>
+								{/if}
+							</div>
+							<div class="rounded-lg border border-slate-200 bg-white p-2">
+								{#if q.audioUrl}
+									<audio src={q.audioUrl} controls preload="none" class="mb-1.5 w-full" aria-label={`Lampiran audio soal ${qi + 1}`}></audio>
+									<button
+										type="button"
+										onclick={() => removeMedia(qi, 'audio')}
+										class="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] font-bold text-slate-500 hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500"
+									>
+										Hapus audio
+									</button>
+								{:else}
+									<button
+										type="button"
+										onclick={() => pickMedia(qi, 'audio')}
+										disabled={mediaBusy !== null}
+										class="flex w-full flex-col items-center gap-1 rounded-lg border border-dashed border-slate-300 px-2 py-3 text-[11px] font-bold text-slate-500 hover:border-amber-400 hover:text-amber-700 focus-visible:outline-2 focus-visible:outline-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+									>
+										<i class="fa-solid fa-microphone" aria-hidden="true"></i> Tambah audio
+									</button>
+								{/if}
+							</div>
+							<div class="rounded-lg border border-slate-200 bg-white p-2">
+								{#if q.fileUrl}
+									<p class="mb-1.5 truncate text-[11px] font-bold text-slate-700" title={q.fileName ?? q.fileUrl}>
+										<i class="fa-solid fa-file-pdf text-red-500" aria-hidden="true"></i>
+										{q.fileName ?? 'Lampiran PDF'}
+									</p>
+									<button
+										type="button"
+										onclick={() => removeMedia(qi, 'pdf')}
+										class="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-[11px] font-bold text-slate-500 hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500"
+									>
+										Hapus file
+									</button>
+								{:else}
+									<button
+										type="button"
+										onclick={() => pickMedia(qi, 'pdf')}
+										disabled={mediaBusy !== null}
+										class="flex w-full flex-col items-center gap-1 rounded-lg border border-dashed border-slate-300 px-2 py-3 text-[11px] font-bold text-slate-500 hover:border-amber-400 hover:text-amber-700 focus-visible:outline-2 focus-visible:outline-amber-600 disabled:cursor-not-allowed disabled:opacity-60"
+									>
+										<i class="fa-solid fa-file-arrow-up" aria-hidden="true"></i> Tambah PDF
+									</button>
+								{/if}
+							</div>
+						</div>
+						{#if mediaBusy === qi}
+							<p role="status" class="mt-2 text-[11px] font-bold text-amber-700">
+								<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Mengunggah…
+							</p>
+						{/if}
+					</div>
 				</div>
 			</li>
 		{/each}
@@ -319,4 +487,31 @@
 		<i class="fa-solid fa-plus" aria-hidden="true"></i>
 		Tambah Soal {questions.length + 1}
 	</button>
+	<input
+		type="file"
+		accept={MEDIA_ACCEPT.image}
+		bind:this={imageInput}
+		onchange={handleMediaFile}
+		class="sr-only"
+		tabindex={-1}
+		aria-hidden="true"
+	/>
+	<input
+		type="file"
+		accept={MEDIA_ACCEPT.audio}
+		bind:this={audioInput}
+		onchange={handleMediaFile}
+		class="sr-only"
+		tabindex={-1}
+		aria-hidden="true"
+	/>
+	<input
+		type="file"
+		accept={MEDIA_ACCEPT.pdf}
+		bind:this={pdfInput}
+		onchange={handleMediaFile}
+		class="sr-only"
+		tabindex={-1}
+		aria-hidden="true"
+	/>
 </div>

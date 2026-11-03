@@ -17,6 +17,7 @@ export interface AdminUser {
 	id: number;
 	name: string;
 	email: string;
+	expertise: string | null;
 	role: string;
 	isActive: boolean;
 	createdAt: string;
@@ -149,4 +150,16 @@ export function fetchAdminUser(id: number): Promise<AdminUserDetail> {
 /** Aktif/nonaktif akun (PATCH /api/v1/admin/users/:id {isActive}). */
 export async function setAdminUserActive(id: number, isActive: boolean): Promise<void> {
 	await req<unknown>(`/admin/users/${id}`, { method: 'PATCH', body: { isActive } });
+}
+
+/**
+ * Ubah akun (PATCH /api/v1/admin/users/:id {name?, email?, expertise?, isActive?}).
+ * Min. 1 field; string kosong pada expertise = hapus. Email duplikat → 409;
+ * ubah status diri sendiri → 400.
+ */
+export function updateAdminUser(
+	id: number,
+	input: { name?: string; email?: string; expertise?: string; isActive?: boolean }
+): Promise<AdminUser> {
+	return req<AdminUser>(`/admin/users/${id}`, { method: 'PATCH', body: input });
 }

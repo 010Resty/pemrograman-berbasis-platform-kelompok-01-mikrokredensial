@@ -1,9 +1,9 @@
 import type { ApiResult, AssignmentSubmission, UploadMeta } from '$lib/types/submission';
+import { getAccessToken } from '$lib/stores/auth.svelte';
 
 /**
- * Client pengumpulan tugas PDF.
- * Target utama: endpoint same-origin SvelteKit `/api/assignments/upload`
- * (proxy ke backend Express bila tersedia, mock-Drive bila tidak).
+ * Client pengumpulan tugas PDF via proksi same-origin `/api/assignments/upload`
+ * (upload base64 → backend Express → catat submission; tanpa mock).
  */
 
 function buildForm(file: File, meta: UploadMeta): FormData {
@@ -28,6 +28,8 @@ export function uploadAssignmentPdf(
 		const xhr = new XMLHttpRequest();
 		xhr.open('POST', '/api/assignments/upload');
 		xhr.responseType = 'json';
+		const token = getAccessToken();
+		if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
 		xhr.upload.onprogress = (e) => {
 			if (e.lengthComputable) onProgress?.(Math.round((e.loaded / e.total) * 100));
@@ -52,9 +54,35 @@ export function uploadAssignmentPdf(
 
 export async function fetchSubmissions(materialId?: string): Promise<AssignmentSubmission[]> {
 	const q = materialId ? `?materialId=${encodeURIComponent(materialId)}` : '';
-	const res = await fetch(`/api/assignments/upload${q}`, { headers: { accept: 'application/json' } });
+	const token = getAccessToken();
+	const res = await fetch(`/api/assignments/upload${q}`, {
+		headers: {
+			accept: 'application/json',
+			...(token ? { authorization: `Bearer ${token}` } : {})
+		}
+	});
 	if (!res.ok) throw new Error(`Gagal memuat riwayat (${res.status}).`);
 	const json = (await res.json()) as ApiResult<AssignmentSubmission[]>;
 	if (!json.status) throw new Error(json.message);
 	return json.data;
+}
+
+/**
+ * Unduh berkas submission milik sendiri sebagai Blob (GET /api/v1/files/:id/content
+ * mewajibkan token; tautan <a> biasa tidak membawa Authorization sehingga 403).
+ * Pemanggil membuat object URL dan mencabutnya setelah dipakai.
+ */
+export async function downloadSubmissionFile(url: string): Promise<Blob> {
+	const token = getAccessToken();
+	const res = await fetch(url, {
+		headers: token ? { authorization: `Bearer ${token}` } : {}
+	});
+	if (!res.ok) {
+		throw new Error(
+			res.status === 403
+				? 'Akses berkas ditolak (bukan pemilik/pengampu).'
+				: `Gagal mengunduh berkas (HTTP ${res.status}).`
+		);
+	}
+	return res.blob();
 }

@@ -11,7 +11,7 @@
 ## K-01 Undangan instruktur [Keputusan pengguna]
 
 - Hanya admin dapat membuat/mengundang instruktur fase awal. Tanpa pendaftaran bebas.
-- Detail undangan, aktivasi, pengaturan password [Belum diputuskan].
+- Alur [Keputusan pengguna 2026-11-02]: admin buat undangan (email+nama) → token 1x pakai kedaluwarsa 7 hari → pendaftar atur password sendiri → akun aktif; klik link = aktivasi, tanpa OTP.
 - Gap [Terverifikasi]: `register/+page.svelte` masih izinkan peran `teacher` bebas → belum sesuai, jangan tandai selesai.
 
 ## K-02 Kuis [Keputusan pengguna]
@@ -38,16 +38,16 @@
 ## K-06 Tugas [Keputusan pengguna]
 
 - Kumpul ulang tanpa batas sampai lulus. Belum lulus = belum penuhi sertifikat. Nilai pakai rubrik. Simpan riwayat berkas+waktu+nilai+feedback+status di backend.
-- Rubrik seragam atau beda per tugas [Belum diputuskan].
+- Rubrik seragam nasional [Keputusan pengguna 2026-11-02]: 3 kriteria tetap (Kelengkapan, Ketepatan isi, Kerapian), bobot sama, rata-rata = nilai.
 - Perilaku [Terverifikasi]: `AssignmentMaterial.svelte` izinkan `revising` tanpa batas — sebagian sesuai.
 
 ## K-07 Modul independen [Keputusan pengguna]
 
-- Setelah punya akses kursus, bisa mulai modul mana saja. Tiap modul sertifikat sendiri. Kunci berurutan hanya untuk sub/materi sekuensial.
+- Setelah punya akses kursus, bisa mulai modul mana saja. Tiap modul sertifikat sendiri. Kunci sekuensial hanya dalam sub-modul yang sama [Keputusan pengguna 2026-11-02: aturan tunggal, tanpa daftar manual].
 - Gap [Terverifikasi]: `isModuleLocked` di `courses.ts` masih kunci antar-modul → bertentangan, perlu ubah frontend + backend.
 
 ## K-08 Perubahan materi [Keputusan pengguna]
 
-- Tidak hapus progres otomatis. Ulang sengaja untuk materi terdampak saja bila perubahan penting. Catat perubahan + terdampak + alasan + status.
-- Definisi penting + kewenangan [Belum diputuskan].
+- Tidak hapus progres otomatis. Ulang hanya materi terdampak bila perubahan penting. Catat perubahan + terdampak + alasan + status.
+- Penting [Keputusan pengguna 2026-11-02] = ubah isi kuis/tugas/ambang lulus atau hapus materi; ringan = typo/format/sampul/judul. Diputus instruktur pemilik kursus.
 - Gap [Terverifikasi]: `curriculum.ts` tanpa versi/log.

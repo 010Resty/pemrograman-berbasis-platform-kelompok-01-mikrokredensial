@@ -1,20 +1,28 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 	import {
-		cancelVoucher,
-		createVoucher,
-		generateCode,
-		listVouchers,
-		type VoucherKind,
-		type VoucherStatus,
-		type VoucherView
-	} from '$lib/stores/vouchers';
-	import { courses } from '$lib/data/courses';
+		createBackendVoucher,
+		disableVoucher,
+		enableVoucher,
+		fetchVoucherDetail,
+		fetchVouchers,
+		type BackendVoucher,
+		type BackendVoucherKind,
+		type VoucherDetail
+	} from '$lib/api/vouchers';
+	import { fetchAdminCourses } from '$lib/api/admin';
+	import type { BackendCourse } from '$lib/api/courses';
 
-	type KindFilter = 'all' | VoucherKind;
-	type StatusFilter = 'all' | VoucherStatus;
+	/**
+	 * Manajemen voucher — data backend asli (K-03: resmi, admin-only,
+	 * 1 voucher = 1 kursus, personal 1 akun 1x pakai, anti-race server).
+	 * Status tampil: Aktif = available/assigned; Habis digunakan = redeemed;
+	 * Kedaluarsa = expired (atau lewat tanggal); Dibatalkan = revoked.
+	 */
+
+	type KindFilter = 'all' | 'Personal' | 'Umum';
+	type StatusFilter = 'all' | 'Aktif' | 'Habis digunakan' | 'Kedaluarsa' | 'Dibatalkan';
 
 	let query = $state('');
 	let kindFilter = $state<KindFilter>('all');
@@ -22,54 +30,73 @@
 	let statusFilter = $state<StatusFilter>('all');
 	let page = $state(1);
 	let perPage = $state(5);
-	let version = $state(0);
+
+	let items = $state<BackendVoucher[]>([]);
+	let serverTotal = $state(0);
+	let courses = $state<BackendCourse[]>([]);
+	let isLoading = $state(true);
+	let loadError = $state('');
+	let notice = $state('');
 
 	/* --- Formulir tambah --- */
 	let showAdd = $state(false);
-	let formKind = $state<VoucherKind>('Personal');
+	let formKind = $state<'Personal' | 'Umum'>('Personal');
 	let formCourseId = $state('');
+	let formAssignee = $state('');
+	let formCode = $state('');
 	let formMaxUses = $state('10');
 	let useExpiry = $state(false);
 	let formExpiry = $state('');
-	let previewCode = $state('');
 	let formError = $state('');
 	let isSubmitting = $state(false);
 	let addBtn: HTMLButtonElement | null = $state(null);
 	let firstField: HTMLInputElement | null = $state(null);
 	let modalOpened = false;
 
-	/* --- Detail & pembatalan --- */
-	let selectedId = $state<string | null>(null);
+	/* --- Detail & aksi --- */
+	let detail = $state<VoucherDetail | null>(null);
+	let detailLoading = $state(false);
 	let showDetail = $state(false);
-	let pendingCancel = $state<VoucherView | null>(null);
+	let pendingCancel = $state<BackendVoucher | null>(null);
 	let showCancel = $state(false);
+	let actionBusy = $state<string | null>(null);
 	let copiedId = $state<string | null>(null);
-	let notice = $state('');
 
-	const vouchers = $derived.by<VoucherView[]>(() => {
-		void version;
-		if (!browser) return [];
-		return listVouchers();
-	});
+	function uiStatus(v: BackendVoucher): StatusFilter {
+		if (v.status === 'revoked') return 'Dibatalkan';
+		if (v.status === 'redeemed') return 'Habis digunakan';
+		if (v.status === 'expired') return 'Kedaluarsa';
+		try {
+			if (v.expiresAt && new Date(v.expiresAt).getTime() <= Date.now()) return 'Kedaluarsa';
+		} catch {
+			/* abaikan tanggal rusak */
+		}
+		return 'Aktif';
+	}
 
-	const stats = $derived({
-		total: vouchers.length,
-		aktif: vouchers.filter((v) => v.status === 'Aktif').length,
-		habis: vouchers.filter((v) => v.status === 'Habis digunakan').length,
-		kedaluarsa: vouchers.filter((v) => v.status === 'Kedaluarsa').length,
-		batal: vouchers.filter((v) => v.status === 'Dibatalkan').length
-	});
+	function kindLabel(v: BackendVoucher): 'Personal' | 'Umum' {
+		return v.kind === 'personal' ? 'Personal' : 'Umum';
+	}
 
 	const filtered = $derived(
-		vouchers.filter((v) => {
-			const mKind = kindFilter === 'all' || v.kind === kindFilter;
-			const mCourse = courseFilter === 'all' || String(v.courseId) === courseFilter;
-			const mStatus = statusFilter === 'all' || v.status === statusFilter;
+		items.filter((v) => {
+			const mStatus = statusFilter === 'all' || uiStatus(v) === statusFilter;
 			const q = query.trim().toLowerCase();
-			const mQuery = !q || v.code.toLowerCase().includes(q);
-			return mKind && mCourse && mStatus && mQuery;
+			const mQuery =
+				!q ||
+				v.code.toLowerCase().includes(q) ||
+				(v.courseTitle ?? '').toLowerCase().includes(q);
+			return mStatus && mQuery;
 		})
 	);
+
+	const stats = $derived({
+		total: serverTotal,
+		aktif: items.filter((v) => uiStatus(v) === 'Aktif').length,
+		habis: items.filter((v) => uiStatus(v) === 'Habis digunakan').length,
+		kedaluarsa: items.filter((v) => uiStatus(v) === 'Kedaluarsa').length,
+		batal: items.filter((v) => uiStatus(v) === 'Dibatalkan').length
+	});
 
 	/* Kembali ke halaman 1 setiap filter/pencarian/jumlah baris/data berubah. */
 	$effect(() => {
@@ -78,22 +105,21 @@
 		void courseFilter;
 		void statusFilter;
 		void perPage;
-		void version;
+		void items;
 		page = 1;
 	});
 
 	const paged = $derived(filtered.slice((page - 1) * perPage, page * perPage));
 
-	const selected = $derived(vouchers.find((v) => v.id === selectedId) ?? null);
-
-	function statusClass(s: VoucherStatus): string {
+	function statusClass(s: StatusFilter): string {
 		if (s === 'Aktif') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
 		if (s === 'Habis digunakan') return 'border-slate-200 bg-slate-100 text-slate-600';
 		if (s === 'Kedaluarsa') return 'border-amber-200 bg-amber-50 text-amber-700';
 		return 'border-red-200 bg-red-50 text-red-700';
 	}
 
-	function formatDate(iso: string): string {
+	function formatDate(iso: string | null): string {
+		if (!iso) return '-';
 		try {
 			return new Date(iso).toLocaleDateString('id-ID', {
 				day: 'numeric',
@@ -127,16 +153,50 @@
 		return `${d.getFullYear()}-${m}-${day}`;
 	}
 
+	function messageOf(e: unknown, fallback: string): string {
+		return e instanceof Error && e.message ? e.message : fallback;
+	}
+
+	async function load(): Promise<void> {
+		isLoading = true;
+		loadError = '';
+		try {
+			const [vouchers, courseList] = await Promise.all([
+				fetchVouchers({
+					kind: kindFilter === 'all' ? undefined : (kindFilter.toLowerCase() as BackendVoucherKind),
+					courseId: courseFilter === 'all' ? undefined : Number(courseFilter),
+					limit: 100
+				}),
+				courses.length === 0 ? fetchAdminCourses(100) : Promise.resolve(courses)
+			]);
+			items = vouchers.items;
+			serverTotal = vouchers.total;
+			courses = courseList;
+		} catch (e) {
+			loadError = messageOf(e, 'Gagal memuat voucher dari backend.');
+		} finally {
+			isLoading = false;
+		}
+	}
+
+	/* Muat awal + muat ulang tiap filter server berubah. */
+	$effect(() => {
+		void kindFilter;
+		void courseFilter;
+		void load();
+	});
+
 	function openAdd() {
 		formKind = 'Personal';
 		formCourseId = '';
+		formAssignee = '';
+		formCode = '';
 		formMaxUses = '10';
 		useExpiry = false;
 		formExpiry = '';
 		formError = '';
 		isSubmitting = false;
 		notice = '';
-		previewCode = generateCode(new Set(vouchers.map((v) => v.code)));
 		showAdd = true;
 	}
 
@@ -144,10 +204,6 @@
 		showAdd = false;
 		formError = '';
 		isSubmitting = false;
-	}
-
-	function regenerateCode() {
-		previewCode = generateCode(new Set(vouchers.map((v) => v.code)));
 	}
 
 	$effect(() => {
@@ -159,20 +215,33 @@
 		}
 	});
 
-	function submitAdd(event: Event) {
+	async function submitAdd(event: Event) {
 		event.preventDefault();
 		if (isSubmitting) return;
 		formError = '';
 
-		const course = courses.find((c) => String(c.id) === formCourseId);
-		if (!course) {
+		const courseId = Number(formCourseId);
+		if (!Number.isInteger(courseId) || courseId <= 0) {
 			formError = 'Pilih kursus tujuan. Satu voucher hanya berlaku untuk satu kursus.';
 			return;
 		}
 
+		const kind: BackendVoucherKind = formKind === 'Personal' ? 'personal' : 'umum';
+		let assignedEmail: string | undefined;
+		if (kind === 'personal') {
+			assignedEmail = formAssignee.trim().toLowerCase();
+			if (!assignedEmail) {
+				formError = 'Voucher Personal wajib menentukan email penerima terdaftar.';
+				return;
+			}
+			if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assignedEmail)) {
+				formError = 'Format email penerima tidak valid.';
+				return;
+			}
+		}
+
 		let maxUses = 1;
-		if (formKind === 'Umum') {
-			/* bind:value input number bisags non-string saat kosong — normalisasi dulu. */
+		if (kind === 'umum') {
 			const raw = String(formMaxUses ?? '').trim();
 			if (!/^\d+$/.test(raw)) {
 				formError = 'Batas penggunaan harus bilangan bulat positif tanpa desimal (contoh: 20).';
@@ -185,7 +254,7 @@
 			}
 		}
 
-		let expiresAt: string | null = null;
+		let expiresAt: string | undefined;
 		if (useExpiry) {
 			if (!formExpiry) {
 				formError = 'Tanggal kedaluwarsa wajib diisi karena masa berlaku diaktifkan.';
@@ -207,27 +276,52 @@
 			expiresAt = new Date(`${formExpiry}T23:59:59`).toISOString();
 		}
 
+		let code: string | undefined;
+		if (formCode.trim()) {
+			code = formCode.trim().toUpperCase().replace(/\s+/g, '');
+			if (!/^[A-Z0-9-]{4,32}$/.test(code)) {
+				formError = 'Kode khusus 4–32 karakter (huruf, angka, tanda -). Kosongkan untuk otomatis.';
+				return;
+			}
+		}
+
 		isSubmitting = true;
-		const created = createVoucher({
-			kind: formKind,
-			courseId: course.id,
-			courseTitle: course.title,
-			maxUses,
-			expiresAt
-		});
-		version++;
-		closeAdd();
-		notice = `Voucher ${created.code} untuk kursus “${created.courseTitle}” dicatat secara lokal (demo). Keunikan global dan pemberian akses membutuhkan backend.`;
+		try {
+			const created = await createBackendVoucher({
+				code,
+				courseId,
+				kind,
+				maxUses,
+				assignedEmail,
+				expiresAt
+			});
+			closeAdd();
+			notice = `Voucher ${created.code} dibuat (status ${created.status}). Keunikan global dan anti-race dijamin backend.`;
+			await load();
+		} catch (e) {
+			formError = messageOf(e, 'Gagal membuat voucher. Coba lagi nanti.');
+		} finally {
+			isSubmitting = false;
+		}
 	}
 
-	function openDetail(v: VoucherView) {
-		selectedId = v.id;
+	async function openDetail(v: BackendVoucher) {
 		showDetail = true;
+		detailLoading = true;
+		detail = null;
+		try {
+			detail = await fetchVoucherDetail(v.code);
+		} catch (e) {
+			notice = messageOf(e, 'Gagal memuat detail voucher.');
+			showDetail = false;
+		} finally {
+			detailLoading = false;
+		}
 	}
 
 	function closeDetail() {
 		showDetail = false;
-		selectedId = null;
+		detail = null;
 	}
 
 	async function copyText(text: string, id: string) {
@@ -243,36 +337,62 @@
 		}
 	}
 
-	function copyCode(v: VoucherView) {
-		void copyText(v.code, v.id);
+	function copyCode(code: string) {
+		void copyText(code, code);
 	}
 
-	function copyInfo(v: VoucherView) {
+	function copyInfo(v: BackendVoucher) {
 		const lines = [
 			`Kode voucher: ${v.code}`,
-			`Jenis: ${v.kind}`,
-			`Kursus: ${v.courseTitle}`,
-			`Dibuat: ${formatDate(v.createdAt)}`,
+			`Jenis: ${kindLabel(v)}`,
+			`Kursus: ${v.courseTitle ?? '-'}`,
 			`Berlaku sampai: ${v.expiresAt ? formatDate(v.expiresAt) : 'Tanpa batas waktu'}`,
 			`Penggunaan: ${v.usedCount}/${v.maxUses}`,
-			`Status: ${v.status}`
+			`Status: ${uiStatus(v)}`
 		].join('\n');
-		void copyText(lines, `info-${v.id}`);
+		void copyText(lines, `info-${v.code}`);
 	}
 
-	function askCancel(v: VoucherView) {
+	function askCancel(v: BackendVoucher) {
 		pendingCancel = v;
 		showCancel = true;
 	}
 
-	function confirmCancel() {
-		if (pendingCancel) {
-			cancelVoucher(pendingCancel.id);
-			version++;
-			notice = `Voucher ${pendingCancel.code} dibatalkan (data lokal). Riwayat penukaran tetap tersimpan di detail.`;
+	async function confirmCancel() {
+		if (!pendingCancel || actionBusy) {
+			pendingCancel = null;
+			showCancel = false;
+			return;
 		}
+		const target = pendingCancel;
 		pendingCancel = null;
 		showCancel = false;
+		actionBusy = target.code;
+		try {
+			await disableVoucher(target.code);
+			notice = `Voucher ${target.code} dinonaktifkan. Riwayat penukaran tetap tersimpan di detail.`;
+			if (detail?.code === target.code) await openDetail(target);
+			await load();
+		} catch (e) {
+			notice = messageOf(e, 'Gagal menonaktifkan voucher.');
+		} finally {
+			actionBusy = null;
+		}
+	}
+
+	async function handleEnable(v: BackendVoucher) {
+		if (actionBusy) return;
+		actionBusy = v.code;
+		try {
+			await enableVoucher(v.code);
+			notice = `Voucher ${v.code} diaktifkan kembali.`;
+			if (detail?.code === v.code) await openDetail(v);
+			await load();
+		} catch (e) {
+			notice = messageOf(e, 'Gagal mengaktifkan voucher.');
+		} finally {
+			actionBusy = null;
+		}
 	}
 </script>
 
@@ -280,7 +400,7 @@
 	<title>Manajemen Voucher — Admin Aristoteles</title>
 	<meta
 		name="description"
-		content="Buat dan kelola voucher kursus gratis Aristoteles (simulasi lokal, menunggu backend)."
+		content="Buat dan kelola voucher kursus resmi Aristoteles (K-03, tersimpan di backend)."
 	/>
 </svelte:head>
 
@@ -292,8 +412,8 @@
 				Manajemen Voucher
 			</h1>
 			<p class="mt-1 text-sm text-slate-500">
-				{filtered.length} dari {vouchers.length} voucher ditampilkan · data lokal browser (demo),
-				bukan voucher resmi.
+				{filtered.length} ditampilkan · total {serverTotal} voucher resmi di backend
+				(K-03: 1 voucher = 1 kursus, anti-race server).
 			</p>
 		</div>
 		<button
@@ -307,15 +427,14 @@
 	</div>
 
 	<div
-		class="mb-6 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-relaxed text-amber-800"
+		class="mb-6 flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900"
 		role="note"
 	>
-		<i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
+		<i class="fa-solid fa-circle-info mt-0.5 shrink-0" aria-hidden="true"></i>
 		<p>
-			<strong>Simulasi lokal:</strong> voucher di halaman ini hanya tersimpan di browser dan memakai
-			kode demo (<span class="font-mono">ARISTO-…</span>), bukan token keamanan. Keunikan kode
-			global, validasi peserta, batas atomik anti-race, dan pemberian akses kursus membutuhkan
-			backend dan belum tersedia.
+			<strong>Voucher resmi:</strong> tersimpan di backend dengan keunikan kode global,
+			validasi peserta, dan batas atomik anti-race. Voucher Personal terikat satu akun
+			terdaftar dan hanya 1x pakai.
 		</p>
 	</div>
 
@@ -373,7 +492,7 @@
 					id="voucher-search"
 					type="search"
 					bind:value={query}
-					placeholder="Cari kode voucher..."
+					placeholder="Cari kode atau kursus..."
 					class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-4 pl-10 font-mono text-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 focus:outline-none"
 				/>
 			</div>
@@ -429,107 +548,140 @@
 
 	<div class="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm">
 		<div class="h-1 bg-gradient-to-r from-orange-600 via-amber-500 to-orange-600" aria-hidden="true"></div>
-		<div class="overflow-x-auto">
-			<table class="w-full min-w-[900px] text-sm">
-				<caption class="sr-only">Daftar voucher kursus gratis (data lokal)</caption>
-				<thead class="bg-orange-700 text-white">
-					<tr class="[&_th]:py-3.5 [&_th]:align-middle">
-						<th scope="col" class="px-6 text-left text-xs font-bold tracking-wider uppercase">Kode</th>
-						<th scope="col" class="px-6 text-left text-xs font-bold tracking-wider uppercase">Jenis</th>
-						<th scope="col" class="px-6 text-left text-xs font-bold tracking-wider uppercase">Kursus</th>
-						<th scope="col" class="px-6 text-center text-xs font-bold tracking-wider uppercase">Penggunaan</th>
-						<th scope="col" class="px-6 text-left text-xs font-bold tracking-wider uppercase">Dibuat</th>
-						<th scope="col" class="px-6 text-left text-xs font-bold tracking-wider uppercase">Berlaku s.d.</th>
-						<th scope="col" class="px-6 text-center text-xs font-bold tracking-wider uppercase">Status</th>
-						<th scope="col" class="px-6 text-right text-xs font-bold tracking-wider uppercase">Aksi</th>
-					</tr>
-				</thead>
-				<tbody class="divide-y divide-slate-100">
-					{#each paged as v, i (v.id)}
-						<tr class={`transition-colors hover:bg-orange-50/50 ${i % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'}`}>
-							<td class="px-6 py-3.5">
-								<span class="font-mono text-[13px] font-bold text-slate-900">{v.code}</span>
-							</td>
-							<td class="px-6 py-3.5">
-								<span class={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${v.kind === 'Personal' ? 'bg-orange-100 text-orange-700' : 'bg-sky-100 text-sky-700'}`}>
-									{v.kind}
-								</span>
-							</td>
-							<td class="px-6 py-3.5">
-								<span class="block max-w-56 truncate font-semibold text-slate-900">{v.courseTitle}</span>
-							</td>
-							<td class="px-6 py-3.5">
-								<div class="flex min-w-28 flex-col items-center gap-1">
-									<span class="text-xs font-extrabold text-slate-800 tabular-nums">{v.usedCount}/{v.maxUses}</span>
-									<div
-										class="h-1.5 w-full overflow-hidden rounded-full bg-slate-100"
-										role="progressbar"
-										aria-valuenow={v.usedCount}
-										aria-valuemin={0}
-										aria-valuemax={v.maxUses}
-										aria-label={`Penggunaan voucher ${v.code}`}
-									>
+		{#if isLoading}
+			<p role="status" class="p-8 text-center text-sm text-slate-500">
+				<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
+				Memuat voucher dari backend…
+			</p>
+		{:else if loadError}
+			<div class="p-8 text-center">
+				<p role="alert" class="text-sm font-semibold text-red-600">{loadError}</p>
+				<button
+					type="button"
+					onclick={() => void load()}
+					class="mt-3 rounded-xl bg-orange-600 px-5 py-2 text-xs font-bold text-white hover:bg-orange-700 focus-visible:outline-2 focus-visible:outline-orange-600"
+				>
+					Coba lagi
+				</button>
+			</div>
+		{:else}
+			<div class="overflow-x-auto">
+				<table class="w-full min-w-[900px] text-sm">
+					<caption class="sr-only">Daftar voucher kursus resmi</caption>
+					<thead class="bg-orange-700 text-white">
+						<tr class="[&_th]:py-3.5 [&_th]:align-middle">
+							<th scope="col" class="px-6 text-left text-xs font-bold tracking-wider uppercase">Kode</th>
+							<th scope="col" class="px-6 text-left text-xs font-bold tracking-wider uppercase">Jenis</th>
+							<th scope="col" class="px-6 text-left text-xs font-bold tracking-wider uppercase">Kursus</th>
+							<th scope="col" class="px-6 text-center text-xs font-bold tracking-wider uppercase">Penggunaan</th>
+							<th scope="col" class="px-6 text-left text-xs font-bold tracking-wider uppercase">Penerima</th>
+							<th scope="col" class="px-6 text-left text-xs font-bold tracking-wider uppercase">Berlaku s.d.</th>
+							<th scope="col" class="px-6 text-center text-xs font-bold tracking-wider uppercase">Status</th>
+							<th scope="col" class="px-6 text-right text-xs font-bold tracking-wider uppercase">Aksi</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-100">
+						{#each paged as v (v.code)}
+							{@const st = uiStatus(v)}
+							<tr class="bg-white transition-colors hover:bg-orange-50/50">
+								<td class="px-6 py-3.5">
+									<span class="font-mono text-[13px] font-bold text-slate-900">{v.code}</span>
+								</td>
+								<td class="px-6 py-3.5">
+									<span class={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${kindLabel(v) === 'Personal' ? 'bg-orange-100 text-orange-700' : 'bg-sky-100 text-sky-700'}`}>
+										{kindLabel(v)}
+									</span>
+								</td>
+								<td class="px-6 py-3.5">
+									<span class="block max-w-56 truncate font-semibold text-slate-900">{v.courseTitle ?? '-'}</span>
+								</td>
+								<td class="px-6 py-3.5">
+									<div class="flex min-w-28 flex-col items-center gap-1">
+										<span class="text-xs font-extrabold text-slate-800 tabular-nums">{v.usedCount}/{v.maxUses}</span>
 										<div
-											class={`h-full rounded-full ${v.usedCount >= v.maxUses ? 'bg-slate-400' : 'bg-orange-500'}`}
-											style="width: {v.maxUses > 0 ? Math.min(100, Math.round((v.usedCount / v.maxUses) * 100)) : 0}%"
-										></div>
+											class="h-1.5 w-full overflow-hidden rounded-full bg-slate-100"
+											role="progressbar"
+											aria-valuenow={v.usedCount}
+											aria-valuemin={0}
+											aria-valuemax={v.maxUses}
+											aria-label={`Penggunaan voucher ${v.code}`}
+										>
+											<div
+												class={`h-full rounded-full ${v.usedCount >= v.maxUses ? 'bg-slate-400' : 'bg-orange-500'}`}
+												style="width: {v.maxUses > 0 ? Math.min(100, Math.round((v.usedCount / v.maxUses) * 100)) : 0}%"
+											></div>
+										</div>
 									</div>
-								</div>
-							</td>
-							<td class="px-6 py-3.5 whitespace-nowrap text-slate-600">{formatDate(v.createdAt)}</td>
-							<td class="px-6 py-3.5 whitespace-nowrap text-slate-600">
-								{#if v.expiresAt}
-									{formatDate(v.expiresAt)}
-								{:else}
-									<span class="text-slate-400 italic">Tanpa batas</span>
-								{/if}
-							</td>
-							<td class="px-6 py-3.5 text-center">
-								<span class={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold whitespace-nowrap ${statusClass(v.status)}`}>
-									<span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{v.status}
-								</span>
-							</td>
-							<td class="px-6 py-3.5">
-								<div class="flex justify-end gap-2">
-									<button
-										type="button"
-										onclick={() => openDetail(v)}
-										aria-label={`Lihat detail voucher ${v.code}`}
-										title="Lihat detail"
-										class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-orange-600 focus-visible:outline-2 focus-visible:outline-orange-600"
-									>
-										<i class="fa-solid fa-eye text-sm" aria-hidden="true"></i>
-									</button>
-									<button
-										type="button"
-										onclick={() => copyCode(v)}
-										aria-label={`Salin kode voucher ${v.code}`}
-										title="Salin kode voucher (demo)"
-										class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600"
-									>
-										<i class={`fa-solid ${copiedId === v.id ? 'fa-check text-emerald-600' : 'fa-copy'} text-sm`} aria-hidden="true"></i>
-									</button>
-									{#if v.status === 'Aktif'}
+								</td>
+								<td class="px-6 py-3.5">
+									<span class="block max-w-48 truncate text-xs text-slate-600">{v.assignedEmail ?? '—'}</span>
+								</td>
+								<td class="px-6 py-3.5 whitespace-nowrap text-slate-600">
+									{#if v.expiresAt}
+										{formatDate(v.expiresAt)}
+									{:else}
+										<span class="text-slate-400 italic">Tanpa batas</span>
+									{/if}
+								</td>
+								<td class="px-6 py-3.5 text-center">
+									<span class={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold whitespace-nowrap ${statusClass(st)}`}>
+										<span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{st}
+									</span>
+								</td>
+								<td class="px-6 py-3.5">
+									<div class="flex justify-end gap-2">
 										<button
 											type="button"
-											onclick={() => askCancel(v)}
-											aria-label={`Batalkan voucher ${v.code}`}
-											title="Batalkan voucher"
-											class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500"
+											onclick={() => void openDetail(v)}
+											aria-label={`Lihat detail voucher ${v.code}`}
+											title="Lihat detail + riwayat"
+											class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-orange-600 focus-visible:outline-2 focus-visible:outline-orange-600"
 										>
-											<i class="fa-solid fa-ban text-sm" aria-hidden="true"></i>
+											<i class="fa-solid fa-eye text-sm" aria-hidden="true"></i>
 										</button>
-									{/if}
-								</div>
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
-		{#if filtered.length === 0}
+										<button
+											type="button"
+											onclick={() => copyCode(v.code)}
+											aria-label={`Salin kode voucher ${v.code}`}
+											title="Salin kode voucher"
+											class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600"
+										>
+											<i class={`fa-solid ${copiedId === v.code ? 'fa-check text-emerald-600' : 'fa-copy'} text-sm`} aria-hidden="true"></i>
+										</button>
+										{#if st === 'Aktif'}
+											<button
+												type="button"
+												onclick={() => askCancel(v)}
+												disabled={actionBusy === v.code}
+												aria-label={`Nonaktifkan voucher ${v.code}`}
+												title="Nonaktifkan voucher"
+												class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+											>
+												<i class="fa-solid fa-ban text-sm" aria-hidden="true"></i>
+											</button>
+										{:else if st === 'Dibatalkan'}
+											<button
+												type="button"
+												onclick={() => void handleEnable(v)}
+												disabled={actionBusy === v.code}
+												aria-label={`Aktifkan kembali voucher ${v.code}`}
+												title="Aktifkan kembali"
+												class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 focus-visible:outline-2 focus-visible:outline-emerald-500 disabled:cursor-not-allowed disabled:opacity-60"
+											>
+												<i class="fa-solid fa-rotate-left text-sm" aria-hidden="true"></i>
+											</button>
+										{/if}
+									</div>
+								</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+			</div>
+		{/if}
+		{#if !isLoading && !loadError && filtered.length === 0}
 			<p class="border-t border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
-				{vouchers.length === 0
+				{items.length === 0
 					? 'Belum ada voucher. Buat voucher pertama lewat tombol Tambah Voucher.'
 					: 'Tidak ada voucher yang cocok dengan pencarian atau filter.'}
 			</p>
@@ -559,8 +711,7 @@
 			>
 				<h2 id="add-voucher-title" class="text-lg font-bold text-slate-900">Tambah Voucher</h2>
 				<p class="mt-0.5 text-xs text-slate-500">
-					Voucher tersimpan lokal (demo) untuk satu kursus. Keunikan global dan akses kursus
-					 membutuhkan backend.
+					Satu voucher hanya untuk satu kursus. Personal terikat satu akun terdaftar (1x pakai).
 				</p>
 				{#if formError}
 					<p role="alert" class="mt-3 rounded-xl border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-semibold text-red-700">
@@ -584,7 +735,7 @@
 								<span class="text-sm font-bold text-slate-900">Personal</span>
 							</span>
 							<span class="mt-1 block pl-6 text-[11px] leading-relaxed text-slate-500">
-								Satu kode untuk satu peserta — hanya penukaran berhasil pertama yang dihitung.
+								Satu kode untuk satu peserta terdaftar — 1x pakai.
 							</span>
 						</label>
 						<label class={`cursor-pointer rounded-xl border-2 p-3 transition-colors focus-within:outline-2 focus-within:outline-orange-600 ${formKind === 'Umum' ? 'border-orange-500 bg-orange-50/60' : 'border-slate-200 hover:border-slate-300'}`}>
@@ -611,7 +762,6 @@
 						<select
 							id="voucher-course-add"
 							bind:value={formCourseId}
-							aria-invalid={formError.includes('kursus') ? 'true' : undefined}
 							class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 focus:outline-none"
 						>
 							<option value="">— Pilih kursus —</option>
@@ -620,23 +770,25 @@
 							{/each}
 						</select>
 					</div>
-					<div>
-						<label for="voucher-max" class="mb-1 block text-xs font-bold text-slate-700">
-							Batas penggunaan {formKind === 'Personal' ? '(otomatis 1)' : ''}
-						</label>
-						{#if formKind === 'Personal'}
+					{#if formKind === 'Personal'}
+						<div>
+							<label for="voucher-assignee" class="mb-1 block text-xs font-bold text-slate-700">
+								Email penerima <span class="text-red-500">*</span>
+							</label>
 							<input
-								id="voucher-max"
-								type="text"
-								disabled
-								value="1"
-								aria-describedby="voucher-max-note"
-								class="w-full cursor-not-allowed rounded-xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-sm text-slate-500"
+								id="voucher-assignee"
+								type="email"
+								bind:value={formAssignee}
+								autocomplete="email"
+								placeholder="peserta@anda.com (harus terdaftar)"
+								class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 focus:outline-none"
 							/>
-							<p id="voucher-max-note" class="mt-1 text-[11px] text-slate-400">
-								Voucher Personal selalu dibatasi satu kali penukaran.
-							</p>
-						{:else}
+						</div>
+					{:else}
+						<div>
+							<label for="voucher-max" class="mb-1 block text-xs font-bold text-slate-700">
+								Batas penggunaan
+							</label>
 							<input
 								id="voucher-max"
 								type="number"
@@ -651,7 +803,19 @@
 							<p id="voucher-max-note" class="mt-1 text-[11px] text-slate-400">
 								Bilangan bulat minimal 1. Setelah batas tercapai voucher tidak dapat ditukarkan lagi.
 							</p>
-						{/if}
+						</div>
+					{/if}
+					<div>
+						<label for="voucher-code" class="mb-1 block text-xs font-bold text-slate-700">
+							Kode khusus <span class="font-normal text-slate-400">(opsional — otomatis bila kosong)</span>
+						</label>
+						<input
+							id="voucher-code"
+							type="text"
+							bind:value={formCode}
+							placeholder="cth. HEMAT-2026"
+							class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 font-mono text-sm font-bold focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 focus:outline-none"
+						/>
 					</div>
 					<div class="rounded-xl border border-slate-200 p-3.5">
 						<label class="flex cursor-pointer items-center gap-2.5">
@@ -675,34 +839,9 @@
 							</div>
 						{:else}
 							<p class="mt-2 text-[11px] leading-relaxed text-slate-400">
-								Tanpa centang ini voucher tidak memiliki batas waktu (disimpan sebagai tanpa kedaluwarsa).
+								Tanpa centang ini voucher tidak memiliki batas waktu.
 							</p>
 						{/if}
-					</div>
-					<div>
-						<span id="voucher-code-label" class="mb-1 block text-xs font-bold text-slate-700">Kode voucher (otomatis)</span>
-						<div class="flex gap-2">
-							<input
-								type="text"
-								readonly
-								value={previewCode}
-								aria-labelledby="voucher-code-label"
-								aria-describedby="voucher-code-note"
-								class="w-full rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3.5 py-2.5 font-mono text-sm font-bold text-slate-700"
-							/>
-							<button
-								type="button"
-								onclick={regenerateCode}
-								aria-label="Buat ulang kode voucher"
-								title="Buat ulang kode"
-								class="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 p-2.5 text-slate-500 transition-colors hover:bg-slate-50 hover:text-orange-600 focus-visible:outline-2 focus-visible:outline-orange-600"
-							>
-								<i class="fa-solid fa-dice text-sm" aria-hidden="true"></i>
-							</button>
-						</div>
-						<p id="voucher-code-note" class="mt-1 text-[11px] text-slate-400">
-							Kode demo lokal — keunikan global final dijamin backend nantinya.
-						</p>
 					</div>
 				</div>
 
@@ -719,14 +858,14 @@
 						disabled={isSubmitting}
 						class="flex-1 rounded-xl bg-orange-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-orange-700 disabled:cursor-not-allowed disabled:opacity-60"
 					>
-						Simpan Voucher
+						{isSubmitting ? 'Menyimpan…' : 'Buat Voucher'}
 					</button>
 				</div>
 			</form>
 		</div>
 	{/if}
 
-	{#if showDetail && selected}
+	{#if showDetail}
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4"
 			role="dialog"
@@ -743,97 +882,97 @@
 			<div class="my-8 w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
 				<div class="h-1.5 bg-gradient-to-r from-orange-600 via-amber-500 to-orange-600" aria-hidden="true"></div>
 				<div class="p-6">
-					<div class="flex items-start justify-between gap-3">
-						<div>
-							<p class="text-[11px] font-bold tracking-widest text-orange-600 uppercase">Detail voucher</p>
-							<h2 id="voucher-detail-title" class="mt-0.5 font-mono text-xl font-extrabold break-all text-slate-900">
-								{selected.code}
-							</h2>
-						</div>
-						<span class={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${statusClass(selected.status)}`}>
-							<span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{selected.status}
-						</span>
-					</div>
-
-					<dl class="mt-4 grid grid-cols-1 gap-2.5 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2">
-						<div>
-							<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Jenis</dt>
-							<dd class="mt-0.5 font-bold text-slate-900">{selected.kind}</dd>
-						</div>
-						<div>
-							<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Kursus</dt>
-							<dd class="mt-0.5 font-bold text-slate-900">{selected.courseTitle}</dd>
-						</div>
-						<div>
-							<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Dibuat</dt>
-							<dd class="mt-0.5 font-semibold text-slate-700">{formatDate(selected.createdAt)}</dd>
-						</div>
-						<div>
-							<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Berlaku s.d.</dt>
-							<dd class="mt-0.5 font-semibold text-slate-700">
-								{selected.expiresAt ? formatDate(selected.expiresAt) : 'Tanpa batas waktu'}
-							</dd>
-						</div>
-						<div>
-							<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Penggunaan</dt>
-							<dd class="mt-0.5 font-extrabold text-slate-900 tabular-nums">
-								{selected.usedCount}/{selected.maxUses}
-							</dd>
-						</div>
-						<div>
-							<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Pembatalan</dt>
-							<dd class="mt-0.5 font-semibold text-slate-700">
-								{selected.cancelledAt ? `Dibatalkan ${formatDate(selected.cancelledAt)}` : '—'}
-							</dd>
-						</div>
-					</dl>
-
-					<h3 class="mt-5 text-xs font-bold tracking-wider text-slate-500 uppercase">
-						Riwayat penukaran ({selected.history.length})
-					</h3>
-					{#if selected.history.length === 0}
-						<p class="mt-2 rounded-xl border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">
-							Belum ada penukaran. Riwayat tercatat setelah penukaran berhasil — pencatatan
-							nyata membutuhkan backend.
+					{#if detailLoading}
+						<p role="status" class="p-4 text-center text-sm text-slate-500">
+							<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
+							Memuat detail…
 						</p>
-					{:else}
-						<ul class="mt-2 max-h-44 space-y-1.5 overflow-y-auto">
-							{#each selected.history as h (h.id)}
-								<li class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs">
-									<span class="font-semibold text-slate-700">{h.note}</span>
-									<time class="shrink-0 font-bold whitespace-nowrap text-slate-500 tabular-nums" datetime={h.redeemedAt}>
-										{formatDateTime(h.redeemedAt)}
-									</time>
-								</li>
-							{/each}
-						</ul>
-					{/if}
+					{:else if detail}
+						<div class="flex items-start justify-between gap-3">
+							<div>
+								<p class="text-[11px] font-bold tracking-widest text-orange-600 uppercase">Detail voucher</p>
+								<h2 id="voucher-detail-title" class="mt-0.5 font-mono text-xl font-extrabold break-all text-slate-900">
+									{detail.code}
+								</h2>
+							</div>
+							<span class={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold whitespace-nowrap ${statusClass(uiStatus(detail))}`}>
+								<span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{uiStatus(detail)}
+							</span>
+						</div>
 
-					<div class="mt-5 flex flex-col gap-2 sm:flex-row">
-						<button
-							type="button"
-							onclick={() => copyCode(selected)}
-							class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
-						>
-							<i class={`fa-solid ${copiedId === selected.id ? 'fa-check text-emerald-600' : 'fa-copy'}`} aria-hidden="true"></i>
-							{copiedId === selected.id ? 'Tersalin!' : 'Salin kode'}
-						</button>
-						<button
-							type="button"
-							onclick={() => copyInfo(selected)}
-							class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
-						>
-							<i class={`fa-solid ${copiedId === `info-${selected.id}` ? 'fa-check text-emerald-600' : 'fa-clipboard-list'}`} aria-hidden="true"></i>
-							{copiedId === `info-${selected.id}` ? 'Tersalin!' : 'Salin info'}
-						</button>
-						<button
-							type="button"
-							onclick={closeDetail}
-							class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-orange-700 focus-visible:outline-2 focus-visible:outline-orange-600"
-						>
-							Tutup
-						</button>
-					</div>
+						<dl class="mt-4 grid grid-cols-1 gap-2.5 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2">
+							<div>
+								<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Jenis</dt>
+								<dd class="mt-0.5 font-bold text-slate-900">{kindLabel(detail)}</dd>
+							</div>
+							<div>
+								<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Kursus</dt>
+								<dd class="mt-0.5 font-bold text-slate-900">{detail.courseTitle ?? '-'}</dd>
+							</div>
+							<div>
+								<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Penerima</dt>
+								<dd class="mt-0.5 font-semibold break-all text-slate-700">{detail.assignedEmail ?? '—'}</dd>
+							</div>
+							<div>
+								<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Berlaku s.d.</dt>
+								<dd class="mt-0.5 font-semibold text-slate-700">
+									{detail.expiresAt ? formatDate(detail.expiresAt) : 'Tanpa batas waktu'}
+								</dd>
+							</div>
+							<div>
+								<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Penggunaan</dt>
+								<dd class="mt-0.5 font-extrabold text-slate-900 tabular-nums">
+									{detail.usedCount}/{detail.maxUses}
+								</dd>
+							</div>
+						</dl>
+
+						<h3 class="mt-5 text-xs font-bold tracking-wider text-slate-500 uppercase">
+							Riwayat penukaran ({detail.redemptionCount})
+						</h3>
+						{#if detail.redemptions.length === 0}
+							<p class="mt-2 rounded-xl border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">
+								Belum ada penukaran.
+							</p>
+						{:else}
+							<ul class="mt-2 max-h-44 space-y-1.5 overflow-y-auto">
+								{#each detail.redemptions as h (h.id)}
+									<li class="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs">
+										<span class="font-semibold text-slate-700">{h.userName} · {h.userEmail}</span>
+										<time class="shrink-0 font-bold whitespace-nowrap text-slate-500 tabular-nums" datetime={h.redeemedAt}>
+											{formatDateTime(h.redeemedAt)}
+										</time>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+
+						<div class="mt-5 flex flex-col gap-2 sm:flex-row">
+							<button
+								type="button"
+								onclick={() => detail && copyCode(detail.code)}
+								class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
+							>
+								<i class={`fa-solid ${copiedId === detail.code ? 'fa-check text-emerald-600' : 'fa-copy'}`} aria-hidden="true"></i>
+								{copiedId === detail.code ? 'Tersalin!' : 'Salin kode'}
+							</button>
+							<button
+								type="button"
+								onclick={() => detail && copyInfo(detail)}
+								class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
+							>
+								<i class={`fa-solid ${copiedId === `info-${detail.code}` ? 'fa-check text-emerald-600' : 'fa-clipboard-list'}`} aria-hidden="true"></i>
+								{copiedId === `info-${detail.code}` ? 'Tersalin!' : 'Salin info'}
+							</button>
+							<button
+								type="button"
+								onclick={closeDetail}
+								class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl bg-orange-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-orange-700 focus-visible:outline-2 focus-visible:outline-orange-600"
+							>
+								Tutup
+							</button>
+						</div>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -842,16 +981,16 @@
 	<WarningModal
 		bind:open={showCancel}
 		type="warning"
-		title="Batalkan voucher?"
+		title="Nonaktifkan voucher?"
 		message={pendingCancel
-			? `Voucher ${pendingCancel.code} tidak akan bisa ditukarkan lagi. Riwayat penukaran (${pendingCancel.usedCount}x) tetap tersimpan. Tindakan ini hanya berlaku lokal (demo).`
+			? `Voucher ${pendingCancel.code} tidak akan bisa ditukarkan lagi. Riwayat penukaran (${pendingCancel.usedCount}x) tetap tersimpan.`
 			: 'Voucher ini tidak akan bisa ditukarkan lagi.'}
-		confirmText="Ya, batalkan"
+		confirmText="Ya, nonaktifkan"
 		cancelText="Kembali"
 		oncancel={() => {
 			pendingCancel = null;
 			showCancel = false;
 		}}
-		onconfirm={confirmCancel}
+		onconfirm={() => void confirmCancel()}
 	/>
 </div>

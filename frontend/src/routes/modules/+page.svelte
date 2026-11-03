@@ -1,8 +1,11 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import '../../app.css';
-	import Logo from '$lib/components/Logo.svelte';
-	import { aristotelesLogo as logoUrl } from '$lib/assets/logo';
+	import PublicHeader from '$lib/components/public/PublicHeader.svelte';
+	import PublicFooter from '$lib/components/public/PublicFooter.svelte';
+	import SeoHead from '$lib/components/SeoHead.svelte';
+	import { canonicalPath, getSiteUrl } from '$lib/seo/site';
+	import { reveal } from '$lib/actions/reveal';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { periodBadgeClass, periodIcon, type CoursePeriod } from '$lib/data/course-meta';
 	import {
@@ -32,27 +35,22 @@
 	const COVER_FALLBACK =
 		'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80';
 
-	let menuOpen = $state(false);
-
-	const mobileLinks = [
-		{ href: '/', label: 'Beranda' },
-		{ href: '/modules', label: 'Pelatihan' },
-		{ href: '/#peringkat', label: 'Peringkat' },
-		{ href: '/#tentang', label: 'Tentang' },
-		{ href: '/#verifikasi', label: 'Verifikasi' }
-	];
-
 	let search = $state('');
 	let debouncedSearch = $state('');
 	let activeCategory = $state('Semua');
 	let activePeriod = $state<'all' | CoursePeriod>('all');
 	let page = $state(1);
 	let perPage = $state(12);
-	let catalog = $state<BackendCourse[]>([]);
+	/** Katalog awal dari server load (SSR); fetch browser hanya bila kosong/ganti filter. */
+	let { data }: { data: { origin: string; catalog: BackendCourse[] } } = $props();
+	// svelte-ignore state_referenced_locally -- seed SSR: snapshot awal, update via fetch browser
+	let catalog = $state<BackendCourse[]>(data.catalog);
 	let catalogNames = $state(new Map<number, string>());
-	let loading = $state(true);
+	// svelte-ignore state_referenced_locally -- seed SSR: snapshot awal, update via fetch browser
+	let loading = $state(data.catalog.length === 0);
 	let loadError = $state('');
 	let loadSeq = 0;
+	let catalogFirstRun = true;
 
 	const periodFilters: { value: 'all' | CoursePeriod; label: string }[] = [
 		{ value: 'all', label: 'Semua Periode' },
@@ -118,6 +116,11 @@
 		void debouncedSearch;
 		void activeCategory;
 		void activePeriod;
+		// Mount pertama: data SSR sudah tampil → jangan fetch ulang (hindari flash).
+		if (catalogFirstRun) {
+			catalogFirstRun = false;
+			if (catalog.length > 0) return;
+		}
 		void load();
 	});
 
@@ -144,126 +147,61 @@
 	function coursePeriod(course: BackendCourse): CoursePeriod {
 		return course.period === 'upcoming' || course.period === 'ended' ? course.period : 'ongoing';
 	}
+
+	const modulesJsonLd = $derived([
+		{
+			'@context': 'https://schema.org',
+			'@type': 'CollectionPage',
+			name: 'Semua Kursus Mikrokredensial ARISTOTELES',
+			description:
+				'Katalog lengkap kursus mikrokredensial dengan filter kategori, pencarian, dan periode batch: berjalan, akan datang, dan arsip.',
+			url: canonicalPath('/modules', data.origin),
+			inLanguage: 'id-ID',
+			isPartOf: { '@type': 'WebSite', name: 'ARISTOTELES', url: getSiteUrl(data.origin) }
+		},
+		{
+			'@context': 'https://schema.org',
+			'@type': 'BreadcrumbList',
+			itemListElement: [
+				{ '@type': 'ListItem', position: 1, name: 'Beranda', item: canonicalPath('/', data.origin) },
+				{ '@type': 'ListItem', position: 2, name: 'Semua Pelatihan', item: canonicalPath('/modules', data.origin) }
+			]
+		}
+	]);
 </script>
 
-<svelte:head>
-	<title>Semua Pelatihan — Aristoteles Platform</title>
-	<meta
-		name="description"
-		content="Katalog lengkap pelatihan mikrokredensial Aristoteles: info, rating, periode, dan kurikulum."
-	/>
-</svelte:head>
+<SeoHead
+	title="Semua Kursus Mikrokredensial — Katalog ARISTOTELES"
+	description="Katalog lengkap kursus online mikrokredensial ARISTOTELES. Cari berdasar kategori & periode batch, lihat kurikulum, daftar dan raih sertifikat."
+	path="/modules"
+	origin={data.origin}
+	jsonLd={modulesJsonLd}
+/>
 
-<!-- Navbar publik (selaras landing page) -->
-<header class="sticky top-0 z-50 bg-white shadow-sm">
-	<div class="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-		<a href="/" class="flex shrink-0 items-center gap-3 rounded-lg focus-visible:outline-2 focus-visible:outline-blue-600" aria-label="Aristoteles - Beranda">
-			<Logo size="md" showText={true} textSize="xl" />
-		</a>
-		<nav aria-label="Navigasi utama" class="hidden min-w-0 flex-1 items-center justify-center gap-5 font-semibold text-[13px] text-slate-700 lg:flex xl:gap-7">
-			<a href="/#beranda" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">BERANDA</a>
-			<a href="/modules" aria-current="page" class="whitespace-nowrap text-blue-600 transition-colors duration-200 ease-smooth hover:text-blue-700">PELATIHAN</a>
-			<a href="/#peringkat" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">PERINGKAT</a>
-			<a href="/#tentang" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">TENTANG</a>
-			<a href="/#verifikasi" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">VERIFIKASI</a>
-		</nav>
-		<div class="hidden shrink-0 items-center gap-2 rounded-full border border-slate-200 bg-slate-100 py-1.5 pr-2 pl-4 xl:flex">
-			<label for="modules-nav-search" class="sr-only">Cari program mikrokredensial</label>
-			<input id="modules-nav-search" type="search" placeholder="Cari program..." class="w-40 bg-transparent text-xs text-slate-700 focus:outline-none" />
-			<span class="flex h-7 w-7 items-center justify-center rounded-full bg-white" aria-hidden="true">
-				<img src={logoUrl} alt="" aria-hidden="true" class="h-5 w-5 rounded-full object-cover" />
-			</span>
-		</div>
-		<div class="hidden shrink-0 items-center gap-2.5 sm:flex">
-			<a
-				href="/login"
-				class="inline-flex min-h-[44px] items-center justify-center rounded-full border border-blue-600 px-5 text-xs font-bold whitespace-nowrap text-blue-700 uppercase transition-all duration-200 ease-smooth hover:bg-blue-50 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-			>
-				Masuk
-			</a>
-			<a
-				href="/register"
-				class="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 text-xs font-bold whitespace-nowrap text-white uppercase shadow-lg shadow-blue-500/25 transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-			>
-				Mulai Belajar
-				<i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
-			</a>
-		</div>
-		<button
-			type="button"
-			onclick={() => (menuOpen = !menuOpen)}
-			aria-expanded={menuOpen}
-			aria-controls="mobile-nav"
-			aria-label={menuOpen ? 'Tutup menu navigasi' : 'Buka menu navigasi'}
-			class="flex min-h-11 min-w-11 items-center justify-center rounded-xl p-2 text-slate-700 transition-colors duration-200 ease-smooth hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-blue-600 lg:hidden"
-		>
-			<i class={`fa-solid ${menuOpen ? 'fa-xmark' : 'fa-bars'} text-xl`} aria-hidden="true"></i>
-		</button>
-	</div>
-	<nav
-		id="mobile-nav"
-		aria-label="Navigasi seluler"
-		inert={!menuOpen}
-		class={`grid transition-[grid-template-rows,visibility] duration-300 ease-smooth lg:hidden ${menuOpen ? 'grid-rows-[1fr] visible' : 'grid-rows-[0fr] invisible'}`}
-	>
-		<div class="min-h-0 overflow-hidden">
-			<div class="border-t border-slate-100 bg-white px-4 pt-2 pb-5 sm:px-6">
-				<ul class="divide-y divide-slate-100 text-sm font-semibold text-slate-700">
-					{#each mobileLinks as link (link.href)}
-						<li>
-							<a
-								href={link.href}
-								onclick={() => (menuOpen = false)}
-								aria-current={link.href === '/modules' ? 'page' : undefined}
-								class="block rounded-lg px-2 py-3 uppercase tracking-wide transition-colors duration-200 ease-smooth hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-							>
-								{link.label}
-							</a>
-						</li>
-					{/each}
-				</ul>
-				<div class="mt-3 grid grid-cols-2 gap-2.5 sm:hidden">
-					<a
-						href="/login"
-						class="inline-flex min-h-[44px] items-center justify-center rounded-full border border-blue-600 px-4 text-xs font-bold text-blue-700 uppercase transition-all duration-200 ease-smooth hover:bg-blue-50 active:scale-[0.98]"
-					>
-						Masuk
-					</a>
-					<a
-						href="/register"
-						class="inline-flex min-h-[44px] items-center justify-center rounded-full bg-blue-600 px-4 text-xs font-bold text-white uppercase shadow-lg shadow-blue-500/25 transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98]"
-					>
-						Mulai Belajar
-					</a>
-				</div>
-			</div>
-		</div>
-	</nav>
-</header>
+<!-- Navbar publik bersama (sama dengan halaman Promo/Pelatihan/Peringkat/Tentang/Verifikasi) -->
+<PublicHeader active="pelatihan" />
 
 <main>
 	<!-- Hero -->
-	<section class="relative overflow-hidden bg-gradient-to-br from-blue-50 via-cyan-50/30 to-white py-14">
-		<div class="pointer-events-none absolute top-0 right-10 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl" aria-hidden="true"></div>
-		<div class="relative mx-auto max-w-7xl animate-rise px-4 sm:px-6 lg:px-8">
-			<nav aria-label="Breadcrumb" class="mb-3 flex items-center gap-2 text-xs text-slate-500">
-				<a href="/" class="rounded font-semibold text-blue-600 hover:text-blue-700">Beranda</a>
-				<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
-				<span aria-current="page" class="font-medium text-slate-700">Semua Pelatihan</span>
-			</nav>
-			<span class="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1 text-xs font-bold text-blue-700 uppercase">
-				<i class="fa-solid fa-book-bookmark" aria-hidden="true"></i> Katalog Pelatihan
-			</span>
-			<h1 class="mt-3 text-3xl font-extrabold tracking-tight text-slate-900 sm:text-4xl">
-				Semua Pelatihan Mikrokredensial
+	<section class="relative overflow-hidden bg-white">
+		<div class="pointer-events-none absolute inset-0" aria-hidden="true">
+			<div class="absolute -top-32 right-[10%] h-72 w-72 rounded-full bg-ice blur-3xl"></div>
+		</div>
+		<div class="relative mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
+			<p class="flex items-center gap-3 font-heading text-xs font-bold tracking-[0.18em] text-royal uppercase">
+				<span class="h-px w-8 bg-royal" aria-hidden="true"></span>
+				Katalog Pelatihan
+			</p>
+			<h1 class="mt-3 max-w-2xl font-heading text-4xl font-extrabold tracking-tight text-abyss sm:text-5xl">
+				Semua pelatihan mikrokredensial
 			</h1>
-			<p class="mt-2 max-w-2xl text-sm text-slate-600 sm:text-base">
-				Jelajahi seluruh program: rating, periode batch, jumlah modul dan materi.</p>
+			<p class="mt-3 max-w-2xl text-sm leading-relaxed text-slate-600 sm:text-base">
+				Jelajahi seluruh program: kategori, periode batch, dan informasi akses.</p>
 		</div>
 	</section>
 
 	<!-- Katalog -->
-	<section class="bg-white py-12">
+	<section class="border-t border-mist bg-white py-12">
 		<div class="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
 			<div class="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center">
 				<div class="relative max-w-md flex-1">
@@ -277,7 +215,7 @@
 						bind:value={search}
 						placeholder="Cari judul atau deskripsi pelatihan..."
 						autocomplete="off"
-						class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-4 pl-10 text-sm text-slate-800 placeholder:text-slate-400 transition-all duration-200 ease-smooth focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+						class="w-full rounded-xl border border-mist bg-white py-2.5 pr-4 pl-10 text-sm text-slate-800 placeholder:text-slate-400 transition-colors duration-200 focus:border-royal focus:ring-2 focus:ring-royal/20 focus:outline-none"
 					/>
 				</div>
 				<div class="flex flex-wrap gap-2" role="group" aria-label="Filter kategori">
@@ -286,10 +224,10 @@
 							type="button"
 							onclick={() => (activeCategory = cat)}
 							aria-pressed={activeCategory === cat}
-							class={`rounded-xl px-4 py-2 text-xs font-bold transition-all duration-200 ease-smooth active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 ${
+							class={`rounded-xl px-4 py-2 font-heading text-xs font-bold transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-royal ${
 								activeCategory === cat
-									? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
-									: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+									? 'bg-abyss text-white'
+									: 'border border-mist bg-white text-slate-600 hover:border-royal hover:text-royal'
 							}`}
 						>
 							{cat}
@@ -303,10 +241,10 @@
 						type="button"
 						onclick={() => (activePeriod = pf.value)}
 						aria-pressed={activePeriod === pf.value}
-						class={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200 ease-smooth active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 ${
+						class={`inline-flex items-center gap-1.5 rounded-xl px-4 py-2 font-heading text-xs font-bold transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-royal ${
 							activePeriod === pf.value
-								? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
-								: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+								? 'bg-abyss text-white'
+								: 'border border-mist bg-white text-slate-600 hover:border-royal hover:text-royal'
 						}`}
 					>
 						{#if pf.value !== 'all'}
@@ -325,54 +263,54 @@
 			</p>
 
 			{#if loading}
-				<div class="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label="Memuat katalog">
+				<div class="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label="Memuat katalog">
 					{#each [1, 2, 3, 4, 5, 6, 7, 8] as i (i)}
-						<div class="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-							<div class="h-44 animate-pulse bg-slate-100"></div>
+						<div class="overflow-hidden rounded-2xl border border-mist bg-white">
+							<div class="h-44 animate-pulse bg-ice"></div>
 							<div class="space-y-2 p-5">
-								<div class="h-4 w-3/4 animate-pulse rounded bg-slate-100"></div>
-								<div class="h-3 w-1/2 animate-pulse rounded bg-slate-100"></div>
+								<div class="h-4 w-3/4 animate-pulse rounded bg-ice"></div>
+								<div class="h-3 w-1/2 animate-pulse rounded bg-ice"></div>
 							</div>
 						</div>
 					{/each}
 				</div>
 			{:else if loadError}
 				<div role="alert" class="rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
-					<p class="text-sm font-bold text-red-700">Katalog belum dapat dimuat</p>
+					<p class="font-heading text-sm font-bold text-red-700">Katalog belum dapat dimuat</p>
 					<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{loadError}</p>
 					<button
 						type="button"
 						onclick={() => void load()}
-						class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-red-600"
+						class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-5 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-royal"
 					>
 						<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
 					</button>
 				</div>
 			{:else if catalog.length === 0}
-				<div class="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
+				<div class="rounded-2xl border border-dashed border-mist bg-white p-12 text-center">
 					<i class="fa-solid fa-magnifying-glass mb-3 text-3xl text-slate-300" aria-hidden="true"></i>
-					<p class="text-sm font-semibold text-slate-700">Pelatihan tidak ditemukan.</p>
+					<p class="font-heading text-sm font-bold text-abyss">Pelatihan tidak ditemukan.</p>
 					<p class="mt-1 text-xs text-slate-500">Coba kata kunci, kategori, atau periode lain.</p>
 				</div>
 			{:else}
-				<div class="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm">
-					<div class="grid grid-cols-1 gap-6 p-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-						{#each paged as course (course.id)}
+				<div class="overflow-hidden rounded-2xl border border-mist bg-white">
+					<div class="grid grid-cols-1 gap-5 p-5 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+						{#each paged as course, i (course.id)}
 							{@const period = coursePeriod(course)}
-							<article class="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-300 ease-smooth hover:-translate-y-1 hover:shadow-xl">
+							<article use:reveal={{ delay: (i % 4) * 60 }} class="group relative flex flex-col overflow-hidden rounded-2xl border border-mist bg-white transition-all duration-200 hover:-translate-y-1 hover:border-royal/40 hover:shadow-xl hover:shadow-slate-900/10">
 								<div class="relative overflow-hidden" aria-hidden="true">
 									<img
 										src={course.image || COVER_FALLBACK}
-										alt=""
-										class="h-44 w-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-105"
+										alt={`Kursus ${course.title} — ${course.category ?? 'mikrokredensial'} level ${course.level}`}
+										class="h-44 w-full object-cover transition duration-500 group-hover:scale-[1.03]"
 										loading="lazy"
 									/>
 									{#if course.duration}
-										<span class="absolute top-3 left-3 rounded-md bg-red-600 px-3 py-1 text-[10px] font-extrabold text-white uppercase">
+										<span class="absolute top-3 left-3 rounded-md bg-abyss px-3 py-1 font-heading text-[10px] font-bold text-white uppercase">
 											{course.duration}
 										</span>
 									{/if}
-									<span class={`absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-extrabold uppercase ${periodBadgeClass(period)}`}>
+									<span class={`absolute bottom-3 left-3 inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[10px] font-bold uppercase ${periodBadgeClass(period)}`}>
 										<i class={`fa-solid ${periodIcon(period)}`} aria-hidden="true"></i>
 										{periodShort(course)}
 									</span>
@@ -380,29 +318,29 @@
 								<div class="flex flex-1 flex-col justify-between space-y-4 p-5">
 									<div>
 										<div class="mb-2 flex items-center justify-between text-xs text-slate-500">
-											<span class="font-bold tracking-wide text-blue-600 uppercase">{course.level}</span>
+											<span class="font-heading font-bold tracking-wide text-royal uppercase">{course.level}</span>
 											{#if course.status === 'archived'}
-												<span class="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500 uppercase">Arsip</span>
+												<span class="rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-500 uppercase">Arsip</span>
 											{/if}
 										</div>
-										<p class="text-[11px] font-bold tracking-wide text-blue-600 uppercase">
+										<p class="font-heading text-[11px] font-bold tracking-wide text-royal uppercase">
 											{course.category ?? 'Umum'}
 										</p>
-										<h2 class="mt-1 line-clamp-2 text-base leading-snug font-extrabold text-slate-900">
-											<a href={`/modules/${course.id}`} class="rounded transition-colors duration-200 ease-smooth group-hover:text-blue-600 focus-visible:outline-2 focus-visible:outline-blue-600 after:absolute after:inset-0" aria-label={`Lihat info singkat: ${course.title}`}>{course.title}</a>
+										<h2 class="mt-1 line-clamp-2 font-heading text-base leading-snug font-bold text-abyss">
+											<a href={`/modules/${course.id}`} class="rounded transition-colors duration-200 group-hover:text-royal focus-visible:outline-2 focus-visible:outline-royal after:absolute after:inset-0" aria-label={`Lihat info singkat: ${course.title}`}>{course.title}</a>
 										</h2>
 										<p class="mt-1 line-clamp-2 text-xs text-slate-500">
 											{catalogNames.get(course.id) ?? '…'}
 										</p>
 									</div>
-									<div class="flex items-center justify-between border-t border-slate-100 pt-4">
-										<span class="text-sm font-extrabold text-blue-600">{course.priceLabel}</span>
+									<div class="flex items-center justify-between border-t border-mist pt-4">
+										<span class="font-heading text-sm font-extrabold text-abyss">{course.priceLabel}</span>
 									</div>
 								</div>
 							</article>
 						{/each}
 					</div>
-					<div class="border-t border-slate-100 bg-slate-50/70">
+					<div class="border-t border-mist bg-ice/60">
 						<Pagination bind:page bind:perPage perPageOptions={[12, 24, 48]} totalItems={catalog.length} itemLabel="pelatihan" label="Navigasi halaman katalog" id="modules-pagination" />
 					</div>
 				</div>
@@ -411,6 +349,4 @@
 	</section>
 </main>
 
-<footer class="border-t border-slate-800 bg-slate-900 py-8 text-center text-xs text-slate-500">
-	&copy; 2026 Aristoteles Platform Mikrokredensial. Semua hak dilindungi.
-</footer>
+<PublicFooter />

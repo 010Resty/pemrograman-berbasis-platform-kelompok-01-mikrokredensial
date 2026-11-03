@@ -21,10 +21,13 @@
 - Sertifikat UI (`user/sertifikat`, `instruktur/sertifikat`) — kartu statis, tombol Unduh/Bagikan tanpa handler.
 - Tambah kursus (`tambah/+page.svelte`) — validasi lengkap, simpan `instruktur-draft-course` dengan `modules: []`, tidak masuk daftar.
 - Admin tabel (`admin/courses|users|instrukturs`) — tambah array lokal, aksi palsu.
+- Undangan instruktur end-to-end (`admin/invitations`, `/invite/[token]`, `api/invitations.ts`) — daftar/buat/batal/kirim-ulang + aktivasi via backend, email SMTP otomatis; token sekali-tampil, kirim-ulang menerbitkan token baru (lama hangus).
+- Voucher admin end-to-end (`admin/vouchers`, `api/vouchers.ts`) — daftar/filter, buat Personal/Umum, detail + riwayat penukaran asli, nonaktif/aktifkan via backend (K-03).
+- Ubah instruktur (`admin/instrukturs/[id]/edit`, PATCH `/admin/users/:id`) — nama/email/keahlian/status tersimpan permanen + audit; keahlian tampil di daftar, detail, dan form.
 
 ## Simulasi / mock [Terverifikasi]
 
-- `DEMO_ACCOUNTS` password `1234567`, `VALID_CODES` voucher statis, `driveLink` mock, angka dashboard/pendapatan/sertifikat hardcoded, `setTimeout` loading palsu.
+- `DEMO_ACCOUNTS` password `1234567`, `driveLink` mock, angka dashboard/pendapatan/sertifikat hardcoded, `setTimeout` loading palsu.
 
 ## Belum tersedia [Terverifikasi]
 
@@ -34,9 +37,9 @@
 
 ## Kebutuhan baru dari K-01–K-08 [Keputusan pengguna, belum implementasi]
 
-- K-01 undangan instruktur admin-only — kode masih izinkan `teacher` bebas di `register/+page.svelte`.
+- K-01 undangan instruktur admin-only — backend `POST /admin/invitations` + email SMTP + aktivasi `/invitations/accept` terverifikasi; `register/+page.svelte` menolak peran teacher; daftar backend tanpa token (salin-ulang tautan lama tak mungkin, pakai kirim-ulang).
 - K-02 nilai terbaik + riwayat persisten — kode simpan hasil terakhir saja di `quiz-results.svelte.ts`.
-- K-03 voucher resmi sekali pakai anti-race — kode `VALID_CODES` lokal.
+- K-03 voucher resmi sekali pakai anti-race — admin kelola via backend (`POST/GET /admin/vouchers`, disable/enable, riwayat penukaran); Personal 1 akun 1x pakai + penukaran peserta atomik terverifikasi.
 - K-05 gate sertifikat otomatis — UI statis, belum baca `isModuleComplete`.
 - K-06 rubrik + riwayat tugas backend — belum ada.
 - K-07 modul independen — kode masih kunci antar-modul.

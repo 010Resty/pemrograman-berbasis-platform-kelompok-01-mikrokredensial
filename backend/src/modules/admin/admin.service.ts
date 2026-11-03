@@ -31,9 +31,22 @@ export const createTeacherSchema = z
   })
   .strict();
 
-export const setActiveSchema = z
-  .object({ isActive: z.boolean() })
-  .strict();
+export const updateUserSchema = z
+  .object({
+    name: z.string().trim().min(2, "Nama minimal 2 karakter").max(100).optional(),
+    email: z.string().trim().email("Format email tidak valid").max(191).optional(),
+    expertise: z.string().trim().max(100, "Keahlian maksimal 100 karakter").optional(),
+    isActive: z.boolean().optional(),
+  })
+  .strict()
+  .refine(
+    (v) =>
+      v.name !== undefined ||
+      v.email !== undefined ||
+      v.expertise !== undefined ||
+      v.isActive !== undefined,
+    { message: "Minimal satu field (name/email/expertise/isActive) wajib diisi", path: ["body"] }
+  );
 
 export const assignInstructorSchema = z
   .object({
@@ -71,6 +84,7 @@ export interface PublicUser {
   id: number;
   name: string;
   email: string;
+  expertise: string | null;
   role: string;
   isActive: boolean;
   createdAt: Date;
@@ -105,6 +119,7 @@ export const listUsers = async (
         id: users.id,
         name: users.name,
         email: users.email,
+        expertise: users.expertise,
         role: users.role,
         isActive: users.isActive,
         createdAt: users.createdAt,
@@ -163,6 +178,7 @@ export const getUserById = async (id: number): Promise<AdminUserDetail> => {
       id: users.id,
       name: users.name,
       email: users.email,
+      expertise: users.expertise,
       role: users.role,
       isActive: users.isActive,
       createdAt: users.createdAt,
@@ -213,6 +229,7 @@ export const createTeacher = async (
       email,
       passwordHash,
       role: "teacher",
+      emailVerifiedAt: new Date(),
       isActive: true,
     });
     const id = Number((h as unknown as { insertId: number }).insertId);
@@ -228,6 +245,7 @@ export const createTeacher = async (
         id: users.id,
         name: users.name,
         email: users.email,
+        expertise: users.expertise,
         role: users.role,
         isActive: users.isActive,
         createdAt: users.createdAt,
@@ -241,20 +259,13 @@ export const createTeacher = async (
   return created;
 };
 
-// ---------- Aktif / nonaktif akun ----------
+// ---------- Ubah akun (nama/email/status) ----------
 
-export const setUserActive = async (
+export const updateUser = async (
   actorId: number,
   targetId: number,
-  isActive: boolean
+  input: z.infer<typeof updateUserSchema>
 ): Promise<PublicUser> => {
-  if (targetId === actorId) {
-    throw new AdminError(
-      400,
-      "CANNOT_SELF",
-      "Tidak dapat mengubah status akun sendiri"
-    );
-  }
   const rows = await db
     .select({ id: users.id })
     .from(users)
@@ -263,20 +274,49 @@ export const setUserActive = async (
   if (!rows[0]) {
     throw new AdminError(404, "USER_NOT_FOUND", "Pengguna tidak ditemukan");
   }
+  // Kunci pengaman diri sendiri hanya untuk status (anti-lockout);
+  // nama/email sendiri boleh diubah.
+  if (input.isActive !== undefined && targetId === actorId) {
+    throw new AdminError(
+      400,
+      "CANNOT_SELF",
+      "Tidak dapat mengubah status akun sendiri"
+    );
+  }
+  const patch: { name?: string; email?: string; expertise?: string | null; isActive?: boolean } = {};
+  if (input.name !== undefined) patch.name = input.name;
+  if (input.email !== undefined) {
+    const email = input.email.toLowerCase();
+    const dup = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, email))
+      .limit(1);
+    if (dup[0] && dup[0].id !== targetId) {
+      throw new AdminError(409, "EMAIL_TAKEN", "Email sudah terdaftar");
+    }
+    patch.email = email;
+  }
+  // String kosong = hapus keahlian (kembali NULL).
+  if (input.expertise !== undefined) {
+    patch.expertise = input.expertise === "" ? null : input.expertise;
+  }
+  if (input.isActive !== undefined) patch.isActive = input.isActive;
   const updated = await db.transaction(async (tx) => {
-    await tx.update(users).set({ isActive }).where(eq(users.id, targetId));
+    await tx.update(users).set(patch).where(eq(users.id, targetId));
     await writeAuditLog(tx, {
       actorUserId: actorId,
-      action: isActive ? "user.enable" : "user.disable",
+      action: "user.update",
       targetType: "user",
       targetIdInt: targetId,
-      metadata: { userId: targetId, isActive },
+      metadata: { userId: targetId, changed: Object.keys(patch) },
     });
     const fresh = await tx
       .select({
         id: users.id,
         name: users.name,
         email: users.email,
+        expertise: users.expertise,
         role: users.role,
         isActive: users.isActive,
         createdAt: users.createdAt,

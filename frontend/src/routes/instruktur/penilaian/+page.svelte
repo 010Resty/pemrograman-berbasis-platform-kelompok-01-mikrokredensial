@@ -1,30 +1,53 @@
 <script lang="ts">
-	import { getCourseById } from '$lib/data/courses';
-	import { COURSE_ORDER, resolveTaskKey } from '$lib/data/grading';
-	import { allReviews, ensureGradingLoaded, gradingLoading } from '$lib/stores/grading.svelte';
+	import { browser } from '$app/environment';
+	import { loadInstructorReviewQueue, type QueueCourse } from '$lib/api/grading-queue';
 
-	$effect(() => {
-		ensureGradingLoaded();
-	});
+	/**
+	 * Antrean penilaian dari backend (tanpa data contoh).
+	 * Agregat per kursus kelola: materi tugas → pengumpulan (Menunggu =
+	 * status `submitted`, Dinilai = skor tidak null). Gagal muat = error +
+	 * retry; gagal sebagian = spanduk `partial`, bukan angka palsu.
+	 */
 
 	let search = $state('');
 
-	const loading = $derived(gradingLoading());
-	const reviews = $derived(allReviews());
+	let courses = $state<QueueCourse[]>([]);
+	let pendingTotal = $state(0);
+	let gradedTotal = $state(0);
+	let avgScore = $state<number | null>(null);
+	let partial = $state(false);
+	let loading = $state(true);
+	let loadError = $state('');
+	let started = false;
 
-	const pendingCount = $derived(reviews.filter((r) => r.status === 'Menunggu').length);
-	const gradedCount = $derived(reviews.filter((r) => r.status === 'Dinilai').length);
-	const avgScore = $derived.by(() => {
-		const graded = reviews.filter((r) => r.score !== null);
-		if (graded.length === 0) return '-';
-		return Math.round(graded.reduce((n, r) => n + (r.score ?? 0), 0) / graded.length).toString();
+	async function load(): Promise<void> {
+		loading = true;
+		loadError = '';
+		try {
+			const q = await loadInstructorReviewQueue();
+			courses = q.courses;
+			pendingTotal = q.pendingTotal;
+			gradedTotal = q.gradedTotal;
+			avgScore = q.avgScore;
+			partial = q.partial;
+		} catch (e) {
+			loadError = e instanceof Error ? e.message : 'Gagal memuat antrean penilaian.';
+		} finally {
+			loading = false;
+		}
+	}
+
+	$effect(() => {
+		if (!browser || started) return;
+		started = true;
+		void load();
 	});
 
 	interface CourseCard {
 		id: number;
 		title: string;
 		category: string;
-		image: string;
+		image: string | null;
 		taskCount: number;
 		pending: number;
 		total: number;
@@ -33,32 +56,18 @@
 	const cards = $derived.by((): CourseCard[] => {
 		const q = search.trim().toLowerCase();
 		const list: CourseCard[] = [];
-		for (const courseId of COURSE_ORDER) {
-			const course = getCourseById(courseId);
-			if (!course) continue;
+		for (const course of courses) {
 			if (q && !course.title.toLowerCase().includes(q) && !course.category.toLowerCase().includes(q)) {
 				continue;
 			}
-			let taskCount = 0;
-			for (const mod of course.modules) {
-				for (const sub of mod.subModules ?? []) {
-					for (const mat of sub.materials) {
-						if (mat.type === 'tugas') taskCount += 1;
-					}
-				}
-			}
-			const items = reviews.filter((r) => {
-				const key = resolveTaskKey(r);
-				return key !== null && Number(key.split('::')[0]) === courseId;
-			});
 			list.push({
 				id: course.id,
 				title: course.title,
 				category: course.category,
 				image: course.image,
-				taskCount,
-				pending: items.filter((r) => r.status === 'Menunggu').length,
-				total: items.length
+				taskCount: course.tasks.length,
+				pending: course.pending,
+				total: course.total
 			});
 		}
 		return list;
@@ -75,7 +84,7 @@
 		<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">Menu Utama · Penilaian</p>
 		<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Penilaian</h1>
 		<p class="mt-1 text-sm text-slate-500">
-			{pendingCount} menunggu dinilai · {gradedCount} sudah dinilai · rata-rata nilai {avgScore}.
+			{pendingTotal} menunggu dinilai · {gradedTotal} sudah dinilai · rata-rata nilai {avgScore ?? '-'}.
 			Pilih course untuk melihat penugasannya.
 		</p>
 	</div>
@@ -85,21 +94,21 @@
 			<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500 text-white">
 				<i class="fa-solid fa-hourglass-half text-sm" aria-hidden="true"></i>
 			</div>
-			<div class="mt-3 text-2xl font-bold text-slate-900">{pendingCount}</div>
+			<div class="mt-3 text-2xl font-bold text-slate-900">{pendingTotal}</div>
 			<div class="text-xs font-semibold text-slate-600">Menunggu</div>
 		</div>
 		<div class="rounded-2xl border border-emerald-200/70 bg-emerald-50 p-4 sm:p-5">
 			<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white">
 				<i class="fa-solid fa-circle-check text-sm" aria-hidden="true"></i>
 			</div>
-			<div class="mt-3 text-2xl font-bold text-slate-900">{gradedCount}</div>
+			<div class="mt-3 text-2xl font-bold text-slate-900">{gradedTotal}</div>
 			<div class="text-xs font-semibold text-slate-600">Dinilai</div>
 		</div>
 		<div class="rounded-2xl border border-blue-200/70 bg-blue-50 p-4 sm:p-5">
 			<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
 				<i class="fa-solid fa-star text-sm" aria-hidden="true"></i>
 			</div>
-			<div class="mt-3 text-2xl font-bold text-slate-900">{avgScore}</div>
+			<div class="mt-3 text-2xl font-bold text-slate-900">{avgScore ?? '-'}</div>
 			<div class="text-xs font-semibold text-slate-600">Rata-rata</div>
 		</div>
 	</div>
@@ -123,17 +132,38 @@
 
 	{#if loading}
 		<p role="status" class="mb-4 flex items-center gap-2 text-xs font-semibold text-slate-500">
-			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat berkas PDF dari Drive…
+			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat antrean penilaian…
 		</p>
 	{/if}
 
-	{#if cards.length === 0}
+	{#if loadError}
+		<div role="alert" class="mb-4 rounded-2xl border border-red-200 bg-red-50 p-6 text-center">
+			<p class="text-sm font-bold text-red-700">Antrean penilaian belum dapat dimuat</p>
+			<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{loadError}</p>
+			<button
+				type="button"
+				onclick={() => void load()}
+				class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-red-600"
+			>
+				<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+			</button>
+		</div>
+	{/if}
+
+	{#if !loading && !loadError && partial}
+		<p role="note" class="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-800">
+			<i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
+			<span>Sebagian data gagal dimuat — angka di bawah belum lengkap.</span>
+		</p>
+	{/if}
+
+	{#if !loading && !loadError && cards.length === 0}
 		<div class="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
 			<i class="fa-solid fa-folder-open mb-3 text-3xl text-slate-300" aria-hidden="true"></i>
-			<p class="text-sm font-semibold text-slate-700">Tidak ada course yang cocok.</p>
-			<p class="mt-1 text-xs text-slate-500">Coba kata kunci lain.</p>
+			<p class="text-sm font-semibold text-slate-700">Tidak ada antrean penilaian.</p>
+			<p class="mt-1 text-xs text-slate-500">Belum ada course yang Anda kelola atau cocok dengan pencarian.</p>
 		</div>
-	{:else}
+	{:else if cards.length > 0}
 		<div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
 			{#each cards as card (card.id)}
 				<a
@@ -142,13 +172,19 @@
 					class="group flex flex-col overflow-hidden rounded-2xl border border-slate-200/70 bg-white transition-all duration-300 ease-smooth hover:-translate-y-1 hover:shadow-xl focus-visible:outline-2 focus-visible:outline-blue-600"
 				>
 					<div class="relative overflow-hidden">
-						<img
-							src={card.image}
-							alt=""
-							aria-hidden="true"
-							class="h-36 w-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-105"
-							loading="lazy"
-						/>
+						{#if card.image}
+							<img
+								src={card.image}
+								alt=""
+								aria-hidden="true"
+								class="h-36 w-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-105"
+								loading="lazy"
+							/>
+						{:else}
+							<div class="flex h-36 w-full items-center justify-center bg-gradient-to-br from-blue-100 to-indigo-100" aria-hidden="true">
+								<i class="fa-solid fa-book-open text-2xl text-blue-300"></i>
+							</div>
+						{/if}
 						<span
 							class="absolute top-3 left-3 rounded-md bg-slate-900/80 px-2.5 py-1 text-[10px] font-extrabold text-white uppercase backdrop-blur"
 						>

@@ -45,6 +45,7 @@ before(async () => {
     email: "siswa@uji.io",
     passwordHash: "hash-uji",
     role: "student",
+    emailVerifiedAt: new Date(),
   });
   userId = Number((uH as unknown as { insertId: number }).insertId);
   const [cH] = await db.insert(schema.courses).values({

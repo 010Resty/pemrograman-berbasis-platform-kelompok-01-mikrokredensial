@@ -4,6 +4,7 @@ import {
   detailHandler,
   gradeHandler,
   listHandler,
+  queueHandler,
   statusHandler,
   submitHandler,
 } from "./submission.controller";
@@ -11,6 +12,9 @@ import {
 const router = Router();
 
 const grade = [authenticate, requireRole("teacher", "admin")];
+
+// Antrean penilaian pengelola (agregat satu respons).
+router.get("/instructor/review-queue", ...grade, queueHandler);
 
 // Pengumpulan + riwayat milik sendiri (peserta berhak akses).
 router.post("/materials/:id/submissions", authenticate, submitHandler);

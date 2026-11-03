@@ -210,10 +210,96 @@ export function loginRequest(
 	});
 }
 
-export function registerRequest(name: string, email: string, password: string): Promise<AuthPayload> {
-	return apiRequest<AuthPayload>('/auth/register', {
+/**
+ * Langkah 1 registrasi: minta kode OTP 6 digit (TANPA membuat akun).
+ * Akun permanen baru dibuat server saat POST /auth/verify-email berhasil.
+ * Data registrasi hanya tersimpan sementara di server sampai kode diverifikasi.
+ */
+export function registerRequest(
+	name: string,
+	email: string,
+	password: string
+): Promise<OtpRequestResult> {
+	return apiRequest<OtpRequestResult>('/auth/register', {
 		method: 'POST',
 		body: { name, email, password }
+	});
+}
+
+/**
+ * Kode mesin backend saat login ditolak karena email belum diverifikasi.
+ * Kontrak: backend menjawab HTTP 403 + errors:[{field:'email',message:'EMAIL_UNVERIFIED'}].
+ * Frontend memakai ini untuk mengarahkan user ke /verify-email (bukan error buntu).
+ */
+export const EMAIL_UNVERIFIED_CODE = 'EMAIL_UNVERIFIED';
+
+export function isEmailUnverifiedError(err: unknown): boolean {
+	if (!(err instanceof BackendRequestError)) return false;
+	if (err.httpStatus !== 403) return false;
+	if (
+		err.errors?.some((e) => e.field === 'email' && e.message === EMAIL_UNVERIFIED_CODE) === true
+	) {
+		return true;
+	}
+	// Toleransi pesan Indonesia bila backend belum memakai kode mesin di atas.
+	return /belum\s+(di)?verifikasi/i.test(err.message);
+}
+
+/**
+ * Hasil permintaan OTP (registrasi / kirim ulang / lupa password).
+ * - Registrasi: akun BELUM dibuat — data hanya tersimpan sementara di server
+ *   sampai kode diverifikasi (kedaluwarsa mengikuti `expiresInSeconds`).
+ * - Lupa password: respons selalu generik agar tidak membocorkan daftar email.
+ */
+export interface OtpRequestResult {
+	message: string;
+	email: string;
+	expiresInSeconds: number;
+	resendCooldownSeconds: number;
+}
+
+/** Kirim ulang kode OTP registrasi (rate-limit + cooldown di server). */
+export function resendEmailOtp(email: string): Promise<OtpRequestResult> {
+	return apiRequest<OtpRequestResult>('/auth/resend-verification', {
+		method: 'POST',
+		body: { email }
+	});
+}
+
+/**
+ * Langkah 2 registrasi: verifikasi kode OTP → server membuat akun permanen
+ * dan menerbitkan sesi/token (payload sama seperti login).
+ */
+export function verifyEmailRequest(email: string, code: string): Promise<AuthPayload> {
+	return apiRequest<AuthPayload>('/auth/verify-email', {
+		method: 'POST',
+		body: { email, code }
+	});
+}
+
+/**
+ * Langkah 1 lupa password: minta kode OTP reset.
+ * Selalu dianggap berhasil di UI (backend menjawab generik).
+ */
+export function forgotPasswordRequest(email: string): Promise<{ message: string }> {
+	return apiRequest<{ message: string }>('/auth/forgot-password', {
+		method: 'POST',
+		body: { email }
+	});
+}
+
+/**
+ * Langkah 2 lupa password: kode OTP + password baru.
+ * Sukses = password diganti; user wajib login ulang (tidak auto-login).
+ */
+export function resetPasswordRequest(
+	email: string,
+	code: string,
+	newPassword: string
+): Promise<{ message: string }> {
+	return apiRequest<{ message: string }>('/auth/reset-password', {
+		method: 'POST',
+		body: { email, code, newPassword }
 	});
 }
 

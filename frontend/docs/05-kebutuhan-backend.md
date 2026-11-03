@@ -9,7 +9,7 @@
 - Data perlu disimpan [Usulan]: pengguna, peran, undangan, status aktivasi, sesi.
 - Operasi kemungkinan [Usulan]: buat/undang instruktur oleh admin, aktivasi + atur password, masuk/keluar, cek peran di server.
 - Tergantung: semua guard portal + kepemilikan.
-- Belum diputuskan: detail undangan, aktivasi, pengaturan password.
+- Detail undangan [Keputusan pengguna 2026-11-02]: admin buat undangan (email+nama) → token 1x pakai 7 hari → pendaftar atur password sendiri → akun aktif.
 
 ## Kuis dan riwayat (K-02) [Keputusan pengguna: tanpa batas, nilai terbaik, default 70 bisa diubah, lulus bertahan, riwayat persisten]
 
@@ -41,7 +41,7 @@
 - Simulasi: `studentName/NIM` kosong, nilai fallback lokal, mock Drive.
 - Data [Usulan]: berkas + waktu + nilai + feedback + status per pengumpulan.
 - Operasi [Usulan]: upload validasi server, list per tugas, nilai 0–100 + feedback.
-- Rubrik seragam atau beda [Belum diputuskan].
+- Rubrik seragam nasional [Keputusan pengguna 2026-11-02]: 3 kriteria tetap, kolom `rubric_scores` JSON.
 
 ## Sertifikat (K-05) [Keputusan pengguna: otomatis bila semua wajib selesai/lulus]
 
@@ -55,7 +55,7 @@
 
 - Ada [Terverifikasi]: `curriculum.ts` draf lokal tanpa versi.
 - Data [Usulan]: perubahan + terdampak + alasan + status ulang.
-- Definisi penting + kewenangan [Belum diputuskan].
+- Penting vs ringan + kewenangan instruktur pemilik [Keputusan pengguna 2026-11-02, lihat K-08 di `06`].
 
 ## Admin + audit
 

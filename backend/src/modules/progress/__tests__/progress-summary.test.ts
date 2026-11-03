@@ -85,6 +85,7 @@ before(async () => {
       name,
       email,
       passwordHash: hash,
+      emailVerifiedAt: new Date(),
       role: "student",
     });
     return Number((h as unknown as { insertId: number }).insertId);

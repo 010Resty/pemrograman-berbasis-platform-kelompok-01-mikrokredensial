@@ -75,7 +75,7 @@ before(async () => {
 
   const hash = await bcrypt.hash(TEST_PASSWORD, 4);
   const mkUser = async (name: string, email: string, role: "admin" | "teacher" | "student") => {
-    await db.insert(schema.users).values({ name, email, passwordHash: hash, role });
+    await db.insert(schema.users).values({ name, email, passwordHash: hash, role, emailVerifiedAt: new Date() });
   };
   await mkUser("Admin Uji", "admin@uji.io", "admin");
   await mkUser("Guru Uji", "guru@uji.io", "teacher");

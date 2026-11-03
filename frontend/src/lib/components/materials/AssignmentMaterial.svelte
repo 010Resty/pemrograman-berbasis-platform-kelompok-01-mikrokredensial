@@ -3,7 +3,7 @@
 	import type { AssignmentDetail } from '$lib/data/material-details';
 	import type { AssignmentSubmission, UploadMeta, UploadPhase } from '$lib/types/submission';
 	import { MAX_PDF_BYTES, formatBytes } from '$lib/types/submission';
-	import { uploadAssignmentPdf, fetchSubmissions } from '$lib/services/submission.service';
+	import { uploadAssignmentPdf, fetchSubmissions, downloadSubmissionFile } from '$lib/services/submission.service';
 	import { latestFor, pushSubmission, setHistory, submissionsByMaterial } from '$lib/stores/submissions.svelte';
 
 	let {
@@ -29,7 +29,8 @@
 	let dragOver = $state(false);
 	let fileInput: HTMLInputElement | null = $state(null);
 	let formHeading: HTMLHeadingElement | null = $state(null);
-	let copied = $state(false);
+	let downloading = $state(false);
+	let downloadError = $state('');
 	/** True saat user membuka form untuk merevisi kiriman yang sudah ada. */
 	let revising = $state(false);
 
@@ -100,7 +101,6 @@
 	}
 
 	async function pickFile(file: File | undefined | null) {
-		copied = false;
 		if (!file) return;
 		const err = await validatePdf(file);
 		if (err) {
@@ -152,7 +152,6 @@
 	function reset() {
 		if (previewUrl) URL.revokeObjectURL(previewUrl);
 		phase = { kind: 'idle' };
-		copied = false;
 	}
 
 	/** Buka form revisi: input file lama dibuang, user wajib pilih PDF baru. */
@@ -171,13 +170,28 @@
 		revising = false;
 	}
 
-	async function copyLink(link: string) {
+	/** Unduh PDF kiriman (butuh token → fetch, bukan tautan langsung). */
+	async function downloadFile(submission: AssignmentSubmission): Promise<void> {
+		if (downloading) return;
+		downloading = true;
+		downloadError = '';
 		try {
-			await navigator.clipboard.writeText(link);
-			copied = true;
-			setTimeout(() => (copied = false), 2000);
-		} catch {
-			/* clipboard ditolak — user bisa salin manual */
+			const blob = await downloadSubmissionFile(submission.driveLink);
+			const url = URL.createObjectURL(blob);
+			try {
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = submission.fileName || 'tugas.pdf';
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+			} finally {
+				setTimeout(() => URL.revokeObjectURL(url), 10_000);
+			}
+		} catch (e) {
+			downloadError = e instanceof Error ? e.message : 'Gagal mengunduh berkas.';
+		} finally {
+			downloading = false;
 		}
 	}
 </script>
@@ -248,16 +262,16 @@
 					<span>Sudah terkumpul — {history.fileName}</span>
 					<span class="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-extrabold text-white uppercase">Terbaru</span>
 					<span class="rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-						{history.driveMode === 'drive' ? 'Tautan Drive' : 'Simulasi lokal'}
+						{history.driveMode === 'drive' ? 'Tersimpan di server' : 'Simulasi lokal'}
 					</span>
 				</p>
 				<p class="mt-0.5 text-xs text-emerald-700">
 					{new Date(history.createdAt).toLocaleString('id-ID')} ·
-					{history.driveMode === 'drive' ? 'tersimpan di Google Drive' : 'mode mock (isi kredensial Drive untuk produksi)'} ·
+					{history.driveMode === 'drive' ? 'tersimpan di server' : 'mode MOCK — belum terkirim'} ·
 					status: {history.status}{history.score !== null ? ` · nilai ${history.score}` : ''}
 				</p>
 				<p class="mt-1 text-[11px] text-emerald-700">
-					Terkumpul ≠ lulus — menunggu nilai instruktur. Tautan Drive bukan bukti verifikasi server.
+					Terkumpul ≠ lulus — menunggu nilai instruktur.
 				</p>
 				{#if history.feedback?.trim()}
 					<p class="mt-1 text-xs text-emerald-800">
@@ -267,14 +281,14 @@
 					<p class="mt-1 text-[11px] text-emerald-700">Belum ada umpan balik dari instruktur.</p>
 				{/if}
 				<div class="mt-2 flex flex-wrap gap-2">
-					<a
-						href={history.driveLink}
-						target="_blank"
-						rel="noopener noreferrer"
-						class="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600"
+					<button
+						type="button"
+						onclick={() => void downloadFile(history)}
+						disabled={downloading}
+						class="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-emerald-600"
 					>
-						<i class="fa-brands fa-google-drive" aria-hidden="true"></i> Buka di Drive
-					</a>
+						<i class={`fa-solid ${downloading ? 'fa-circle-notch fa-spin' : 'fa-download'}`} aria-hidden="true"></i> {downloading ? 'Mengunduh…' : 'Unduh PDF'}
+					</button>
 					<button
 						type="button"
 						onclick={startRevise}
@@ -282,11 +296,14 @@
 					>
 						<i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Kumpulkan revisi (PDF baru)
 					</button>
+					{#if downloadError}
+						<p role="alert" class="w-full text-xs font-semibold text-red-600">{downloadError}</p>
+					{/if}
 				</div>
 				{#if previousSubmissions.length > 0}
 					<div class="mt-3 border-t border-emerald-200 pt-3">
 						<p class="text-[11px] font-extrabold tracking-wide text-emerald-800 uppercase">
-							Riwayat sebelumnya ({previousSubmissions.length}) — tersimpan lokal, maks. 20
+							Riwayat sebelumnya ({previousSubmissions.length})
 						</p>
 						<ol class="mt-1.5 space-y-1.5">
 							{#each previousSubmissions as prev (prev.id)}
@@ -294,7 +311,7 @@
 									<i class="fa-solid fa-file-pdf text-red-500" aria-hidden="true"></i>
 									<span class="max-w-48 truncate font-bold">{prev.fileName}</span>
 									<span>{new Date(prev.createdAt).toLocaleString('id-ID')}</span>
-									<span>· {prev.driveMode === 'drive' ? 'Tautan Drive' : 'Simulasi lokal'}</span>
+									<span>· {prev.driveMode === 'drive' ? 'Tersimpan di server' : 'Simulasi lokal'}</span>
 									<span>· {prev.status}{prev.score !== null ? ` · nilai ${prev.score}` : ''}</span>
 								</li>
 							{/each}
@@ -318,36 +335,24 @@
 				<div class="min-w-0 flex-1">
 					<p class="text-sm font-bold text-emerald-800">
 						{s.driveMode === 'drive'
-							? 'PDF terkirim via tautan Drive (belum tentu terverifikasi server).'
+							? 'PDF terkumpul di server.'
 							: 'PDF tersimpan lokal (simulasi) — belum terkirim ke server.'}
 					</p>
 					<p class="mt-0.5 text-xs text-emerald-700">
 						{s.fileName} · {formatBytes(s.fileSize)} ·
-						{s.driveMode === 'drive' ? 'tersimpan di Drive' : 'mode MOCK'} ·
 						instruktur menilai maks. 3 hari kerja.
 					</p>
 					<p class="mt-1 text-[11px] text-emerald-700">
-						Terkumpul ≠ lulus — menunggu nilai instruktur. Tautan Drive bukan bukti verifikasi server.
-					</p>
-					<p class="mt-2 truncate text-xs text-emerald-700">
-						<i class="fa-solid fa-link mr-1" aria-hidden="true"></i>
-						<a href={s.driveLink} target="_blank" rel="noopener noreferrer" class="font-semibold underline hover:no-underline">{s.driveLink}</a>
+						Terkumpul ≠ lulus — kelulusan dan nilai dibaca dari server.
 					</p>
 					<div class="mt-3 flex flex-wrap gap-2">
-						<a
-							href={s.driveLink}
-							target="_blank"
-							rel="noopener noreferrer"
-							class="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600"
-						>
-							<i class="fa-brands fa-google-drive" aria-hidden="true"></i> Lihat di Drive
-						</a>
 						<button
 							type="button"
-							onclick={() => copyLink(s.driveLink)}
-							class="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-emerald-300 bg-white px-4 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-emerald-600"
+							onclick={() => void downloadFile(s)}
+							disabled={downloading}
+							class="inline-flex min-h-11 items-center gap-1.5 rounded-xl bg-emerald-600 px-4 py-2 text-xs font-bold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-emerald-600"
 						>
-							<i class="fa-solid fa-copy" aria-hidden="true"></i> {copied ? 'Tersalin!' : 'Salin tautan'}
+							<i class={`fa-solid ${downloading ? 'fa-circle-notch fa-spin' : 'fa-download'}`} aria-hidden="true"></i> {downloading ? 'Mengunduh…' : 'Unduh PDF'}
 						</button>
 						<button
 							type="button"
@@ -362,7 +367,7 @@
 		</div>
 	{:else if !history || revising}
 		<form
-			aria-label="Formulir pengumpulan tugas PDF via Google Drive"
+			aria-label="Formulir pengumpulan tugas PDF"
 			class="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6"
 			onsubmit={(e) => {
 				e.preventDefault();
@@ -375,12 +380,11 @@
 				class="flex items-center gap-2 text-sm font-bold text-slate-900 focus-visible:outline-2 focus-visible:outline-violet-600"
 			>
 				<i class="fa-solid fa-file-arrow-up text-violet-600" aria-hidden="true"></i>
-				{revising ? 'Revisi tugas (PDF baru → Google Drive)' : 'Kumpulkan tugas (PDF → Google Drive → aplikasi)'}
+				{revising ? 'Revisi tugas (PDF baru)' : 'Kumpulkan tugas (PDF)'}
 			</h2>
 			<p class="mt-1 text-xs text-slate-500">
-				Format wajib <strong>PDF</strong>, maks. {formatBytes(MAX_PDF_BYTES)}. File diunggah lalu
-				tautannya dicatat untuk dinilai instruktur
-				(simulasi bila backend offline — cek label mode MOCK pada hasil).
+				Format wajib <strong>PDF</strong>, maks. {formatBytes(MAX_PDF_BYTES)}. File diunggah ke server lalu
+				dicatat sebagai kiriman untuk dinilai instruktur.
 				{#if courseTitle}<span class="font-semibold text-slate-600">· {courseTitle}</span>{/if}
 			</p>
 
@@ -431,7 +435,7 @@
 				{#if phase.kind === 'uploading'}
 					<div class="mt-3" role="status" aria-live="polite" aria-label={`Mengunggah ${phase.progress} persen`}>
 						<div class="flex items-center justify-between text-xs font-bold text-slate-600">
-							<span><i class="fa-brands fa-google-drive mr-1.5 text-violet-500" aria-hidden="true"></i>Mengunggah ke Google Drive…</span>
+							<span><i class="fa-solid fa-upload mr-1.5 text-violet-500" aria-hidden="true"></i>Mengunggah PDF…</span>
 							<span>{phase.progress}%</span>
 						</div>
 						<div class="mt-1.5 h-2.5 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={phase.progress}>
@@ -504,7 +508,7 @@
 						{#if busy}
 							<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Mengirim…
 						{:else}
-							<i class="fa-brands fa-google-drive" aria-hidden="true"></i> {revising ? 'Unggah Revisi ke Drive' : 'Unggah ke Drive & Kumpulkan'}
+							<i class="fa-solid fa-paper-plane" aria-hidden="true"></i> {revising ? 'Unggah Revisi' : 'Kumpulkan Tugas'}
 						{/if}
 					</button>
 				</div>

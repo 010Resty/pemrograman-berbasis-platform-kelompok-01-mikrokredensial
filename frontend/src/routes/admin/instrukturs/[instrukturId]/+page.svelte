@@ -14,10 +14,10 @@
 	 * Tanpa data contoh: nama/email/peran/status/bergabung dari server +
 	 * kursus yang dibuat akun ini (GET /api/v1/instructor/courses lalu
 	 * saring `createdBy`, karena baris daftar tak memuat `instructors[]`).
-	 * Keahlian dan peringkat belum ada endpointnya, jadi tidak ditampilkan.
-	 * Ubah nama/email/keahlian belum didukung: PATCH /admin/users/:id
-	 * hanya menerima isActive, jadi halaman ini hanya menyediakan
-	 * aktif/nonaktif akun.
+	 * Keahlian dari server bila sudah diisi admin (tambah/ubah lewat halaman Ubah).
+	 * Peringkat belum ada endpointnya, jadi tidak ditampilkan.
+	 * Ubah nama/email/keahlian/status via PATCH /admin/users/:id;
+	 * halaman ini menyediakan aktif/nonaktif cepat + tautan ke halaman Ubah.
 	 */
 
 	const instrukturId = $derived(Number(page.params.instrukturId));
@@ -242,6 +242,12 @@
 					</p>
 				</div>
 				<div class="flex flex-wrap gap-2">
+					<a
+						href={`/admin/instrukturs/${user.id}/edit`}
+						class="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-violet-600 px-4 py-2.5 text-xs font-bold text-white hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-violet-600"
+					>
+						<i class="fa-solid fa-pen" aria-hidden="true"></i> Ubah
+					</a>
 					<button
 						type="button"
 						onclick={() => void toggleActive()}
@@ -275,6 +281,10 @@
 				<div class="flex flex-col gap-0.5 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
 					<dt class="text-slate-500">Email</dt>
 					<dd class="font-semibold text-slate-900">{user.email}</dd>
+				</div>
+				<div class="flex flex-col gap-0.5 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+					<dt class="text-slate-500">Keahlian</dt>
+					<dd class="font-semibold text-slate-900">{user.expertise ?? '—'}</dd>
 				</div>
 				<div class="flex flex-col gap-0.5 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
 					<dt class="text-slate-500">Peran</dt>
@@ -357,11 +367,10 @@
 		>
 			<h2 id="ins-batas" class="text-sm font-bold text-slate-800">Cakupan data halaman ini</h2>
 			<p class="mt-1 text-xs leading-relaxed text-slate-500">
-				Menampilkan identitas dan status akun dari server, serta kursus yang dibuat
-				akun ini. Kursus lain tempat ia ditugaskan sebagai pengampu (bukan pembuat)
-				belum dapat dibedakan lewat endpoint daftar kursus, begitu pula keahlian
-				dan peringkat. Ubah nama/email/keahlian belum didukung backend
-				(PATCH hanya menerima status aktif).
+				Menampilkan identitas, keahlian, dan status akun dari server, serta kursus
+				yang dibuat akun ini. Kursus lain tempat ia ditugaskan sebagai pengampu
+				(bukan pembuat) belum dapat dibedakan lewat endpoint daftar kursus,
+				begitu pula peringkat. Ubah data lewat tombol Ubah di atas.
 			</p>
 		</section>
 

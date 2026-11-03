@@ -1,0 +1,1 @@
+ALTER TABLE `users` ADD `expertise` varchar(100);

@@ -6,6 +6,7 @@
 		type BackendCourse
 	} from '$lib/api/courses';
 	import { redeemVoucher } from '$lib/api/vouchers';
+	import { syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
 	import { periodBadgeClass, periodIcon, type CoursePeriod } from '$lib/data/course-meta';
 
 	type Status = 'all' | 'in-progress' | 'completed' | 'not-started';
@@ -175,6 +176,8 @@
 			voucherMessage = 'Voucher berhasil ditukar. Akses kursus dibuka.';
 			voucherCode = '';
 			await load();
+			// Server baru saja membuat enrollment — selaraskan gerbang materi.
+			void syncEnrollmentsFromServer();
 		} catch (err) {
 			voucherStatus = 'error';
 			voucherMessage = err instanceof Error ? err.message : 'Penukaran gagal. Coba lagi.';

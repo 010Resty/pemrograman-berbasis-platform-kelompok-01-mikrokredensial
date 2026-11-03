@@ -87,7 +87,14 @@
 
 	/** Kuis server (materi kuis numerik saja): sumber kebenaran terpisah dari draf lokal.
 	 * Kunci jawaban tidak pernah dimuat dari server; impor butuh tandai ulang. */
-	let serverQuizQs = $state<Array<{ question: string; options: string[] }> | null>(null);
+	let serverQuizQs = $state<Array<{
+		question: string;
+		options: string[];
+		imageUrl?: string | null;
+		audioUrl?: string | null;
+		fileUrl?: string | null;
+		fileName?: string | null;
+	}> | null>(null);
 	let serverQuizCount = $state(0);
 	let serverQuizLoading = $state(false);
 	let serverQuizError = $state('');
@@ -298,7 +305,11 @@
 			serverQuizPass = typeof detail?.passScore === 'number' ? detail.passScore : null;
 			serverQuizQs = quiz.questions.map((q) => ({
 				question: q.questionText,
-				options: q.options.map((o) => o.optionText)
+				options: q.options.map((o) => o.optionText),
+				imageUrl: q.imageUrl,
+				audioUrl: q.audioUrl,
+				fileUrl: q.fileUrl,
+				fileName: q.fileName
 			}));
 		} catch (e) {
 			serverQuizError = e instanceof Error ? e.message : 'Gagal memuat kuis server.';
@@ -312,6 +323,10 @@
 			questions: draft.questions.map((q) => ({
 				questionText: q.question,
 				explanation: q.explanation || null,
+				imageUrl: q.imageUrl,
+				audioUrl: q.audioUrl,
+				fileUrl: q.fileUrl,
+				fileName: q.fileName,
 				options: q.options.map((opt, oi) => ({ optionText: opt, isCorrect: oi === q.answer }))
 			}))
 		};
@@ -368,7 +383,11 @@
 				question: q.question,
 				options: [...q.options, '', '', '', ''].slice(0, 4),
 				answer: 0,
-				explanation: ''
+				explanation: '',
+				imageUrl: q.imageUrl ?? undefined,
+				audioUrl: q.audioUrl ?? undefined,
+				fileUrl: q.fileUrl ?? undefined,
+				fileName: q.fileName ?? undefined
 			})),
 			passScore: storedQuiz?.passScore ?? serverQuizPass ?? DEFAULT_PASS_SCORE,
 			updatedAt: ''

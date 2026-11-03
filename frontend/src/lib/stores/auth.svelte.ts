@@ -2,9 +2,14 @@ import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
 import {
 	BackendRequestError,
+	forgotPasswordRequest,
+	isEmailUnverifiedError,
 	loginRequest,
 	meRequest,
 	registerRequest,
+	resendEmailOtp,
+	resetPasswordRequest,
+	verifyEmailRequest,
 	type BackendUser
 } from '$lib/api/backend';
 import {
@@ -78,7 +83,6 @@ const TOKEN_KEY = 'aristoteles-access-token';
 
 let currentUser = $state<Session | null>(null);
 let accessToken: string | null = null;
-let initialized = false;
 
 /**
  * Cache verifikasi sesi terpusat (optimasi request):
@@ -102,6 +106,7 @@ let sessionGeneration = 0;
 /** Pembersih cache privat terdaftar (store domain mendaftarkan `clear`-nya). */
 const privateCacheClearers = new Set<() => void>();
 
+/** Identitas global — hanya terisi dari server (login/verifikasi /me). Storage mentah tidak pernah mengisinya. */
 export function getCurrentUser(): Session | null {
 	return currentUser;
 }
@@ -161,46 +166,60 @@ function persistAuth(session: Session, token: string, rememberMe: boolean): void
 }
 
 /**
- * Baca sesi tersimpan. Sesi lama era demo (id `demo-*`, token `demo-token-*`,
- * atau tanpa `id`) dianggap tidak valid dan dibersihkan — user wajib login
- * ulang via backend. Guard portal wajib memakai `verifySession()` (/me),
- * bukan hanya fungsi ini.
+ * Baca sesi tersimpan TANPA mempercayainya: hanya parse + validasi bentuk,
+ * tidak pernah mengisi `currentUser`. Identitas global hanya diisi dari
+ * server (`loginWithBackend` / `verifyEmailWithBackend` / `doVerify` /me).
+ * Dengan ini sesi editan manual di storage tidak pernah tampil sebagai
+ * identitas sebelum lolos verifikasi token ke backend.
+ * Sesi lama era demo (id `demo-*`) atau bentuk tak valid langsung dibersihkan.
+ * Guard portal wajib memakai `verifySession()` (/me), bukan hanya fungsi ini.
  */
 export function loadSession(): Session | null {
-	if (currentUser) return currentUser;
 	if (!browser) return null;
-	if (initialized) return currentUser;
-	initialized = true;
 	for (const storage of [localStorage, sessionStorage]) {
 		try {
 			const raw = storage.getItem(SESSION_KEY);
 			if (!raw) continue;
 			const parsed = JSON.parse(raw) as Partial<Session>;
 			const parsedId = parsed?.id;
+			const parsedName = typeof parsed?.name === 'string' ? parsed.name.trim() : '';
+			const parsedEmail = typeof parsed?.email === 'string' ? parsed.email.trim() : '';
 			if (
 				(typeof parsedId === 'string' || typeof parsedId === 'number') &&
 				String(parsedId).length > 0 &&
 				!String(parsedId).startsWith('demo-') &&
-				typeof parsed?.email === 'string' &&
+				parsedName.length >= 1 &&
+				parsedName.length <= 255 &&
+				parsedEmail.includes('@') &&
+				parsedEmail.length <= 320 &&
 				isValidRole(parsed?.role)
 			) {
-				currentUser = { ...(parsed as Session), id: String(parsedId) };
-				return currentUser;
+				// Sengaja TIDAK mengisi currentUser: identitas global hanya dari server.
+				return { ...(parsed as Session), id: String(parsedId) };
 			}
-			// Sesi lama/demo tanpa id valid -> bersihkan agar tidak dianggap login.
+			// Sesi lama/demo/editan tanpa bentuk valid -> bersihkan agar tidak dipakai.
 			storage.removeItem(SESSION_KEY);
 		} catch {
 			// abaikan data korup, lanjut ke penyimpanan berikutnya
 		}
 	}
-	return currentUser;
+	return null;
 }
 
 export type BackendAuthResult =
 	| { ok: true; user: Session }
-	| { ok: false; error: string; fieldErrors?: Array<{ field: string; message: string }> };
+	| {
+			ok: false;
+			error: string;
+			fieldErrors?: Array<{ field: string; message: string }>;
+			/** Terisi dengan email bila login ditolak karena email belum diverifikasi. */
+			needsVerification?: string;
+	  };
 
-function toUserMessage(err: unknown, fallback: string): BackendAuthResult {
+function toUserMessage(
+	err: unknown,
+	fallback: string
+): { ok: false; error: string; fieldErrors?: Array<{ field: string; message: string }> } {
 	if (err instanceof BackendRequestError) {
 		if (err.httpStatus === 0) return { ok: false, error: err.message };
 		if (err.httpStatus === 401 || err.httpStatus === 400) {
@@ -232,32 +251,119 @@ export async function loginWithBackend(
 		sessionGeneration += 1;
 		return { ok: true, user: session };
 	} catch (err) {
+		// Email belum diverifikasi: bukan error buntu — arahkan ke /verify-email.
+		if (isEmailUnverifiedError(err)) {
+			const msg =
+				err instanceof BackendRequestError && err.message
+					? err.message
+					: 'Email belum diverifikasi. Masukkan kode OTP yang dikirim ke email Anda.';
+			return { ok: false, error: msg, needsVerification: email.trim() };
+		}
 		return toUserMessage(err, 'Login gagal. Coba lagi nanti.');
 	}
 }
 
 /**
- * Registrasi peserta nyata via backend (POST /api/v1/auth/register).
- * Backend selalu membuat role `student` (K-01: tanpa teacher/admin publik).
+ * Langkah 1 registrasi: minta kode OTP (TANPA membuat akun, TANPA sesi).
+ * Akun permanen dibuat server hanya setelah kode diverifikasi
+ * (lihat `verifyEmailWithBackend`). Berlaku semua peran; backend tetap
+ * membuat role `student` untuk pendaftaran publik (K-01).
  */
+export interface RegisterPending {
+	ok: true;
+	email: string;
+	expiresInSeconds: number;
+	resendCooldownSeconds: number;
+}
+
 export async function registerWithBackend(
 	name: string,
 	email: string,
-	password: string,
+	password: string
+): Promise<RegisterPending | { ok: false; error: string; fieldErrors?: Array<{ field: string; message: string }> }> {
+	try {
+		const result = await registerRequest(name.trim(), email.trim(), password);
+		return {
+			ok: true,
+			email: result.email || email.trim(),
+			expiresInSeconds: result.expiresInSeconds,
+			resendCooldownSeconds: result.resendCooldownSeconds
+		};
+	} catch (err) {
+		return toUserMessage(err, 'Registrasi gagal. Coba lagi nanti.');
+	}
+}
+
+/**
+ * Langkah 2 registrasi: verifikasi kode OTP → server membuat akun permanen
+ * dan menerbitkan sesi/token (sama seperti login sukses).
+ */
+export async function verifyEmailWithBackend(
+	email: string,
+	code: string,
 	rememberMe: boolean
 ): Promise<BackendAuthResult> {
 	try {
-		const payload = await registerRequest(name.trim(), email.trim(), password);
+		const payload = await verifyEmailRequest(email.trim(), code.trim());
 		const session = toSession(payload.user);
 		currentUser = session;
 		persistAuth(session, payload.accessToken, rememberMe);
-		// Seed cache verifikasi seperti login (respons register tervalidasi server).
 		verifiedSession = session;
 		verifiedToken = payload.accessToken;
 		sessionGeneration += 1;
 		return { ok: true, user: session };
 	} catch (err) {
-		return toUserMessage(err, 'Registrasi gagal. Coba lagi nanti.');
+		return toUserMessage(err, 'Verifikasi gagal. Coba lagi nanti.');
+	}
+}
+
+/** Kirim ulang kode OTP registrasi (cooldown dihitung dari respons server). */
+export async function resendVerificationCode(
+	email: string
+): Promise<RegisterPending | { ok: false; error: string }> {
+	try {
+		const result = await resendEmailOtp(email.trim());
+		return {
+			ok: true,
+			email: result.email || email.trim(),
+			expiresInSeconds: result.expiresInSeconds,
+			resendCooldownSeconds: result.resendCooldownSeconds
+		};
+	} catch (err) {
+		return toUserMessage(err, 'Gagal mengirim ulang kode. Coba lagi nanti.');
+	}
+}
+
+/**
+ * Langkah 1 lupa password: minta kode OTP reset.
+ * Selalu dianggap "terkirim" di UI (backend menjawab generik agar tidak
+ * membocorkan daftar email terdaftar).
+ */
+export async function requestPasswordReset(
+	email: string
+): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+	try {
+		const result = await forgotPasswordRequest(email.trim());
+		return { ok: true, message: result.message };
+	} catch (err) {
+		return toUserMessage(err, 'Permintaan gagal. Coba lagi nanti.');
+	}
+}
+
+/**
+ * Langkah 2 lupa password: kode OTP + password baru.
+ * Sukses TIDAK auto-login — user wajib masuk ulang dengan password baru.
+ */
+export async function resetPasswordWithBackend(
+	email: string,
+	code: string,
+	newPassword: string
+): Promise<{ ok: true; message: string } | { ok: false; error: string; fieldErrors?: Array<{ field: string; message: string }> }> {
+	try {
+		const result = await resetPasswordRequest(email.trim(), code.trim(), newPassword);
+		return { ok: true, message: result.message };
+	} catch (err) {
+		return toUserMessage(err, 'Reset password gagal. Coba lagi nanti.');
 	}
 }
 
@@ -321,8 +427,12 @@ async function doVerify(token: string): Promise<VerifyResult> {
 			try {
 				if (localStorage.getItem(TOKEN_KEY)) {
 					localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+					// Salinan sesi di storage lain dibuang: kebenaran ikut token + server,
+					// bukan salinan storage yang bisa ditanam manual.
+					sessionStorage.removeItem(SESSION_KEY);
 				} else {
 					sessionStorage.setItem(SESSION_KEY, JSON.stringify(session));
+					localStorage.removeItem(SESSION_KEY);
 				}
 			} catch {
 				// abaikan
@@ -409,7 +519,13 @@ function isAuthPage(): boolean {
 	if (!browser) return true;
 	try {
 		const p = window.location.pathname;
-		return p === '/login' || p === '/register';
+		return (
+			p === '/login' ||
+			p === '/register' ||
+			p === '/verify-email' ||
+			p === '/lupa-password' ||
+			p === '/reset-password'
+		);
 	} catch {
 		return true;
 	}

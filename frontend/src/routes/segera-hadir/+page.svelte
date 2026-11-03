@@ -2,7 +2,8 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { homeFor, loadSession, type Role } from '$lib/stores/auth.svelte';
+	import { homeFor, verifySession, type Role } from '$lib/stores/auth.svelte';
+	import roketImg from '$lib/assets/roket.png';
 
 	/**
 	 * Halaman independen "Segera Hadir".
@@ -22,13 +23,26 @@
 
 	const featureName = $derived((page.url.searchParams.get('fitur') ?? '').trim() || 'Fitur ini');
 
-	const session = $derived.by(() => {
-		if (!browser) return null;
-		return loadSession();
+	// Target kembali memakai peran TERVERIFIKASI server (/me), bukan isi
+	// storage mentah — sesi lokal yang dipalsukan tidak boleh mengarahkan
+	// ke portal yang bukan haknya (guard portal tetap verifikasi ulang).
+	let verifiedRole = $state<Role | null>(null);
+
+	$effect(() => {
+		if (!browser) return;
+		let cancelled = false;
+		(void (async () => {
+			const res = await verifySession();
+			if (!cancelled && res.ok) verifiedRole = res.session.role;
+		})());
+		return () => {
+			cancelled = true;
+		};
 	});
-	const target = $derived(session ? homeFor(session.role) : '/');
+
+	const target = $derived(verifiedRole ? homeFor(verifiedRole) : '/');
 	const targetLabel = $derived(
-		session ? `Dasbor ${ROLE_LABEL_ID[session.role]}` : 'Beranda'
+		verifiedRole ? `Dasbor ${ROLE_LABEL_ID[verifiedRole]}` : 'Beranda'
 	);
 
 	let remaining = $state(COUNTDOWN_SECONDS);
@@ -54,25 +68,40 @@
 </script>
 
 <svelte:head>
-	<title>Segera Hadir — Aristoteles</title>
+	<title>Segera Hadir — ARISTOTELES</title>
 	<meta name="description" content="Fitur yang Anda buka sedang disiapkan dan akan segera hadir." />
+	<meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
-<div class="flex min-h-screen items-center justify-center bg-slate-50 p-4">
+<div class="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-ice via-white to-slate-50 p-4">
+	<div class="pointer-events-none absolute inset-0" aria-hidden="true">
+		<div class="absolute -top-24 right-[8%] h-72 w-72 rounded-full bg-royal/15 blur-3xl"></div>
+		<div class="absolute bottom-[-6rem] left-[4%] h-72 w-72 rounded-full bg-teal/20 blur-3xl"></div>
+		<div class="absolute inset-0 bg-[radial-gradient(rgba(16,42,86,0.1)_1.2px,transparent_1.2px)] bg-[size:22px_22px] [mask-image:radial-gradient(ellipse_70%_60%_at_50%_40%,black,transparent)]"></div>
+	</div>
 	<main
 		aria-labelledby="segera-hadir-title"
-		class="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200/70 bg-white text-center shadow-xl"
+		class="relative w-full max-w-md overflow-hidden rounded-[1.75rem] border border-slate-200/70 bg-white text-center shadow-2xl shadow-slate-900/10"
 	>
-		<div class="h-1.5 bg-gradient-to-r from-blue-600 via-sky-500 to-blue-600" aria-hidden="true"></div>
+		<div class="h-1.5 bg-gradient-to-r from-blue-600 via-sky-500 to-teal" aria-hidden="true"></div>
 		<div class="p-8 sm:p-10">
-			<span
-				class="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-50 text-2xl text-blue-600"
-				aria-hidden="true"
-			>
-				<i class="fa-solid fa-hourglass-half"></i>
-			</span>
+			<div class="relative mx-auto w-fit">
+				<img
+					src={roketImg}
+					alt="Ilustrasi roket meluncur — fitur segera hadir"
+					loading="eager"
+					class="mx-auto h-56 w-auto drop-shadow-2xl"
+				/>
+				<span class="absolute -right-3 -bottom-3 inline-flex items-center gap-1.5 rounded-full bg-abyss px-3.5 py-1.5 font-heading text-[11px] font-bold tracking-wider text-white uppercase shadow-lg">
+					<span class="relative flex h-2 w-2" aria-hidden="true">
+						<span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-teal opacity-70 motion-reduce:hidden"></span>
+						<span class="relative inline-flex h-2 w-2 rounded-full bg-teal"></span>
+					</span>
+					Segera hadir
+				</span>
+			</div>
 			<p class="mt-5 text-[11px] font-bold tracking-widest text-blue-600 uppercase">
-				Aristoteles · Segera Hadir
+				Aristoteles
 			</p>
 			<h1 id="segera-hadir-title" class="mt-1 text-2xl font-extrabold text-slate-900">
 				{featureName} Segera Hadir

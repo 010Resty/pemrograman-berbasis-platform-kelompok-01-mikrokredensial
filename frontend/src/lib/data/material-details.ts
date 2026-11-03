@@ -6,6 +6,11 @@ export interface QuizQuestion {
 	/** index opsi yang benar */
 	answer: number;
 	explanation?: string;
+	/** Lampiran opsional: URL berkas server (/api/v1/files/...) */
+	imageUrl?: string;
+	audioUrl?: string;
+	fileUrl?: string;
+	fileName?: string;
 }
 
 export interface AssignmentDetail {

@@ -1,8 +1,18 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { page } from '$app/state';
+	import { resolve } from '$app/paths';
 	import { generateHTML } from '@tiptap/html';
+	import type { JSONContent } from '@tiptap/core';
 	import { getCourseById } from '$lib/data/courses';
 	import { getTaskInfo, resolveTaskKey } from '$lib/data/grading';
+	import { isServerId, fetchCourseDetail, fetchMaterialDetail, fileUrl } from '$lib/api/courses';
+	import {
+		fetchMaterialSubmissions,
+		gradeMaterialSubmission,
+		type MaterialSubmissionItem
+	} from '$lib/api/submissions';
+	import { downloadSubmissionFile } from '$lib/services/submission.service';
 	import { resolveSubModules } from '$lib/data/training';
 	import { countDocWords } from '$lib/stores/material-docs';
 	import { loadTaskDraft } from '$lib/stores/task-drafts';
@@ -75,6 +85,180 @@
 	const loading = $derived(gradingLoading());
 	const reviews = $derived(allReviews());
 
+	/* ---- Cabang server: id numerik = materi kursus nyata (mis. dari dasbor Perlu Dinilai) ---- */
+	const serverMode = $derived(
+		isServerId(page.params.courseId) && isServerId(page.params.materialId)
+	);
+
+	let srvLoadedKey = '';
+	let srvLoading = $state(false);
+	let srvError = $state('');
+	let srvCourseTitle = $state('');
+	let srvMaterialTitle = $state('');
+	let srvRows = $state<MaterialSubmissionItem[]>([]);
+	let srvNotice = $state('');
+	let srvNoticeError = $state(false);
+	let srvDownloading = $state<number | null>(null);
+	let srvDownloadError = $state('');
+	let srvBriefHtml = $state('');
+	/** Baris yang sedang diubah nilainya (nilai ulang); null = mode lihat. */
+	let editingRow = $state<number | null>(null);
+
+	const srvPending = $derived(srvRows.filter((r) => r.status === 'submitted').length);
+
+	/** Badge presisi sesuai enum status backend (submitted/reviewed/revision_requested/passed/failed). */
+	function srvStatusMeta(status: string): { label: string; classes: string } {
+		switch (status) {
+			case 'submitted':
+				return { label: 'Menunggu', classes: 'border-amber-200 bg-amber-50 text-amber-700' };
+			case 'revision_requested':
+				return { label: 'Minta revisi', classes: 'border-violet-200 bg-violet-50 text-violet-700' };
+			case 'passed':
+				return { label: 'Lulus', classes: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
+			case 'failed':
+				return { label: 'Tidak lulus', classes: 'border-red-200 bg-red-50 text-red-700' };
+			default:
+				return { label: 'Dinilai', classes: 'border-slate-200 bg-slate-100 text-slate-600' };
+		}
+	}
+
+	function srvNeedsGrade(r: MaterialSubmissionItem): boolean {
+		return r.status === 'submitted' || r.score === null;
+	}
+
+	/** Tiptap JSON materi → HTML; non-JSON jadi teks polos (aman, tanpa innerHTML mentah). */
+	function srvBriefHtmlFrom(raw: string | null): string {
+		if (!raw) return '';
+		try {
+			const json = JSON.parse(raw) as JSONContent;
+			if (json && typeof json === 'object' && json.type === 'doc') {
+				return generateHTML(json, createEditorExtensions(''));
+			}
+		} catch {
+			/* bukan JSON Tiptap — fallback teks di bawah */
+		}
+		const esc = raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+		return `<p>${esc.replaceAll('\n', '<br>')}</p>`;
+	}
+
+	function formatDateTime(iso: string | null): string {
+		if (!iso) return '-';
+		const d = new Date(iso);
+		if (Number.isNaN(d.getTime())) return '-';
+		return d.toLocaleDateString('id-ID', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	}
+
+	async function loadServer(): Promise<void> {
+		srvLoading = true;
+		srvError = '';
+		srvNotice = '';
+		srvNoticeError = false;
+		// Draf nilai statis tidak berlaku untuk baris server.
+		draftScores = {};
+		draftDecisions = {};
+		draftFeedback = {};
+		try {
+			const cid = Number(page.params.courseId);
+			const mid = Number(page.params.materialId);
+			const [course, material, subs] = await Promise.all([
+				fetchCourseDetail(cid).catch(() => null),
+				fetchMaterialDetail(mid).catch(() => null),
+				fetchMaterialSubmissions(mid)
+			]);
+			if (!subs.manager) throw new Error('Akun ini bukan pengampu kursus ini.');
+			srvCourseTitle = course?.title ?? `Kursus #${cid}`;
+			srvMaterialTitle = material?.title ?? `Tugas #${mid}`;
+			srvBriefHtml = srvBriefHtmlFrom(material?.content ?? null);
+			srvRows = subs.rows;
+			editingRow = null;
+		} catch (e) {
+			srvError = e instanceof Error ? e.message : 'Gagal memuat pengumpulan.';
+		} finally {
+			srvLoading = false;
+		}
+	}
+
+	$effect(() => {
+		if (!browser || !serverMode) return;
+		const key = `${page.params.courseId}:${page.params.materialId}`;
+		if (srvLoadedKey === key) return;
+		srvLoadedKey = key;
+		void loadServer();
+	});
+
+	async function submitServerScore(id: number): Promise<void> {
+		const key = String(id);
+		const raw = (draftScores[key] ?? '').trim();
+		const val = Number(raw);
+		if (!raw || !Number.isInteger(val) || val < 0 || val > 100) {
+			srvNotice = 'Masukkan nilai 0–100 terlebih dahulu.';
+			srvNoticeError = true;
+			return;
+		}
+		const decision =
+			draftDecisions[key] === 'failed' || draftDecisions[key] === 'revision_requested'
+				? draftDecisions[key]
+				: 'passed';
+		try {
+			const updated = await gradeMaterialSubmission(Number(page.params.materialId), id, {
+				score: val,
+				decision,
+				feedback: (draftFeedback[key] ?? '').trim() || undefined
+			});
+			srvRows = srvRows.map((r) => (r.id === id ? updated : r));
+			delete draftScores[key];
+			delete draftDecisions[key];
+			delete draftFeedback[key];
+			editingRow = null;
+			srvNotice = `Nilai ${val} tersimpan untuk ${updated.studentName ?? 'peserta'}.`;
+			srvNoticeError = false;
+		} catch (e) {
+			srvNotice = e instanceof Error ? e.message : 'Gagal menyimpan nilai.';
+			srvNoticeError = true;
+		}
+	}
+
+	/** Isi form dengan nilai tersimpan lalu buka mode ubah untuk baris ini. */
+	function startEditRow(r: MaterialSubmissionItem): void {
+		draftScores[String(r.id)] = r.score === null ? '' : String(r.score);
+		draftDecisions[String(r.id)] =
+			r.status === 'failed' ? 'failed' : r.status === 'revision_requested' ? 'revision_requested' : 'passed';
+		draftFeedback[String(r.id)] = r.feedback ?? '';
+		editingRow = r.id;
+		srvNotice = '';
+		srvNoticeError = false;
+	}
+
+	async function downloadServerFile(row: MaterialSubmissionItem): Promise<void> {
+		if (srvDownloading !== null) return;
+		srvDownloading = row.id;
+		srvDownloadError = '';
+		try {
+			const blob = await downloadSubmissionFile(fileUrl(row.fileUrl));
+			const url = URL.createObjectURL(blob);
+			try {
+				const a = document.createElement('a');
+				a.href = url;
+				a.download = row.originalName || `tugas-${row.id}.pdf`;
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+			} finally {
+				setTimeout(() => URL.revokeObjectURL(url), 10_000);
+			}
+		} catch (e) {
+			srvDownloadError = e instanceof Error ? e.message : 'Gagal mengunduh berkas.';
+		} finally {
+			srvDownloading = null;
+		}
+	}
+
 	const items = $derived.by(() => {
 		if (!info) return [];
 		const q = search.trim().toLowerCase();
@@ -124,7 +308,224 @@
 </svelte:head>
 
 <div class="p-4 sm:p-6 lg:p-8">
-	{#if !course || !info}
+	{#if serverMode}
+		<nav aria-label="Breadcrumb" class="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
+			<a href={resolve('/instruktur/penilaian')} class="rounded font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600">Penilaian</a>
+			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
+			<span class="max-w-56 truncate font-semibold text-slate-600">{srvCourseTitle || `Kursus #${page.params.courseId}`}</span>
+			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
+			<span aria-current="page" class="max-w-64 truncate font-medium text-slate-700">{srvMaterialTitle || 'Memuat...'}</span>
+		</nav>
+
+		<section aria-labelledby="srv-heading" class="mb-6 overflow-hidden rounded-2xl border border-slate-200/60 bg-white">
+			<div class="border-b border-slate-100 bg-blue-50/40 px-5 py-4 sm:px-6">
+				<p class="flex items-center gap-1.5 text-[11px] font-extrabold tracking-widest text-blue-700 uppercase">
+					<i class="fa-solid fa-pen-to-square" aria-hidden="true"></i>
+					Penilaian tugas · data server
+				</p>
+				<h1 id="srv-heading" class="mt-1 text-xl font-extrabold tracking-tight text-slate-900 sm:text-2xl">
+					{srvMaterialTitle || 'Memuat tugas...'}
+				</h1>
+				<p class="mt-1 text-xs text-slate-500 sm:text-sm" role="status">
+					{srvRows.length} pengumpulan · {srvPending} menunggu dinilai
+				</p>
+			</div>
+		</section>
+
+		<section aria-label="Deskripsi tugas" class="mb-6 overflow-hidden rounded-2xl border border-slate-200/60 bg-white">
+			<div class="border-b border-slate-100 bg-blue-50/40 px-5 py-3 sm:px-6">
+				<p class="flex items-center gap-1.5 text-[11px] font-extrabold tracking-widest text-blue-700 uppercase">
+					<i class="fa-solid fa-briefcase" aria-hidden="true"></i>
+					Deskripsi tugas
+				</p>
+			</div>
+			<div class="px-5 py-4 sm:px-6">
+				{#if srvBriefHtml}
+					<!-- eslint-disable-next-line svelte/no-at-html-tags -- generateHTML dari JSON Tiptap, bukan HTML mentah -->
+					<div class="mdoc text-sm leading-relaxed text-slate-700">{@html srvBriefHtml}</div>
+				{:else}
+					<p class="text-sm text-slate-400">Belum ada deskripsi untuk tugas ini.</p>
+				{/if}
+			</div>
+		</section>
+
+		{#if srvLoading}
+			<p role="status" class="mb-4 flex items-center gap-2 text-xs font-semibold text-slate-500">
+				<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat pengumpulan dari server...
+			</p>
+		{:else if srvError}
+			<div role="alert" class="mx-auto max-w-lg rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
+				<i class="fa-solid fa-triangle-exclamation mb-3 text-3xl text-red-400" aria-hidden="true"></i>
+				<h1 class="text-xl font-bold text-slate-900">Pengumpulan belum dapat dimuat</h1>
+				<p class="mx-auto mt-1 max-w-md text-sm text-red-600">{srvError}</p>
+				<div class="mt-5 flex justify-center gap-2">
+					<button
+						type="button"
+						onclick={() => {
+							srvLoadedKey = '';
+						}}
+						class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-red-600"
+					>
+						<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+					</button>
+					<a
+						href={resolve('/instruktur')}
+						class="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
+					>
+						<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Dasbor
+					</a>
+				</div>
+			</div>
+		{:else}
+			{#if srvNotice}
+				<p role={srvNoticeError ? 'alert' : 'status'} class={`mb-4 flex items-start gap-2 rounded-xl border px-4 py-3 text-xs font-semibold ${srvNoticeError ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700'}`}>
+					<i class={`fa-solid mt-0.5 shrink-0 ${srvNoticeError ? 'fa-circle-exclamation' : 'fa-circle-check'}`} aria-hidden="true"></i>
+					<span>{srvNotice}</span>
+				</p>
+			{/if}
+			{#if srvDownloadError}
+				<p role="alert" class="mb-4 flex items-start gap-2 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">
+					<i class="fa-solid fa-circle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
+					<span>{srvDownloadError}</span>
+				</p>
+			{/if}
+			<div class="overflow-hidden rounded-2xl border border-slate-200/60 bg-white">
+				{#if srvRows.length === 0}
+					<div class="p-12 text-center">
+						<i class="fa-solid fa-folder-open mb-3 text-3xl text-slate-300" aria-hidden="true"></i>
+						<p class="text-sm font-semibold text-slate-700">Belum ada pengumpulan untuk tugas ini.</p>
+						<p class="mt-1 text-xs text-slate-500">Pengumpulan peserta akan muncul di sini.</p>
+					</div>
+				{:else}
+					<div class="overflow-x-auto">
+						<table class="w-full min-w-[760px] text-left text-sm">
+							<caption class="sr-only">Daftar pengumpulan tugas dari server</caption>
+							<thead>
+								<tr class="border-b border-slate-100 bg-slate-50/60 text-xs text-slate-500">
+									<th scope="col" class="px-5 py-3 font-bold">Peserta</th>
+									<th scope="col" class="px-5 py-3 font-bold">Berkas PDF</th>
+									<th scope="col" class="px-5 py-3 font-bold">Status</th>
+									<th scope="col" class="px-5 py-3 font-bold">Nilai</th>
+									<th scope="col" class="px-5 py-3 text-right font-bold">Aksi</th>
+								</tr>
+							</thead>
+							<tbody class="divide-y divide-slate-100">
+								{#each srvRows as r (r.id)}
+									<tr class="transition-colors duration-200 ease-smooth hover:bg-slate-50/50">
+										<td class="px-5 py-4">
+											<span class="block font-semibold text-slate-900">{r.studentName ?? `Peserta #${r.userId}`}</span>
+											<span class="mt-0.5 block text-xs text-slate-500">{r.studentNim ?? '-'} · {formatDateTime(r.submittedAt)}</span>
+											{#if r.note}
+												<span class="mt-1 block max-w-44 truncate text-[11px] text-slate-500" title={r.note}>“{r.note}”</span>
+											{/if}
+										</td>
+										<td class="px-5 py-4">
+											<button
+												type="button"
+												onclick={() => void downloadServerFile(r)}
+												disabled={srvDownloading !== null}
+												title={r.originalName ?? 'Unduh PDF'}
+												class="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 transition-colors duration-200 ease-smooth hover:bg-violet-100 focus-visible:outline-2 focus-visible:outline-violet-600 disabled:cursor-not-allowed disabled:opacity-60"
+											>
+												{#if srvDownloading === r.id}
+													<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
+												{:else}
+													<i class="fa-solid fa-file-pdf text-red-500" aria-hidden="true"></i>
+												{/if}
+												<span class="max-w-40 truncate">{r.originalName ?? 'Unduh PDF'}</span>
+											</button>
+										</td>
+										<td class="px-5 py-4">
+											{#each [srvStatusMeta(r.status)] as meta (meta.label)}
+												<span class={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${meta.classes}`}>
+													{meta.label}
+												</span>
+											{/each}
+										</td>
+										<td class="px-5 py-4">
+											{#if srvNeedsGrade(r) || editingRow === r.id}
+												<label for={`srv-score-${r.id}`} class="sr-only">Nilai untuk {r.studentName ?? 'peserta'}</label>
+												<div class="flex flex-col gap-1.5">
+													<div class="flex items-center gap-1.5">
+														<input
+															id={`srv-score-${r.id}`}
+															type="number"
+															min="0"
+															max="100"
+															placeholder="0–100"
+															bind:value={draftScores[String(r.id)]}
+															class="w-20 rounded-lg border border-slate-200 px-3 py-2 text-sm font-bold focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+														/>
+														<label for={`srv-decision-${r.id}`} class="sr-only">Keputusan untuk {r.studentName ?? 'peserta'}</label>
+														<select
+															id={`srv-decision-${r.id}`}
+															bind:value={draftDecisions[String(r.id)]}
+															class="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none"
+														>
+															<option value="passed">Lulus</option>
+															<option value="revision_requested">Minta revisi</option>
+															<option value="failed">Tidak lulus</option>
+														</select>
+													</div>
+													<label for={`srv-feedback-${r.id}`} class="sr-only">Umpan balik untuk {r.studentName ?? 'peserta'}</label>
+													<input
+														id={`srv-feedback-${r.id}`}
+														type="text"
+														bind:value={draftFeedback[String(r.id)]}
+														placeholder="Umpan balik (opsional)"
+														class="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+													/>
+												</div>
+												{#if editingRow === r.id && !srvNeedsGrade(r)}
+													<button
+														type="button"
+														onclick={() => {
+															editingRow = null;
+															delete draftScores[String(r.id)];
+															delete draftDecisions[String(r.id)];
+															delete draftFeedback[String(r.id)];
+														}}
+														class="self-start rounded-lg px-1 py-0.5 text-xs font-semibold text-slate-500 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-blue-600"
+													>
+														Batal
+													</button>
+												{/if}
+											{:else}
+												<span class="text-sm font-bold text-emerald-600">{r.score ?? '-'}</span>
+												{#if r.feedback}
+													<span class="mt-1 block max-w-44 truncate text-[11px] text-slate-500" title={r.feedback}>“{r.feedback}”</span>
+												{/if}
+											{/if}
+										</td>
+										<td class="px-5 py-4 text-right">
+											{#if srvNeedsGrade(r) || editingRow === r.id}
+												<button
+													type="button"
+													onclick={() => void submitServerScore(r.id)}
+													class="inline-flex min-h-10 items-center gap-1.5 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
+												>
+													<i class="fa-solid fa-check" aria-hidden="true"></i> Simpan Nilai
+												</button>
+											{:else}
+												<button
+													type="button"
+													onclick={() => startEditRow(r)}
+													aria-label={`Ubah nilai ${r.studentName ?? 'peserta'}`}
+													class="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+												>
+													<i class="fa-solid fa-pen text-[11px]" aria-hidden="true"></i> Ubah
+												</button>
+											{/if}
+										</td>
+									</tr>
+								{/each}
+							</tbody>
+						</table>
+					</div>
+				{/if}
+			</div>
+		{/if}
+	{:else if !course || !info}
 		<div class="mx-auto max-w-lg rounded-2xl border border-slate-200 bg-white p-10 text-center">
 			<i class="fa-solid fa-triangle-exclamation mb-3 text-3xl text-amber-500" aria-hidden="true"></i>
 			<h1 class="text-xl font-bold text-slate-900">Tugas tidak ditemukan</h1>

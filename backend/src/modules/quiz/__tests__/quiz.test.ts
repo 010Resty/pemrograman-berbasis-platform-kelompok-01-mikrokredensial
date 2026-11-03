@@ -110,6 +110,7 @@ before(async () => {
     name: "Guru Kuis",
     email: "gurukuis@uji.io",
     passwordHash: hash,
+    emailVerifiedAt: new Date(),
     role: "teacher",
   });
   const teacherId = Number((tH as unknown as { insertId: number }).insertId);
@@ -118,6 +119,7 @@ before(async () => {
       name: `Murid ${i + 1}`,
       email,
       passwordHash: hash,
+      emailVerifiedAt: new Date(),
       role: "student",
     });
     studentIds.push(Number((h as unknown as { insertId: number }).insertId));
@@ -290,10 +292,63 @@ describe("ambil soal peserta (GET, tanpa kunci)", () => {
     assert.equal(r.http, 200);
     assert.equal(r.json.data.questions.length, 2);
     for (const q of r.json.data.questions) {
-      assert.deepEqual(Object.keys(q).sort(), ["id", "options", "position", "questionText"]);
+      assert.deepEqual(
+        Object.keys(q).sort(),
+        ["audioUrl", "fileName", "fileUrl", "id", "imageUrl", "options", "position", "questionText"]
+      );
       for (const o of q.options as Record<string, unknown>[]) {
         assert.deepEqual(Object.keys(o).sort(), ["id", "optionText", "position"]);
       }
+    }
+  });
+
+  it("lampiran soal: simpan + baca + tolak URL asing", async () => {
+    const withMedia = {
+      questions: [
+        {
+          questionText: "Perhatikan gambar berikut. Bangun apa ini?",
+          imageUrl: "/api/v1/files/99/content",
+          audioUrl: "/api/v1/files/100/content",
+          fileUrl: "/api/v1/files/101/content",
+          fileName: "lembar.pdf",
+          options: [
+            { optionText: "Segitiga", isCorrect: true },
+            { optionText: "Persegi", isCorrect: false },
+          ],
+        },
+      ],
+    };
+    const put = await api<{ questions: Record<string, unknown>[] }>(
+      "PUT",
+      `/api/v1/materials/${quizMat2}/quiz`,
+      tokens.teacher,
+      withMedia
+    );
+    assert.equal(put.http, 200);
+    const saved = put.json.data.questions[0];
+    assert.equal(saved.imageUrl, "/api/v1/files/99/content");
+    assert.equal(saved.fileName, "lembar.pdf");
+    const got = await api<{ questions: Record<string, unknown>[] }>(
+      "GET",
+      `/api/v1/materials/${quizMat2}/quiz`,
+      tokens.s1
+    );
+    assert.equal(got.http, 200);
+    assert.equal(got.json.data.questions[0].imageUrl, "/api/v1/files/99/content");
+    assert.equal(got.json.data.questions[0].audioUrl, "/api/v1/files/100/content");
+    // URL luar / data: / javascript: ditolak 400.
+    for (const bad of [
+      "https://contoh.id/gambar.png",
+      "data:image/png;base64,AAAA",
+      "javascript:alert(1)",
+    ]) {
+      const r = await api(
+        "PUT",
+        `/api/v1/materials/${quizMat2}/quiz`,
+        tokens.teacher,
+        { questions: [{ ...withMedia.questions[0], imageUrl: bad }] }
+      );
+      assert.equal(r.http, 400, bad.slice(0, 30));
     }
   });
 

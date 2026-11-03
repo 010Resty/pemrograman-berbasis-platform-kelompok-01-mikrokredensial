@@ -1,11 +1,14 @@
 import { z } from "zod";
-import { and, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../../db";
 import {
   auditLogs,
+  courseInstructors,
+  courses,
   files,
   materials,
   modules,
+  subModules,
   submissions,
   users,
 } from "../../db/schema";
@@ -49,6 +52,9 @@ export interface PublicSubmission {
   userId: number;
   fileId: number | null;
   fileUrl: string;
+  /** Nama + ukuran berkas asli (untuk label unduh di klien). */
+  originalName: string | null;
+  sizeBytes: number | null;
   studentName: string | null;
   studentNim: string | null;
   note: string | null;
@@ -66,6 +72,8 @@ const toPublicSubmission = (row: typeof submissions.$inferSelect): PublicSubmiss
   userId: row.userId,
   fileId: row.fileId,
   fileUrl: row.filePath,
+  originalName: null,
+  sizeBytes: null,
   studentName: row.studentName,
   studentNim: row.studentNim,
   note: row.note,
@@ -76,6 +84,47 @@ const toPublicSubmission = (row: typeof submissions.$inferSelect): PublicSubmiss
   gradedAt: row.gradedAt,
   submittedAt: row.submittedAt,
 });
+
+/**
+ * Lengkapi payload submission dengan metadata berkas (satu query batch).
+ * Tanpa ini klien hanya bisa menebak nama/ukuran berkas.
+ */
+type SubmissionRow = typeof submissions.$inferSelect;
+const withFileMeta = async (
+  rows: SubmissionRow[]
+): Promise<PublicSubmission[]> => {
+  const ids = [
+    ...new Set(
+      rows.map((r) => r.fileId).filter((x): x is number => x !== null)
+    ),
+  ];
+  const meta = new Map<number, { originalName: string; sizeBytes: number }>();
+  if (ids.length > 0) {
+    const frows = await db
+      .select({
+        id: files.id,
+        originalName: files.originalName,
+        sizeBytes: files.sizeBytes,
+      })
+      .from(files)
+      .where(inArray(files.id, ids));
+    for (const f of frows) {
+      meta.set(f.id, { originalName: f.originalName, sizeBytes: f.sizeBytes });
+    }
+  }
+  return rows.map((r) => ({
+    ...toPublicSubmission(r),
+    originalName:
+      r.fileId !== null ? (meta.get(r.fileId)?.originalName ?? null) : null,
+    sizeBytes:
+      r.fileId !== null ? (meta.get(r.fileId)?.sizeBytes ?? null) : null,
+  }));
+};
+
+/** Varian satu baris (map 1:1, tidak pernah mengurangi baris). */
+const withFileMetaOne = async (
+  row: SubmissionRow
+): Promise<PublicSubmission> => (await withFileMeta([row]))[0] as PublicSubmission;
 
 // ---------- Helper internal ----------
 
@@ -200,7 +249,7 @@ export const createSubmission = async (
     .where(eq(submissions.id, id))
     .limit(1);
   if (!created[0]) throw new Error("Gagal menyimpan submission");
-  return toPublicSubmission(created[0]);
+  return withFileMetaOne(created[0]);
 };
 
 // ---------- Daftar & detail ----------
@@ -229,7 +278,7 @@ export const listSubmissions = async (
       .from(submissions)
       .where(and(...conditions))
       .orderBy(desc(submissions.submittedAt), desc(submissions.id));
-    return { manager: true, rows: rows.map(toPublicSubmission) };
+    return { manager: true, rows: await withFileMeta(rows) };
   }
   // Peserta: butuh hak akses belajar, lalu hanya baris milik sendiri.
   const guard = await resolveLearningGuard(viewerId, role, materialId);
@@ -253,7 +302,228 @@ export const listSubmissions = async (
       )
     )
     .orderBy(desc(submissions.submittedAt), desc(submissions.id));
-  return { manager: false, rows: rows.map(toPublicSubmission) };
+  return { manager: false, rows: await withFileMeta(rows) };
+};
+
+// ---------- Antrean penilaian instruktur (agregat satu request) ----------
+
+export interface QueueTaskItem {
+  materialId: number;
+  title: string;
+  moduleTitle: string;
+  moduleIndex: number;
+  duration: string | null;
+  pending: number;
+  graded: number;
+  total: number;
+  avgScore: number | null;
+}
+
+export interface QueueCourseItem {
+  id: number;
+  title: string;
+  category: string | null;
+  image: string | null;
+  tasks: QueueTaskItem[];
+  pending: number;
+  graded: number;
+  total: number;
+}
+
+export interface ReviewQueueResult {
+  courses: QueueCourseItem[];
+  pendingTotal: number;
+  gradedTotal: number;
+  avgScore: number | null;
+}
+
+/**
+ * Agregat antrean penilaian untuk pengelola: kursus kelola (dibuat +
+ * ditugaskan; admin = semua) → materi `tugas` → hitungan pengumpulan.
+ * Satu respons menggantikan kipas N request kursus × materi di klien.
+ */
+export const getInstructorReviewQueue = async (
+  viewerId: number,
+  role: string
+): Promise<ReviewQueueResult> => {
+  const managedIds = async (): Promise<number[]> => {
+    if (role === "admin") {
+      const all = await db.select({ id: courses.id }).from(courses);
+      return all.map((c) => c.id);
+    }
+    const links = await db
+      .select({ courseId: courseInstructors.courseId })
+      .from(courseInstructors)
+      .where(eq(courseInstructors.userId, viewerId));
+    const ids = new Set(links.map((l) => l.courseId));
+    const created = await db
+      .select({ id: courses.id })
+      .from(courses)
+      .where(eq(courses.createdBy, viewerId));
+    for (const c of created) ids.add(c.id);
+    return [...ids];
+  };
+
+  const courseIds = await managedIds();
+  const empty: ReviewQueueResult = {
+    courses: [],
+    pendingTotal: 0,
+    gradedTotal: 0,
+    avgScore: null,
+  };
+  if (courseIds.length === 0) return empty;
+
+  const courseRows = await db
+    .select({
+      id: courses.id,
+      title: courses.title,
+      category: courses.category,
+      image: courses.image,
+    })
+    .from(courses)
+    .where(inArray(courses.id, courseIds));
+
+  const modRows = await db
+    .select({
+      id: modules.id,
+      courseId: modules.courseId,
+      title: modules.title,
+      position: modules.position,
+    })
+    .from(modules)
+    .where(inArray(modules.courseId, courseIds))
+    .orderBy(asc(modules.courseId), asc(modules.position), asc(modules.id));
+  if (modRows.length === 0) {
+    return {
+      ...empty,
+      courses: courseRows.map((c) => ({
+        ...c,
+        tasks: [],
+        pending: 0,
+        graded: 0,
+        total: 0,
+      })),
+    };
+  }
+
+  const modIds = modRows.map((m) => m.id);
+  const [subRows, matRows] = await Promise.all([
+    db
+      .select({
+        id: subModules.id,
+        moduleId: subModules.moduleId,
+        title: subModules.title,
+        position: subModules.position,
+      })
+      .from(subModules)
+      .where(inArray(subModules.moduleId, modIds))
+      .orderBy(asc(subModules.position), asc(subModules.id)),
+    db
+      .select({
+        id: materials.id,
+        moduleId: materials.moduleId,
+        subModuleId: materials.subModuleId,
+        title: materials.title,
+        type: materials.type,
+        duration: materials.duration,
+        position: materials.position,
+      })
+      .from(materials)
+      .where(inArray(materials.moduleId, modIds))
+      .orderBy(asc(materials.position), asc(materials.id)),
+  ]);
+
+  // Modul tanpa sub-modul tetap jalan: materi subModuleId NULL ikut modulnya.
+  const tasksByCourse = new Map<number, QueueTaskItem[]>();
+  const taskMats = matRows.filter((m) => m.type === "tugas");
+  const modById = new Map(modRows.map((m) => [m.id, m]));
+  const byModuleCourse = new Map<number, number>();
+  for (const m of modRows) byModuleCourse.set(m.id, m.courseId);
+  // Nomor modul terurut per kursus (label "Modul N").
+  const modIndex = new Map<number, number>();
+  {
+    const perCourse = new Map<number, typeof modRows>();
+    for (const m of modRows) {
+      const list = perCourse.get(m.courseId) ?? [];
+      list.push(m);
+      perCourse.set(m.courseId, list);
+    }
+    for (const list of perCourse.values()) {
+      list.forEach((m, i) => modIndex.set(m.id, i + 1));
+    }
+  }
+  const taskIds = taskMats.map((m) => m.id);
+  const gradeRows = taskIds.length > 0
+    ? await db
+        .select({
+          materialId: submissions.materialId,
+          status: submissions.status,
+          score: submissions.score,
+        })
+        .from(submissions)
+        .where(inArray(submissions.materialId, taskIds))
+    : [];
+  const subsByMat = new Map<number, typeof gradeRows>();
+  for (const s of gradeRows) {
+    const list = subsByMat.get(s.materialId) ?? [];
+    list.push(s);
+    subsByMat.set(s.materialId, list);
+  }
+
+  for (const m of taskMats) {
+    const courseId = byModuleCourse.get(m.moduleId);
+    const mod = modById.get(m.moduleId);
+    if (courseId === undefined || !mod) continue;
+    const rows = subsByMat.get(m.id) ?? [];
+    const scores = rows.filter((r) => r.score !== null).map((r) => r.score as number);
+    const list = tasksByCourse.get(courseId) ?? [];
+    list.push({
+      materialId: m.id,
+      title: m.title,
+      moduleTitle: mod.title,
+      moduleIndex: modIndex.get(m.moduleId) ?? 0,
+      duration: m.duration,
+      pending: rows.filter((r) => r.status === "submitted").length,
+      graded: scores.length,
+      total: rows.length,
+      avgScore:
+        scores.length > 0
+          ? Math.round(scores.reduce((n, s) => n + s, 0) / scores.length)
+          : null,
+    });
+    tasksByCourse.set(courseId, list);
+  }
+
+  const courseOrder = new Map(courseIds.map((id, i) => [id, i]));
+  const outCourses: QueueCourseItem[] = courseRows
+    .map((c) => {
+      const tasks = tasksByCourse.get(c.id) ?? [];
+      return {
+        ...c,
+        tasks,
+        pending: tasks.reduce((n, t) => n + t.pending, 0),
+        graded: tasks.reduce((n, t) => n + t.graded, 0),
+        total: tasks.reduce((n, t) => n + t.total, 0),
+      };
+    })
+    .sort((a, b) => (courseOrder.get(a.id) ?? 0) - (courseOrder.get(b.id) ?? 0));
+
+  let wSum = 0;
+  let wN = 0;
+  for (const c of outCourses) {
+    for (const t of c.tasks) {
+      if (t.avgScore !== null && t.graded > 0) {
+        wSum += t.avgScore * t.graded;
+        wN += t.graded;
+      }
+    }
+  }
+  return {
+    courses: outCourses,
+    pendingTotal: outCourses.reduce((n, c) => n + c.pending, 0),
+    gradedTotal: outCourses.reduce((n, c) => n + c.graded, 0),
+    avgScore: wN > 0 ? Math.round(wSum / wN) : null,
+  };
 };
 
 /** Detail satu submission: pengelola boleh membaca semua; peserta hanya miliknya
@@ -284,7 +554,7 @@ export const getSubmission = async (
     );
   }
   const managerCourse = await isCourseManagerOfMaterial(viewerId, role, materialId);
-  if (managerCourse !== null || role === "admin") return toPublicSubmission(row);
+  if (managerCourse !== null || role === "admin") return withFileMetaOne(row);
   if (row.userId !== viewerId) {
     throw new SubmissionError(
       404,
@@ -308,7 +578,7 @@ export const getSubmission = async (
       "Anda tidak memiliki akses ke kursus ini"
     );
   }
-  return toPublicSubmission(row);
+  return withFileMetaOne(row);
 };
 
 // ---------- Penilaian ----------
@@ -397,7 +667,7 @@ export const gradeSubmission = async (
       "Submission tidak ditemukan"
     );
   }
-  return toPublicSubmission(updated);
+  return withFileMetaOne(updated);
 };
 
 // ---------- Status kelulusan per materi (dipakai frontend + Tahap 3 sertifikat) ----------
@@ -452,6 +722,7 @@ export const getTaskStatus = async (
     };
   }
   const scores = rows.map((r) => r.score).filter((s): s is number => s !== null);
+  const lastSubmission = rows[0] !== undefined ? await withFileMetaOne(rows[0]) : null;
   return {
     materialId,
     attempts: rows.length,
@@ -459,6 +730,6 @@ export const getTaskStatus = async (
     passed: rows.some((r) => r.status === "passed"),
     lastStatus: rows[0].status,
     bestScore: scores.length > 0 ? Math.max(...scores) : null,
-    lastSubmission: toPublicSubmission(rows[0]),
+    lastSubmission,
   };
 };

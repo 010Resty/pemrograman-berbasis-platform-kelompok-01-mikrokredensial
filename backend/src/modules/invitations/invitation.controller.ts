@@ -7,6 +7,7 @@ import {
   createInvitation,
   createInvitationSchema,
   listInvitations,
+  reissueInvitation,
   revokeInvitation,
   validateInvitation,
 } from "./invitation.service";
@@ -133,6 +134,42 @@ export const revokeHandler = async (
         status: "success",
         message: "Undangan dicabut.",
         data: await revokeInvitation(actorId, id, reason),
+      });
+    } catch (e) {
+      if (!invitationError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// POST /api/v1/admin/invitations/:id/reissue — token baru + kirim email.
+export const reissueHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const actorId = needAdmin(req, res);
+    if (actorId === null) return;
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(404).json({
+        status: "error",
+        message: "Undangan tidak ditemukan",
+        code: "INVITATION_NOT_FOUND",
+        data: null,
+      });
+      return;
+    }
+    try {
+      const result = await reissueInvitation(actorId, id);
+      res.status(200).json({
+        status: "success",
+        message: result.emailSent
+          ? "Undangan dikirim ulang ke email penerima."
+          : "Token baru diterbitkan, tetapi email gagal terkirim. Salin tautan berikut — hanya tampil sekali.",
+        data: result,
       });
     } catch (e) {
       if (!invitationError(res, e)) throw e;

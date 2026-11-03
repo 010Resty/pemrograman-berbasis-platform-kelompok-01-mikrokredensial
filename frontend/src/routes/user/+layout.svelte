@@ -8,6 +8,7 @@
 	import { getCurrentUser, homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
 	import { fetchMyCertificates, fetchMyEnrollments } from '$lib/api/progress';
+	import { syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
 	import { untrack } from 'svelte';
 
 	let { children } = $props();
@@ -39,6 +40,8 @@
 			]);
 			courseBadge = String(enrollments.length);
 			certBadge = String(certs.filter((c) => c.status === 'issued').length);
+			// Gerbang materi (ownedCourses) ikut kebenaran server yang sama.
+			void syncEnrollmentsFromServer(enrollments);
 		} catch {
 			// Abaikan: navigasi tetap jalan tanpa badge.
 		}
@@ -139,6 +142,8 @@
 				onClose={() => (sidebarOpen = false)}
 				onLogout={handleLogout}
 				profileName={displayName}
+				profileRole="Mahasiswa"
+				profileAlt={`Foto profil ${displayName}`}
 			/>
 
 	<!-- Main column -->

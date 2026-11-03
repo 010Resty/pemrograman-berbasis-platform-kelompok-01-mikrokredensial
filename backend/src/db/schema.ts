@@ -25,7 +25,12 @@ export const users = mysqlTable("users", {
   role: mysqlEnum("role", ["student", "teacher", "admin"])
     .notNull()
     .default("student"),
+  // Keahlian instruktur (opsional, dikelola admin; NULL = belum diisi).
+  expertise: varchar("expertise", { length: 100 }),
   // Penonaktifan oleh admin; ditegakkan saat login (jendela token ≤15 mnt).
+  // Penanda verifikasi email alur OTP. NULL = belum diverifikasi.
+  // Baris lama di-backfill saat migrasi 0008.
+  emailVerifiedAt: timestamp("email_verified_at"),
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
@@ -200,13 +205,21 @@ export const materials = mysqlTable("materials", {
 // Byte berkas TIDAK di database — kolom ini hanya penunjuk + metadata.
 export const files = mysqlTable("files", {
   id: int("id").autoincrement().primaryKey(),
-  ownerUserId: int("owner_user_id")
-    .notNull()
-    .references(() => users.id, {
-      onDelete: "cascade",
-      onUpdate: "cascade",
-    }),
-  kind: mysqlEnum("kind", ["image", "audio", "pdf", "cover", "assignment"])
+  // Pemilik NULL = unggahan publik tanpa akun (mis. pengajuan instruktur).
+  // Berkas jenis applicant_* hanya boleh dibaca admin (lihat serveFile).
+  ownerUserId: int("owner_user_id").references(() => users.id, {
+    onDelete: "cascade",
+    onUpdate: "cascade",
+  }),
+  kind: mysqlEnum("kind", [
+    "image",
+    "audio",
+    "pdf",
+    "cover",
+    "assignment",
+    "applicant_image",
+    "applicant_cv",
+  ])
     .notNull()
     .default("image"),
   originalName: varchar("original_name", { length: 255 }).notNull(),
@@ -279,6 +292,10 @@ export interface QuizSnapshotQuestion {
   position: number;
   questionText: string;
   explanation: string | null;
+  imageUrl: string | null;
+  audioUrl: string | null;
+  fileUrl: string | null;
+  fileName: string | null;
   options: QuizSnapshotOption[];
 }
 
@@ -333,6 +350,12 @@ export const quizQuestions = mysqlTable(
     position: int("position").notNull(),
     questionText: text("question_text").notNull(),
     explanation: text("explanation"),
+    // Lampiran opsional per soal (URL berkas server /api/v1/files/...,
+    // diunggah via POST /uploads; NULL = tanpa lampiran).
+    imageUrl: varchar("image_url", { length: 500 }),
+    audioUrl: varchar("audio_url", { length: 500 }),
+    fileUrl: varchar("file_url", { length: 500 }),
+    fileName: varchar("file_name", { length: 255 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
   },
@@ -602,3 +625,81 @@ export const certificates = mysqlTable(
     issuedIdx: index("certificates_issued_idx").on(table.issuedAt),
   })
 );
+
+// Registrasi tertunda alur OTP email (K-01: publik hanya student).
+// Akun permanen di `users` baru dibuat saat kode diverifikasi
+// (POST /auth/verify-email). Satu baris aktif per email.
+export const emailVerificationPending = mysqlTable(
+  "email_verification_pending",
+  {
+    email: varchar("email", { length: 191 }).primaryKey(),
+    name: varchar("name", { length: 100 }).notNull(),
+    passwordHash: varchar("password_hash", { length: 255 }).notNull(),
+    codeHash: varchar("code_hash", { length: 64 }).notNull(),
+    expiresAt: timestamp("expires_at").notNull(),
+    attempts: int("attempts").notNull().default(0),
+    lastSentAt: timestamp("last_sent_at").defaultNow().notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  }
+);
+
+// Pengajuan minat menjadi instruktur (formulir publik /menjadi-instruktur).
+// BUKAN akun (K-01): akun resmi tetap lahir dari undangan admin
+// (POST /admin/invitations → /invitations/accept). Satu email satu pengajuan.
+export const instructorApplications = mysqlTable(
+  "instructor_applications",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    // Kode pelacakan pendaftar, mis. APL-7KQ2XA.
+    code: varchar("code", { length: 12 }).notNull().unique(),
+    name: varchar("name", { length: 100 }).notNull(),
+    email: varchar("email", { length: 191 }).notNull().unique(),
+    about: text("about"),
+    skills: varchar("skills", { length: 255 }),
+    youtubeTutorial: varchar("youtube_tutorial", { length: 500 }),
+    youtubeChannel: varchar("youtube_channel", { length: 500 }),
+    linkedin: varchar("linkedin", { length: 500 }),
+    referralEmail: varchar("referral_email", { length: 191 }),
+    photoFileId: int("photo_file_id").references(() => files.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    cvFileId: int("cv_file_id").references(() => files.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    cvName: varchar("cv_name", { length: 255 }),
+    cvSize: int("cv_size").notNull().default(0),
+    status: mysqlEnum("status", [
+      "submitted",
+      "under_review",
+      "approved",
+      "rejected",
+    ])
+      .notNull()
+      .default("submitted"),
+    reviewNote: text("review_note"),
+    reviewedBy: int("reviewed_by").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    reviewedAt: timestamp("reviewed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    emailIdx: index("instructor_applications_email_idx").on(table.email),
+    statusIdx: index("instructor_applications_status_idx").on(table.status),
+  })
+);
+
+// OTP reset password. Respons lupa-password selalu generik agar tidak
+// membocorkan daftar email terdaftar. Satu baris aktif per email.
+export const passwordResetOtps = mysqlTable("password_reset_otps", {
+  email: varchar("email", { length: 191 }).primaryKey(),
+  codeHash: varchar("code_hash", { length: 64 }).notNull(),
+  expiresAt: timestamp("expires_at").notNull(),
+  attempts: int("attempts").notNull().default(0),
+  lastSentAt: timestamp("last_sent_at").defaultNow().notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+});

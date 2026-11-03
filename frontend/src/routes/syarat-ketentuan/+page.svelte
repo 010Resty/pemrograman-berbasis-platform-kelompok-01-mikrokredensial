@@ -2,6 +2,8 @@
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import { resolve } from '$app/paths';
+	import SeoHead from '$lib/components/SeoHead.svelte';
+	import { canonicalPath, getSiteUrl } from '$lib/seo/site';
 
 	const updatedAt = '27 Oktober 2026';
 
@@ -57,13 +59,34 @@
 	];
 </script>
 
-<svelte:head>
-	<title>Syarat & Ketentuan Pendaftaran — Aristoteles</title>
-	<meta
-		name="description"
-		content="Syarat dan ketentuan pendaftaran pelatihan di Platform Mikrokredensial Aristoteles: kelayakan peserta, akurasi data sertifikat, keamanan akun, hak cipta materi, kejujuran akademik, penerbitan sertifikat, dan persetujuan pengguna."
-	/>
-</svelte:head>
+<SeoHead
+	title="Syarat & Ketentuan — ARISTOTELES"
+	description="Syarat & ketentuan ARISTOTELES: kelayakan peserta, keamanan akun, kejujuran akademik, syarat penerbitan sertifikat, dan hak cipta materi kursus."
+	path="/syarat-ketentuan"
+	jsonLd={[
+		{
+			'@context': 'https://schema.org',
+			'@type': 'WebPage',
+			name: 'Syarat dan Ketentuan ARISTOTELES',
+			url: canonicalPath('/syarat-ketentuan'),
+			inLanguage: 'id-ID',
+			isPartOf: { '@type': 'WebSite', name: 'ARISTOTELES', url: getSiteUrl() }
+		},
+		{
+			'@context': 'https://schema.org',
+			'@type': 'BreadcrumbList',
+			itemListElement: [
+				{ '@type': 'ListItem', position: 1, name: 'Beranda', item: canonicalPath('/') },
+				{
+					'@type': 'ListItem',
+					position: 2,
+					name: 'Syarat dan Ketentuan',
+					item: canonicalPath('/syarat-ketentuan')
+				}
+			]
+		}
+	]}
+/>
 
 <header class="sticky top-0 z-50 bg-white shadow-sm">
 	<div class="mx-auto flex h-16 max-w-4xl items-center justify-between gap-3 px-4 sm:px-6">

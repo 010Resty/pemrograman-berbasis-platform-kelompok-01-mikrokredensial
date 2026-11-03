@@ -73,6 +73,7 @@ async function seedUsers(passwordHash: string) {
       email: "rayyan@gmail.com",
       passwordHash,
       role: "student",
+      emailVerifiedAt: new Date(),
     },
   ]);
   console.log("[seed] users: 1 (student)");

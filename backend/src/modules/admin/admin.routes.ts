@@ -5,8 +5,8 @@ import {
   createTeacherHandler,
   listUsersHandler,
   overviewHandler,
-  setActiveHandler,
   unassignHandler,
+  updateUserHandler,
   userDetailHandler,
 } from "./admin.controller";
 
@@ -20,7 +20,7 @@ router.get("/admin/overview", ...admin, overviewHandler);
 router.get("/admin/users", ...admin, listUsersHandler);
 router.get("/admin/users/:id", ...admin, userDetailHandler);
 router.post("/admin/users", ...admin, createTeacherHandler);
-router.patch("/admin/users/:id", ...admin, setActiveHandler);
+router.patch("/admin/users/:id", ...admin, updateUserHandler);
 
 // Penugasan instruktur ke kursus.
 router.post("/admin/courses/:id/instructors", ...admin, assignHandler);

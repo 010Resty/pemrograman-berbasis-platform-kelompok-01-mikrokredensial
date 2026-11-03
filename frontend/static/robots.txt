@@ -1,3 +1,19 @@
-# allow crawling everything by default
+# robots.txt ARISTOTELES — izinkan crawl halaman publik, hemat budget crawl
+# dengan memblokir area privat/auth/API. Ganti domain Sitemap bila produksi
+# memakai domain selain aristoteles.id (atau set PUBLIC_SITE_URL).
 User-agent: *
-Disallow:
+Allow: /
+
+Disallow: /admin/
+Disallow: /user/
+Disallow: /instruktur/
+Disallow: /api/
+Disallow: /login
+Disallow: /register
+Disallow: /lupa-password
+Disallow: /reset-password
+Disallow: /verify-email
+Disallow: /invite/
+Disallow: /segera-hadir
+
+Sitemap: https://aristoteles.id/sitemap.xml

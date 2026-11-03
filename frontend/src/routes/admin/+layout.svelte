@@ -81,6 +81,7 @@
 	const navItems = $derived<NavItem[]>([
 		{ label: 'Dasbor', icon: 'fa-house', href: '/admin' },
 		{ label: 'Peserta', icon: 'fa-users', href: '/admin/peserta', badge: studentBadge },
+		{ label: 'Pengajuan', icon: 'fa-user-plus', href: '/admin/pengajuan-instruktur' },
 		{ label: 'Undangan', icon: 'fa-envelope-open-text', href: '/admin/invitations' },
 		{ label: 'Instruktur', icon: 'fa-chalkboard-user', href: '/admin/instrukturs', badge: teacherBadge },
 		{ label: 'Kursus', icon: 'fa-layer-group', href: '/admin/courses', badge: courseBadge },

@@ -4,7 +4,7 @@
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
-	import { homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
+	import { getCurrentUser, homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
 	import { fetchInstructorDashboard } from '$lib/api/dashboard';
 	import { fetchCertificateSummary } from '$lib/api/certificates';
@@ -93,6 +93,14 @@
 	function handleWindowKeydown(e: KeyboardEvent) {
 		if (e.key === 'Escape') closeProfileMenu();
 	}
+
+	// Profil dari sesi auth (bukan data dummy): nama/email milik akun yang login.
+	const session = $derived(getCurrentUser());
+	const displayName = $derived(session?.name ?? 'Instruktur');
+	const displayEmail = $derived(session?.email ?? '');
+	const displayInitials = $derived(
+		(displayName.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('') || 'IN').toUpperCase()
+	);
 </script>
 
 <svelte:window onkeydown={handleWindowKeydown} />
@@ -115,9 +123,9 @@
 		brandHref="/instruktur"
 		brandLabel="Aristoteles Platform - Dashboard instruktur"
 		navAriaLabel="Navigasi instruktur"
-		profileName="KEVIN PERRY"
+		profileName={displayName}
 		profileRole="Instruktur"
-		profileAlt="Foto profil Kevin Perry"
+		profileAlt={`Foto profil ${displayName}`}
 	/>
 
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -199,7 +207,7 @@
 							type="button"
 							class="flex items-center gap-2.5 rounded-xl p-1.5 pr-3 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
 							onclick={toggleProfileMenu}
-							aria-label="Menu profil Kevin Perry"
+							aria-label={`Menu profil ${displayName}`}
 							aria-expanded={showProfileMenu}
 							aria-haspopup="menu"
 						>
@@ -207,11 +215,11 @@
 								class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-sm font-bold text-white shadow-md"
 								aria-hidden="true"
 							>
-								KP
+								{displayInitials}
 							</span>
 							<span class="hidden text-left sm:block">
 								<span class="block text-sm leading-tight font-semibold text-slate-800"
-									>Kevin Perry</span
+									>{displayName}</span
 								>
 								<span class="block text-xs leading-tight text-slate-500">Instruktur</span>
 							</span>
@@ -225,8 +233,8 @@
 								class="absolute top-full right-0 z-50 mt-2 w-56 overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-xl"
 							>
 								<div class="border-b border-slate-100 px-4 py-3">
-									<div class="text-sm font-semibold text-slate-800">Kevin Perry</div>
-									<div class="text-xs text-slate-500">kevin@aristoteles.ac.id</div>
+									<div class="text-sm font-semibold text-slate-800">{displayName}</div>
+									<div class="text-xs text-slate-500">{displayEmail}</div>
 								</div>
 								<div class="p-1.5" role="none">
 									<a

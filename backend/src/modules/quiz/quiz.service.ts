@@ -27,9 +27,31 @@ const quizOptionInputSchema = z.object({
   position: z.number().int().min(0).max(10000).optional(),
 });
 
+// Lampiran soal hanya boleh URL berkas server (/api/v1/files/...) hasil
+// POST /uploads — URL luar, data:, dan javascript: ditolak (anti-XSS).
+// String kosong dinormalisasi menjadi undefined (= tanpa lampiran).
+const serverFileUrl = z
+  .string()
+  .trim()
+  .max(500)
+  .optional()
+  .transform((v) => (v === undefined || v === "" ? undefined : v))
+  .refine((v) => v === undefined || v.startsWith("/api/v1/files/"), {
+    message: "Lampiran soal harus URL berkas server (/api/v1/files/...)",
+  });
+
 const quizQuestionInputSchema = z.object({
   questionText: z.string().trim().min(1).max(5000),
   explanation: z.string().trim().max(5000).nullable().optional(),
+  imageUrl: serverFileUrl,
+  audioUrl: serverFileUrl,
+  fileUrl: serverFileUrl,
+  fileName: z
+    .string()
+    .trim()
+    .max(255)
+    .optional()
+    .transform((v) => (v === undefined || v === "" ? undefined : v)),
   position: z.number().int().min(0).max(10000).optional(),
   options: z.array(quizOptionInputSchema).min(2).max(10),
 }).refine((q) => q.options.filter((o) => o.isCorrect).length === 1, {
@@ -76,6 +98,10 @@ export interface TakingQuestion {
   id: number;
   position: number;
   questionText: string;
+  imageUrl: string | null;
+  audioUrl: string | null;
+  fileUrl: string | null;
+  fileName: string | null;
   options: TakingOption[];
 }
 
@@ -124,6 +150,10 @@ interface QuestionRow {
   position: number;
   questionText: string;
   explanation: string | null;
+  imageUrl: string | null;
+  audioUrl: string | null;
+  fileUrl: string | null;
+  fileName: string | null;
   options: OptionRow[];
 }
 
@@ -160,6 +190,10 @@ const listQuestionsInternal = async (materialId: number): Promise<QuestionRow[]>
     position: q.position,
     questionText: q.questionText,
     explanation: q.explanation,
+    imageUrl: q.imageUrl,
+    audioUrl: q.audioUrl,
+    fileUrl: q.fileUrl,
+    fileName: q.fileName,
     options: byQ.get(q.id) ?? [],
   }));
 };
@@ -187,6 +221,10 @@ export const getQuizForTaking = async (
     id: q.id,
     position: q.position,
     questionText: q.questionText,
+    imageUrl: q.imageUrl,
+    audioUrl: q.audioUrl,
+    fileUrl: q.fileUrl,
+    fileName: q.fileName,
     options: q.options.map((o) => ({
       id: o.id,
       position: o.position,
@@ -219,6 +257,10 @@ export const replaceQuiz = async (materialId: number, input: QuizSetInput) => {
         position: q.position ?? qi,
         questionText: q.questionText,
         explanation: q.explanation ?? null,
+        imageUrl: q.imageUrl ?? null,
+        audioUrl: q.audioUrl ?? null,
+        fileUrl: q.fileUrl ?? null,
+        fileName: q.fileName ?? null,
       });
       const qid = Number((qh as unknown as { insertId: number }).insertId);
       const opts = [];
@@ -242,6 +284,10 @@ export const replaceQuiz = async (materialId: number, input: QuizSetInput) => {
         position: q.position ?? qi,
         questionText: q.questionText,
         explanation: q.explanation ?? null,
+        imageUrl: q.imageUrl ?? null,
+        audioUrl: q.audioUrl ?? null,
+        fileUrl: q.fileUrl ?? null,
+        fileName: q.fileName ?? null,
         options: opts,
       });
     }
@@ -297,6 +343,10 @@ export const gradeAttempt = async (
       position: q.position,
       questionText: q.questionText,
       explanation: q.explanation,
+      imageUrl: q.imageUrl,
+      audioUrl: q.audioUrl,
+      fileUrl: q.fileUrl,
+      fileName: q.fileName,
       options: q.options.map((o) => ({
         id: o.id,
         position: o.position,

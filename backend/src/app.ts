@@ -9,6 +9,7 @@ import certificateRoutes from "./modules/certificates/certificate.routes";
 import voucherRoutes from "./modules/vouchers/voucher.routes";
 import adminRoutes from "./modules/admin/admin.routes";
 import invitationRoutes from "./modules/invitations/invitation.routes";
+import applicationRoutes from "./modules/applications/application.routes";
 import dashboardRoutes from "./modules/dashboard/dashboard.routes";
 import { uploadsRouter, filesRouter } from "./modules/uploads/upload.routes";
 import express, { Application, Request, Response, NextFunction } from "express";
@@ -76,6 +77,8 @@ app.use("/api/v1", voucherRoutes);
 app.use("/api/v1", adminRoutes);
 // Undangan instruktur (kelola admin, aktivasi publik)
 app.use("/api/v1", invitationRoutes);
+// Pengajuan minat instruktur (publik) + peninjauan (admin, K-01)
+app.use("/api/v1", applicationRoutes);
 
 // Upload & serve berkas (gambar/audio/PDF/cover/tugas)
 app.use("/api/v1/uploads", uploadsRouter);

@@ -42,7 +42,15 @@
 	let sqLoading = $state(false);
 	let sqError = $state('');
 	let serverQuestions = $state<
-		Array<{ id: number; questionText: string; options: Array<{ id: number; optionText: string }> }>
+		Array<{
+			id: number;
+			questionText: string;
+			imageUrl: string | null;
+			audioUrl: string | null;
+			fileUrl: string | null;
+			fileName: string | null;
+			options: Array<{ id: number; optionText: string }>;
+		}>
 	>([]);
 	let serverLoadedFor = $state<string | null>(null);
 	let best = $state<QuizBest | null>(null);
@@ -76,6 +84,43 @@
 			return serverQuestions[qi]?.options.map((o) => o.optionText) ?? [];
 		}
 		return questions[qi]?.options ?? [];
+	}
+
+	/** Hanya URL berkas server yang dirender (anti-XSS walau data usang). */
+	function isServerFileUrl(v: unknown): v is string {
+		return typeof v === 'string' && v.startsWith('/api/v1/files/');
+	}
+
+	function questionMedia(qi: number): {
+		imageUrl?: string;
+		audioUrl?: string;
+		fileUrl?: string;
+		fileName?: string;
+	} {
+		const raw = serverMode
+			? (serverQuestions[qi] as
+					| {
+							imageUrl?: unknown;
+							audioUrl?: unknown;
+							fileUrl?: unknown;
+							fileName?: unknown;
+						}
+					| undefined)
+			: (questions[qi] as
+					| {
+							imageUrl?: unknown;
+							audioUrl?: unknown;
+							fileUrl?: unknown;
+							fileName?: unknown;
+						}
+					| undefined);
+		if (!raw) return {};
+		return {
+			imageUrl: isServerFileUrl(raw.imageUrl) ? raw.imageUrl : undefined,
+			audioUrl: isServerFileUrl(raw.audioUrl) ? raw.audioUrl : undefined,
+			fileUrl: isServerFileUrl(raw.fileUrl) ? raw.fileUrl : undefined,
+			fileName: typeof raw.fileName === 'string' && raw.fileName.trim() ? raw.fileName.trim() : undefined
+		};
 	}
 
 	/* Reset jawaban saat set soal berganti. */
@@ -116,6 +161,10 @@
 			serverQuestions = quiz.questions.map((q) => ({
 				id: q.id,
 				questionText: q.questionText,
+				imageUrl: q.imageUrl,
+				audioUrl: q.audioUrl,
+				fileUrl: q.fileUrl,
+				fileName: q.fileName,
 				options: q.options.map((o) => ({ id: o.id, optionText: o.optionText }))
 			}));
 			if (bestRes) {
@@ -266,6 +315,7 @@
 		<ol class="space-y-4">
 			{#each order as qi (qi)}
 				{@const opts = optionTexts(qi)}
+				{@const media = questionMedia(qi)}
 				<li class="rounded-2xl border border-slate-200 bg-white p-5">
 					<fieldset>
 						<legend class="contents">
@@ -276,6 +326,35 @@
 								{optionLabel(qi)}
 							</span>
 						</legend>
+						{#if media.imageUrl}
+							<img
+								src={media.imageUrl}
+								alt={`Gambar pendukung soal ${qi + 1}`}
+								class="mb-3 max-h-72 w-full rounded-xl border border-slate-200 object-contain bg-slate-50"
+								loading="lazy"
+							/>
+						{/if}
+						{#if media.audioUrl}
+							<audio
+								src={media.audioUrl}
+								controls
+								preload="none"
+								class="mb-3 w-full"
+								aria-label={`Audio pendukung soal ${qi + 1}`}
+							></audio>
+						{/if}
+						{#if media.fileUrl}
+							<a
+								href={media.fileUrl}
+								target="_blank"
+								rel="noopener"
+								class="mb-3 flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-bold text-slate-700 hover:border-blue-300 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+							>
+								<i class="fa-solid fa-file-pdf text-red-500" aria-hidden="true"></i>
+								<span class="flex-1 truncate">{media.fileName ?? 'Unduh lampiran soal'}</span>
+								<i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-400" aria-hidden="true"></i>
+							</a>
+						{/if}
 						<div class="space-y-2" role="radiogroup" aria-label={`Pilihan jawaban soal ${qi + 1}`}>
 							{#each opts as opt, oi (oi)}
 								{@const selected = answers[qi] === oi}

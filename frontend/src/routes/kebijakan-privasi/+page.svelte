@@ -2,6 +2,8 @@
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import { resolve } from '$app/paths';
+	import SeoHead from '$lib/components/SeoHead.svelte';
+	import { canonicalPath, getSiteUrl } from '$lib/seo/site';
 
 	const updatedAt = '27 Oktober 2026';
 
@@ -92,13 +94,34 @@
 	];
 </script>
 
-<svelte:head>
-	<title>Kebijakan Privasi — Aristoteles</title>
-	<meta
-		name="description"
-		content="Kebijakan privasi Platform Mikrokredensial Aristoteles: data yang dikumpulkan, tujuan, penyimpanan, berbagi data, keamanan, dan hak pengguna."
-	/>
-</svelte:head>
+<SeoHead
+	title="Kebijakan Privasi — ARISTOTELES"
+	description="Kebijakan privasi ARISTOTELES: data akun & belajar yang dikumpulkan, tujuan pemakaian, keamanan, retensi, dan cara mengajukan hak atas data Anda."
+	path="/kebijakan-privasi"
+	jsonLd={[
+		{
+			'@context': 'https://schema.org',
+			'@type': 'WebPage',
+			name: 'Kebijakan Privasi ARISTOTELES',
+			url: canonicalPath('/kebijakan-privasi'),
+			inLanguage: 'id-ID',
+			isPartOf: { '@type': 'WebSite', name: 'ARISTOTELES', url: getSiteUrl() }
+		},
+		{
+			'@context': 'https://schema.org',
+			'@type': 'BreadcrumbList',
+			itemListElement: [
+				{ '@type': 'ListItem', position: 1, name: 'Beranda', item: canonicalPath('/') },
+				{
+					'@type': 'ListItem',
+					position: 2,
+					name: 'Kebijakan Privasi',
+					item: canonicalPath('/kebijakan-privasi')
+				}
+			]
+		}
+	]}
+/>
 
 <header class="sticky top-0 z-50 bg-white shadow-sm">
 	<div class="mx-auto flex h-16 max-w-4xl items-center justify-between gap-3 px-4 sm:px-6">

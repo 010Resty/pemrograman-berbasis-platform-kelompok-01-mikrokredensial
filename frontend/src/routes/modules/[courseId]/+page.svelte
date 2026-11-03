@@ -2,14 +2,22 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
+	import { SvelteSet } from 'svelte/reactivity';
 	import '../../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import {
 		fetchCourseDetail,
 		fetchCourseTree,
-		type BackendCourse
+		type BackendCourse,
+		type CourseAccessState
 	} from '$lib/api/courses';
 	import type { CourseModule } from '$lib/data/courses';
+	import { getModuleMaterials, isMaterialLocked, isSubModuleLocked } from '$lib/data/courses';
+	import { fetchMyProgressIds } from '$lib/api/progress';
+	import { apiRequest } from '$lib/api/backend';
+	import { getAccessToken } from '$lib/stores/auth.svelte';
+	import SeoHead from '$lib/components/SeoHead.svelte';
+	import { canonicalPath, getSiteUrl } from '$lib/seo/site';
 
 	/**
 	 * Pratinjau publik satu pelatihan dari backend.
@@ -25,11 +33,21 @@
 
 	const courseId = $derived(Number(page.params.courseId));
 
-	let detail = $state<BackendCourse | null>(null);
+	/** Detail awal dari server load (SSR). Tree + akses + progres tetap via browser. */
+	let { data }: { data: { origin: string; detail: BackendCourse | null; notFound: boolean } } =
+		$props();
+	// svelte-ignore state_referenced_locally -- seed SSR: snapshot awal, update via fetch browser
+	let detail = $state<BackendCourse | null>(data.detail);
 	let tree = $state<CourseModule[]>([]);
-	let loading = $state(true);
+	let access = $state<CourseAccessState | null>(null);
+	let doneIds = $state(new SvelteSet<string>());
+	let loggedIn = $state(false);
+	let pathOpen = $state(new SvelteSet<string>());
+	// svelte-ignore state_referenced_locally -- seed SSR: snapshot awal, update via fetch browser
+	let loading = $state(!data.detail && !data.notFound);
 	let loadError = $state('');
-	let notFound = $state(false);
+	// svelte-ignore state_referenced_locally -- seed SSR: snapshot awal, update via fetch browser
+	let notFound = $state(!data.detail && data.notFound);
 	let started = false;
 	let loadSeq = 0;
 
@@ -43,23 +61,31 @@
 		{ href: '/#verifikasi', label: 'Verifikasi' }
 	];
 
-	async function load(id: number): Promise<void> {
+	async function load(id: number, opts: { soft?: boolean } = {}): Promise<void> {
 		const my = ++loadSeq;
-		loading = true;
+		// soft: detail sudah ada dari SSR → jangan tampilkan skeleton ulang.
+		if (!opts.soft || detail === null) loading = true;
 		loadError = '';
 		notFound = false;
 		try {
-			const d = await fetchCourseDetail(id);
+			// Struktur + akses + progres paralel. Akses dibaca mentah (tanpa req()) agar
+			// pengunjung anonim yang 401 TIDAK dipaksa logout/redirect ke login.
+			const li = browser && getAccessToken() !== null;
+			const [d, t, a, done] = await Promise.all([
+				detail ?? fetchCourseDetail(id),
+				fetchCourseTree(id).catch((): CourseModule[] => []),
+				apiRequest<CourseAccessState>(`/courses/${id}/access`, {
+					token: getAccessToken()
+				}).catch((): null => null),
+				li ? fetchMyProgressIds(id).catch((): number[] => []) : Promise.resolve([] as number[])
+			]);
 			if (my !== loadSeq) return;
+			loggedIn = li;
 			detail = d;
-			try {
-				const t = await fetchCourseTree(id);
-				if (my !== loadSeq) return;
-				tree = t;
-			} catch {
-				if (my !== loadSeq) return;
-				tree = [];
-			}
+			tree = t;
+			access = a;
+			doneIds = new SvelteSet(done.map(String));
+			if (tree.length > 0 && pathOpen.size === 0) pathOpen.add(tree[0].id);
 		} catch (e) {
 			if (my !== loadSeq) return;
 			if (e instanceof Error && /tidak ditemukan|404/.test(e.message)) {
@@ -76,6 +102,17 @@
 	$effect(() => {
 		if (!browser || started) return;
 		started = true;
+		// Hasil SSR: detail → lanjutkan tree/progres tanpa fetch detail ulang;
+		// 404 → tampilkan UI tidak-ditemukan tanpa request ulang.
+		if (data.detail) {
+			void load(courseId, { soft: true });
+			return;
+		}
+		if (data.notFound) {
+			notFound = true;
+			loading = false;
+			return;
+		}
 		const id = courseId;
 		if (!Number.isInteger(id) || id <= 0) {
 			notFound = true;
@@ -88,9 +125,24 @@
 	const instructorNames = $derived(
 		(detail?.instructors ?? []).map((i) => i.name).join(', ') || '—'
 	);
+	function togglePathModule(id: string): void {
+		if (pathOpen.has(id)) pathOpen.delete(id);
+		else pathOpen.add(id);
+	}
 	const moduleCount = $derived(tree.length);
 	const subCount = $derived(tree.reduce((n, m) => n + (m.subModules?.length ?? 0), 0));
 	const materialCount = $derived(tree.reduce((n, m) => n + m.materials.length, 0));
+
+	/** Progres belajar (hanya terisi bila masuk; anonim melihat struktur saja). */
+	const allPathMats = $derived(tree.flatMap((m) => getModuleMaterials(m)));
+	const donePathCount = $derived(allPathMats.filter((m) => doneIds.has(m.id)).length);
+	const coursePercent = $derived(
+		allPathMats.length === 0 ? 0 : Math.round((donePathCount / allPathMats.length) * 100)
+	);
+
+	/** Daftar materi per sub-modul hanya untuk yang punya akses (terdaftar/pengelola).
+	 * Publik tanpa akses hanya melihat struktur sampai tingkat sub-modul. */
+	const canSeeMaterials = $derived(access !== null && (access.hasAccess || access.isManager));
 
 	function periodLabel(): string {
 		if (!detail) return '—';
@@ -99,17 +151,71 @@
 		if (detail.period === 'ended') return 'Periode Lewat';
 		return '—';
 	}
+
+	/**
+	 * SEO dinamis dari data nyata: judul/deskripsi mengikuti detail kursus bila
+	 * sudah termuat, fallback generik saat loading/404. JSON-LD Course hanya
+	 * memakai field backend yang benar ada (tanpa rating/ulasan palsu).
+	 * Hitungan modul dipakai hanya bila tree sudah termuat (hindari "0 modul").
+	 */
+	function truncate160(s: string): string {
+		const t = s.trim().replace(/\s+/g, ' ');
+		return t.length <= 160 ? t : `${t.slice(0, 159).trimEnd()}…`;
+	}
+	const detailPath = $derived(`/modules/${Number.isInteger(courseId) && courseId > 0 ? courseId : ''}`);
+	const detailDescription = $derived(
+		detail
+			? tree.length > 0
+				? truncate160(
+						`Ikuti ${detail.title} (${detail.level}, ${detail.category ?? 'mikrokredensial'}): ${moduleCount} modul, ${subCount} sub-modul, ${materialCount} materi. ${detail.priceLabel} — daftar dan raih sertifikat.`
+					)
+				: truncate160(
+						detail.description ||
+							`${detail.title} (${detail.level}) — ${detail.priceLabel}. Pratinjau struktur modul, sub-modul, materi, periode, dan pengampu kursus.`
+					)
+			: 'Pratinjau pelatihan ARISTOTELES: struktur modul, sub-modul, materi, harga, periode, dan pengampu kursus.'
+	);
+	const detailJsonLd = $derived([
+		{
+			'@context': 'https://schema.org',
+			'@type': 'Course',
+			name: detail?.title ?? 'Pratinjau Pelatihan ARISTOTELES',
+			description: detail?.description ?? detailDescription,
+			url: canonicalPath(detailPath, data.origin),
+			inLanguage: 'id-ID',
+			provider: {
+				'@type': 'Organization',
+				name: 'ARISTOTELES',
+				url: getSiteUrl(data.origin)
+			}
+		},
+		{
+			'@context': 'https://schema.org',
+			'@type': 'BreadcrumbList',
+			itemListElement: [
+				{ '@type': 'ListItem', position: 1, name: 'Beranda', item: canonicalPath('/', data.origin) },
+				{ '@type': 'ListItem', position: 2, name: 'Semua Pelatihan', item: canonicalPath('/modules', data.origin) },
+				{
+					'@type': 'ListItem',
+					position: 3,
+					name: detail?.title ?? 'Pratinjau Pelatihan',
+					item: canonicalPath(detailPath, data.origin)
+				}
+			]
+		}
+	]);
 </script>
 
-<svelte:head>
-	<title>{detail ? `${detail.title} — Pratinjau Pelatihan` : 'Pratinjau Pelatihan'} — Aristoteles Platform</title>
-	<meta
-		name="description"
-		content={detail
-			? `Pratinjau ${detail.title}: ${moduleCount} modul, ${subCount} sub-modul, ${materialCount} materi.`
-			: 'Informasi singkat pelatihan: learning path modul, sub-modul, dan materi.'}
-	/>
-</svelte:head>
+<SeoHead
+	title={detail ? `${detail.title} — Kursus | ARISTOTELES`.slice(0, 60) : 'Pratinjau Pelatihan — ARISTOTELES'}
+	description={detailDescription}
+	path={detailPath}
+	origin={data.origin}
+	type="article"
+	image={detail?.image || undefined}
+	imageAlt={detail ? `Sampul kursus ${detail.title}` : undefined}
+	jsonLd={detailJsonLd}
+/>
 
 <header class="sticky top-0 z-50 bg-white shadow-sm">
 	<div class="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
@@ -276,52 +382,97 @@
 				{/if}
 
 				<section aria-labelledby="pv-kurikulum" class="rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6">
-					<h2 id="pv-kurikulum" class="text-lg font-bold text-slate-900">
-						Kurikulum ({moduleCount} Modul · {subCount} Sub-modul · {materialCount} Materi)
+					<h2 id="pv-kurikulum" class="flex items-center gap-2 text-lg font-bold text-slate-900">
+						<span class="flex h-9 w-9 items-center justify-center rounded-xl bg-blue-600 text-white" aria-hidden="true">
+							<i class="fa-solid fa-route" aria-hidden="true"></i>
+						</span>
+						Alur Belajar ({moduleCount} Modul · {subCount} Sub-modul · {materialCount} Materi)
 					</h2>
-					<p class="mt-1 text-xs text-slate-500">Pratinjau struktur. Isi materi terbuka setelah masuk dan mendaftar.</p>
+					<div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+						<p class="text-xs text-slate-500">Buka tiap modul untuk melihat sub-modul dan materinya.</p>
+						{#if loggedIn}
+							<p class="text-xs font-bold text-slate-600 tabular-nums" role="status">{donePathCount}/{allPathMats.length} materi · {coursePercent}%</p>
+						{/if}
+					</div>
+					{#if loggedIn}
+						<div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={coursePercent} aria-valuemin={0} aria-valuemax={100} aria-label="Progres kursus">
+							<div class="h-full rounded-full bg-blue-600 transition-all" style="width: {coursePercent}%"></div>
+						</div>
+					{/if}
+					{#if !canSeeMaterials}
+						<p class="mt-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-800">
+							<i class="fa-solid fa-lock mt-0.5 shrink-0" aria-hidden="true"></i>
+							<span>Daftar materi tampil sebagai pratinjau terkunci. <a href={resolve('/login')} class="underline hover:text-amber-900">Masuk dan daftar</a> untuk membuka materi.</span>
+						</p>
+					{/if}
 					{#if tree.length === 0}
 						<p class="mt-3 text-sm text-slate-500">Kurikulum belum disusun untuk pelatihan ini.</p>
 					{:else}
-						<ol class="mt-4 space-y-3">
+						<div class="mt-4 divide-y divide-slate-100 rounded-xl border border-slate-200/70">
 							{#each tree as mod, mi (mod.id)}
-								<li class="rounded-xl border border-slate-200 bg-slate-50/60 p-4">
-									<p class="text-sm font-extrabold text-slate-900">
-										<span class="text-blue-600">Modul {mi + 1}:</span> {mod.title}
-									</p>
-									{#if (mod.subModules?.length ?? 0) > 0}
-										<ul class="mt-2 space-y-1.5 pl-4">
-											{#each mod.subModules ?? [] as sub (sub.id)}
-												<li class="text-[13px] text-slate-700">
-													<i class="fa-solid fa-folder-open mr-1.5 text-[11px] text-slate-400" aria-hidden="true"></i>
-													<span class="font-semibold">{sub.title}</span>
-													<span class="text-slate-400"> · {sub.materials.length} materi</span>
-													{#if sub.materials.length > 0}
-														<ul class="mt-1 space-y-1 pl-5">
-															{#each sub.materials as mat (mat.id)}
-																<li class="flex items-center gap-1.5 text-xs text-slate-500">
-																	<i class="fa-solid fa-file-lines text-[10px] text-slate-300" aria-hidden="true"></i>
-																	{mat.title} <span class="text-slate-300">· {mat.type}</span>
-																</li>
-															{/each}
-														</ul>
+								{@const modFlat = getModuleMaterials(mod)}
+								{@const modDone = modFlat.filter((m) => doneIds.has(m.id)).length}
+								{@const modOpen = pathOpen.has(mod.id)}
+								<div>
+									<button
+										type="button"
+										onclick={() => togglePathModule(mod.id)}
+										aria-expanded={modOpen}
+										aria-controls={`pv-mod-${mod.id}`}
+										class="flex min-h-11 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+									>
+										<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-xs font-extrabold text-white" aria-hidden="true">{mi + 1}</span>
+										<span class="min-w-0 flex-1">
+											<span class="block truncate text-sm font-bold text-slate-900">Modul {mi + 1}: {mod.title}</span>
+											<span class="mt-0.5 block text-[11px] font-semibold text-slate-500 tabular-nums">{modDone}/{modFlat.length} materi</span>
+										</span>
+										<i class={`fa-solid fa-chevron-down text-xs text-slate-400 transition-transform ${modOpen ? 'rotate-180' : ''}`} aria-hidden="true"></i>
+									</button>
+									{#if modOpen}
+										<ol id={`pv-mod-${mod.id}`} class="space-y-3 border-t border-slate-100 bg-slate-50/50 px-4 py-3">
+											{#each mod.subModules ?? [] as sub, si (sub.id)}
+												{@const sLocked = !canSeeMaterials || isSubModuleLocked(tree, mi, si, (id) => doneIds.has(id))}
+												<li>
+													{#if !String(sub.id).endsWith('-direct')}
+														<p class="mb-1 flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-slate-500 uppercase">
+															<i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+															Sub-modul {mi + 1}.{si + 1} · {sub.title}
+															<span class="font-semibold normal-case">({sub.materials.length} materi)</span>
+														</p>
 													{/if}
+													<ol class="space-y-1">
+														{#each sub.materials as mat (mat.id)}
+															{@const flatIdx = modFlat.findIndex((f) => f.id === mat.id)}
+															{@const matDone = doneIds.has(mat.id)}
+															{@const locked = !canSeeMaterials || sLocked || isMaterialLocked(modFlat, flatIdx, (id) => doneIds.has(id))}
+															<li class={`flex items-center gap-2.5 rounded-xl border bg-white px-3 py-2 ${locked ? 'border-slate-100' : 'border-slate-200'}`}>
+																<span class={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold ${matDone ? 'bg-emerald-100 text-emerald-700' : locked ? 'bg-slate-100 text-slate-400' : 'bg-blue-100 text-blue-700'}`} aria-hidden="true">
+																	{#if matDone}
+																		<i class="fa-solid fa-check"></i>
+																	{:else if locked}
+																		<i class="fa-solid fa-lock"></i>
+																	{:else}
+																		{flatIdx + 1}
+																	{/if}
+																</span>
+																<span class="min-w-0 flex-1">
+																	<span class={`block truncate text-[13px] font-bold ${locked && !matDone ? 'text-slate-400' : 'text-slate-800'}`}>{mat.title}</span>
+																	{#if mat.type === 'kuis' || mat.type === 'tugas'}
+																		<span class={`mt-0.5 inline-block rounded-full px-2 py-px text-[10px] font-bold uppercase ${mat.type === 'kuis' ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700'}`}>
+																			{mat.type === 'kuis' ? 'Kuis' : 'Tugas'}
+																		</span>
+																	{/if}
+																</span>
+															</li>
+														{/each}
+													</ol>
 												</li>
 											{/each}
-										</ul>
-									{:else if mod.materials.length > 0}
-										<ul class="mt-2 space-y-1 pl-4">
-											{#each mod.materials as mat (mat.id)}
-												<li class="flex items-center gap-1.5 text-[13px] text-slate-700">
-													<i class="fa-solid fa-file-lines text-[10px] text-slate-300" aria-hidden="true"></i>
-													{mat.title} <span class="text-xs text-slate-400">· {mat.type}</span>
-												</li>
-											{/each}
-										</ul>
+										</ol>
 									{/if}
-								</li>
+								</div>
 							{/each}
-						</ol>
+						</div>
 					{/if}
 				</section>
 

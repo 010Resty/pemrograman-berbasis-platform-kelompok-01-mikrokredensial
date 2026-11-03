@@ -290,6 +290,12 @@
 	// Sidebar hierarki: modul terbuka + sub terbuka mengikuti posisi saat ini
 	let sidebarOpenModules = new SvelteSet<string>();
 	let sidebarOpenSubs = new SvelteSet<string>();
+	/** Dropdown modul pada seksi Alur Belajar (terbuka mengikuti posisi saat ini). */
+	let pathOpenModules = new SvelteSet<string>();
+	function togglePathModule(id: string): void {
+		if (pathOpenModules.has(id)) pathOpenModules.delete(id);
+		else pathOpenModules.add(id);
+	}
 	$effect(() => {
 		const mid = page.params.moduleId;
 		const matId = page.params.materialId;
@@ -308,6 +314,7 @@
 				}
 			}
 		}
+		if (mid && !pathOpenModules.has(mid)) pathOpenModules.add(mid);
 	});
 
 	/** Panel daftar modul di sidebar (khusus layar kecil) */
@@ -375,6 +382,13 @@
 	);
 	const totalSubs = $derived(
 		course?.modules.reduce((n, m) => n + resolveSubModules(m).length, 0) ?? 0
+	);
+
+	/** Progres belajar seluruh kursus (untuk kartu Alur Belajar). */
+	const allPathMats = $derived(tree.flatMap((m) => getModuleMaterials(m)));
+	const donePathCount = $derived(allPathMats.filter((m) => doneIds.has(m.id)).length);
+	const coursePercent = $derived(
+		allPathMats.length === 0 ? 0 : Math.round((donePathCount / allPathMats.length) * 100)
 	);
 
 	function typeBadge(type: string): string {
@@ -633,6 +647,106 @@
 					>{material.title}</span
 				>
 			</nav>
+
+			<section aria-labelledby="learning-path-heading" class="mb-6 overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
+				<div class="border-b border-slate-100 p-4 sm:px-6">
+					<div class="flex flex-wrap items-center justify-between gap-2">
+						<h2 id="learning-path-heading" class="flex items-center gap-2 text-base font-extrabold text-slate-900">
+							<span class="flex h-8 w-8 items-center justify-center rounded-xl bg-blue-600 text-sm text-white" aria-hidden="true">
+								<i class="fa-solid fa-route" aria-hidden="true"></i>
+							</span>
+							Alur Belajar
+						</h2>
+						<p class="text-xs font-bold text-slate-600 tabular-nums" role="status">
+							{donePathCount}/{allPathMats.length} materi · {coursePercent}%
+						</p>
+					</div>
+					<div class="mt-2 h-2 overflow-hidden rounded-full bg-slate-100" role="progressbar" aria-valuenow={coursePercent} aria-valuemin={0} aria-valuemax={100} aria-label="Progres kursus">
+						<div class="h-full rounded-full bg-blue-600 transition-all" style="width: {coursePercent}%"></div>
+					</div>
+				</div>
+				<div class="divide-y divide-slate-100">
+					{#each tree as mod, mi (mod.id)}
+						{@const modFlat = getModuleMaterials(mod)}
+						{@const modDone = modFlat.filter((m) => doneIds.has(m.id)).length}
+						{@const modOpen = pathOpenModules.has(mod.id)}
+						{@const modPct = modFlat.length === 0 ? 0 : Math.round((modDone / modFlat.length) * 100)}
+						<div>
+							<button
+								type="button"
+								onclick={() => togglePathModule(mod.id)}
+								aria-expanded={modOpen}
+								aria-controls={`lp-mod-${mod.id}`}
+								class="flex min-h-11 w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600 sm:px-6"
+							>
+								<span class={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-extrabold ${mod.id === module?.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600'}`} aria-hidden="true">
+									{mi + 1}
+								</span>
+								<span class="min-w-0 flex-1">
+									<span class="block truncate text-sm font-bold text-slate-900">Modul {mi + 1}: {mod.title}</span>
+									<span class="mt-0.5 block text-[11px] font-semibold text-slate-500 tabular-nums">{modDone}/{modFlat.length} materi · {modPct}%</span>
+								</span>
+								<i class={`fa-solid fa-chevron-down text-xs text-slate-400 transition-transform ${modOpen ? 'rotate-180' : ''}`} aria-hidden="true"></i>
+							</button>
+							{#if modOpen}
+								<ol id={`lp-mod-${mod.id}`} class="space-y-3 px-4 pb-4 sm:px-6 sm:pl-14">
+									{#each resolveSubModules(mod) as sub, si (sub.id)}
+										{@const sLocked = isSubModuleLocked(tree, mi, si, (id) => doneIds.has(id))}
+										<li>
+											{#if !String(sub.id).endsWith('-direct')}
+												<p class="mb-1 flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-slate-500 uppercase">
+													<i class="fa-solid fa-folder-open" aria-hidden="true"></i>
+													Sub-modul {mi + 1}.{si + 1} · {sub.title}
+												</p>
+											{/if}
+											<ol class="space-y-1">
+												{#each sub.materials as mat (mat.id)}
+													{@const flatIdx = modFlat.findIndex((f) => f.id === mat.id)}
+													{@const isCurrent = mat.id === material?.id}
+													{@const matDone = doneIds.has(mat.id)}
+													{@const matLocked = sLocked || isMaterialLocked(modFlat, flatIdx, (id) => doneIds.has(id))}
+													<li>
+														{#if matLocked && !isCurrent}
+															<span class="flex cursor-not-allowed items-center gap-2.5 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2 opacity-70" title="Selesaikan materi sebelumnya untuk membuka" aria-label={`Terkunci: ${mat.title}`}>
+																<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-[10px] text-slate-400" aria-hidden="true">
+																	<i class="fa-solid fa-lock"></i>
+																</span>
+																<span class="min-w-0 flex-1 truncate text-[13px] font-semibold text-slate-400">{mat.title}</span>
+															</span>
+														{:else}
+															<a
+																href={`/user/kursusku/${courseId}/${mod.id}/${mat.id}`}
+																aria-current={isCurrent ? 'page' : undefined}
+																class={`flex items-center gap-2.5 rounded-xl border px-3 py-2 transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${isCurrent ? 'border-blue-600 bg-blue-600 text-white shadow-md shadow-blue-600/25' : 'border-slate-200 bg-white text-slate-700 hover:border-blue-300 hover:bg-blue-50/50'}`}
+															>
+																<span class={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold ${isCurrent ? 'bg-white/20 text-white' : matDone ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`} aria-hidden="true">
+																	{#if isCurrent}
+																		<i class="fa-solid fa-play"></i>
+																	{:else if matDone}
+																		<i class="fa-solid fa-check"></i>
+																	{:else}
+																		{flatIdx + 1}
+																	{/if}
+																</span>
+																<span class="min-w-0 flex-1 truncate text-[13px] font-bold">{mat.title}</span>
+																{#if mat.type === 'kuis' || mat.type === 'tugas'}
+																	<span class={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${isCurrent ? 'bg-white/20 text-white' : mat.type === 'kuis' ? 'bg-amber-100 text-amber-700' : 'bg-violet-100 text-violet-700'}`}>
+																		{mat.type === 'kuis' ? 'Kuis' : 'Tugas'}
+																	</span>
+																{/if}
+															</a>
+														{/if}
+													</li>
+												{/each}
+											</ol>
+										</li>
+									{/each}
+								</ol>
+							{/if}
+						</div>
+					{/each}
+				</div>
+			</section>
 
 			<div
 				class="mt-4 grid grid-cols-1 items-start gap-6 transition-[grid-template-columns] duration-300 ease-in-out motion-reduce:transition-none lg:grid-cols-[var(--nav-w)_minmax(0,1fr)]"

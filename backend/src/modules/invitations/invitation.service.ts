@@ -4,6 +4,7 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { auditLogs, instructorInvitations, users } from "../../db/schema";
 import { createAccessToken, hashPassword } from "../auth/auth.service";
+import { sendInvitationEmail } from "../../utils/mailer";
 
 export class InvitationError extends Error {
   readonly http: number;
@@ -69,10 +70,33 @@ export interface PublicInvitation {
 
 // ---------- Pembuatan (admin) ----------
 
+/** Tautan aktivasi. FRONTEND_URL menunjuk aplikasi SvelteKit. */
+const buildInviteUrl = (token: string): string =>
+  `${(process.env.FRONTEND_URL?.trim() || process.env.APP_URL?.trim() || "http://localhost:5173").replace(/\/+$/, "")}` +
+  `/invite/${encodeURIComponent(token)}`;
+
+/**
+ * Kirim email undangan. Bukan penentu sukses (token tetap di respons
+ * untuk disalin manual). Gagal kirim dicatat + dilaporkan via return,
+ * tanpa membocorkan detail internal ke klien.
+ */
+const trySendInvitation = async (
+  email: string,
+  opts: { name: string | null; inviteUrl: string; expiresAt: Date }
+): Promise<boolean> => {
+  try {
+    await sendInvitationEmail(email, opts);
+    return true;
+  } catch (error) {
+    console.error("Gagal mengirim email undangan:", error);
+    return false;
+  }
+};
+
 export const createInvitation = async (
   actorId: number,
   input: z.infer<typeof createInvitationSchema>
-): Promise<PublicInvitation & { token: string }> => {
+): Promise<PublicInvitation & { token: string; inviteUrl: string; emailSent: boolean }> => {
   const email = input.email.toLowerCase();
   const taken = await db
     .select({ id: users.id })
@@ -116,7 +140,13 @@ export const createInvitation = async (
     return rows[0] ?? null;
   });
   if (!created) throw new Error("Gagal membuat undangan");
-  // Token plaintext hanya muncul sekali di respons ini.
+  // Token plaintext hanya muncul sekali: di respons ini + di email ini.
+  const inviteUrl = buildInviteUrl(token);
+  const emailSent = await trySendInvitation(email, {
+    name: created.name,
+    inviteUrl,
+    expiresAt,
+  });
   return {
     id: created.id,
     email: created.email,
@@ -127,6 +157,8 @@ export const createInvitation = async (
     expiresAt: created.expiresAt,
     createdAt: created.createdAt,
     token,
+    inviteUrl,
+    emailSent,
   };
 };
 
@@ -203,6 +235,66 @@ export const revokeInvitation = async (
   return publicRow;
 };
 
+// ---------- Terbitkan ulang (admin) ----------
+
+/**
+ * Terbitkan token baru + masa berlaku baru untuk undangan yang masih
+ * `pending`/`expired`, lalu kirim emailnya. Token lama otomatis
+ * hangus (hash diganti). `accepted`/`revoked` bersifat final.
+ */
+export const reissueInvitation = async (
+  actorId: number,
+  id: number
+): Promise<PublicInvitation & { token: string; inviteUrl: string; emailSent: boolean }> => {
+  const token = randomBytes(32).toString("hex");
+  const expiresAt = new Date(Date.now() + 7 * 24 * 3600 * 1000);
+  const refreshed = await db.transaction(async (tx) => {
+    const rows = await tx
+      .select()
+      .from(instructorInvitations)
+      .where(eq(instructorInvitations.id, id))
+      .limit(1);
+    const inv = rows[0];
+    if (!inv) return null;
+    if (inv.status === "accepted" || inv.status === "revoked") {
+      throw new InvitationError(
+        409,
+        "STATUS_FINAL",
+        `Undangan berstatus ${inv.status}, tidak dapat dikirim ulang`
+      );
+    }
+    await tx
+      .update(instructorInvitations)
+      .set({ tokenHash: hashToken(token), status: "pending", expiresAt })
+      .where(eq(instructorInvitations.id, id));
+    await writeAuditLog(tx, {
+      actorUserId: actorId,
+      action: "invitation.reissue",
+      targetType: "invitation",
+      targetIdInt: id,
+      metadata: { invitationId: id, email: inv.email },
+    });
+    const fresh = await tx
+      .select()
+      .from(instructorInvitations)
+      .where(eq(instructorInvitations.id, id))
+      .limit(1);
+    return fresh[0] ?? null;
+  });
+  if (!refreshed) {
+    throw new InvitationError(404, "INVITATION_NOT_FOUND", "Undangan tidak ditemukan");
+  }
+  const inviteUrl = buildInviteUrl(token);
+  const emailSent = await trySendInvitation(refreshed.email, {
+    name: refreshed.name,
+    inviteUrl,
+    expiresAt,
+  });
+  const { tokenHash: _drop, ...publicRow } = refreshed;
+  void _drop;
+  return { ...publicRow, token, inviteUrl, emailSent };
+};
+
 // ---------- Validasi publik (untuk form aktivasi) ----------
 
 export const validateInvitation = async (
@@ -273,6 +365,7 @@ export const acceptInvitation = async (
       email: inv.email,
       passwordHash: await hashPassword(input.password),
       role: "teacher",
+      emailVerifiedAt: new Date(),
       isActive: true,
     });
     const userId = Number((h as unknown as { insertId: number }).insertId);
