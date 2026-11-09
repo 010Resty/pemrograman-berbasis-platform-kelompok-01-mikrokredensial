@@ -18,14 +18,15 @@ void main() {
   final api = ApiClient();
   final session = SessionManager(authApi: AuthApi(api));
   api.onUnauthorized = () => session.clear();
-  runApp(AristotelesApp(session: session, authApi: AuthApi(api)));
+  runApp(AristotelesApp(session: session, authApi: AuthApi(api), api: api));
 }
 
 class AristotelesApp extends StatefulWidget {
   const AristotelesApp(
-      {super.key, required this.session, required this.authApi});
+      {super.key, required this.session, required this.authApi, required this.api});
 
   final SessionManager session;
+  final ApiClient api;
   final AuthApi authApi;
 
   @override
@@ -59,6 +60,7 @@ class _AristotelesAppState extends State<AristotelesApp> {
         session: widget.session,
         onAuthenticated: () => HomeRouter(
           user: widget.session.user!,
+          api: widget.api,
           onLogout: () => widget.session.logout(),
         ),
         onUnauthenticated: () => _authScreen(),

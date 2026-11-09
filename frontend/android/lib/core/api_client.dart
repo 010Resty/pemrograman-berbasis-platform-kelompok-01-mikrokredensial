@@ -73,8 +73,53 @@ class ApiClient {
     return _send<T>('POST', path, body, fromData);
   }
 
-  Future<void> delete<T>(String path) async {
-    await _send<Object?>('DELETE', path, null, (_) => null);
+  Future<T> patch<T>(
+    String path, {
+    Object? body,
+    required T Function(Object? json) fromData,
+  }) {
+    return _send<T>('PATCH', path, body, fromData);
+  }
+
+  Future<T> put<T>(
+    String path, {
+    Object? body,
+    required T Function(Object? json) fromData,
+  }) {
+    return _send<T>('PUT', path, body, fromData);
+  }
+
+  Future<void> delete(String path) {
+    return _send<Object?>('DELETE', path, null, (_) => null);
+  }
+
+  /// Unduh byte mentah dengan header auth (berkas privat, PDF sertifikat).
+  Future<List<int>> downloadBytes(String path) async {
+    final url = Uri.parse('$baseUrl${path.startsWith('/') ? path : '/$path'}');
+    final headers = <String, String>{'accept': '*/*'};
+    final token = _tokenProvider?.call();
+    if (token != null && token.isNotEmpty) {
+      headers['authorization'] = 'Bearer $token';
+    }
+    http.Response res;
+    try {
+      res = await _http.get(url, headers: headers).timeout(ApiConfig.timeout);
+    } on TimeoutException {
+      throw ApiException('Waktu permintaan habis. Periksa koneksi lalu coba lagi.',
+          code: 'timeout');
+    } catch (e) {
+      if (e is ApiException) rethrow;
+      throw ApiException('Backend tidak terjangkau. Periksa server dan alamat API.');
+    }
+    if (res.statusCode == 401) {
+      onUnauthorized?.call();
+      throw ApiException('Sesi berakhir. Masuk kembali.', httpStatus: 401);
+    }
+    if (res.statusCode < 200 || res.statusCode >= 300) {
+      throw ApiException('Gagal mengunduh (HTTP ${res.statusCode}).',
+          httpStatus: res.statusCode);
+    }
+    return res.bodyBytes;
   }
 
   Future<T> _send<T>(
@@ -97,11 +142,13 @@ class ApiClient {
 
     http.Response res;
     try {
-      final future = method == 'GET'
-          ? _http.get(url, headers: headers)
-          : method == 'DELETE'
-              ? _http.delete(url, headers: headers)
-              : _http.post(url, headers: headers, body: payload);
+      final future = switch (method) {
+        'GET' => _http.get(url, headers: headers),
+        'DELETE' => _http.delete(url, headers: headers),
+        'PATCH' => _http.patch(url, headers: headers, body: payload),
+        'PUT' => _http.put(url, headers: headers, body: payload),
+        _ => _http.post(url, headers: headers, body: payload),
+      };
       res = await future.timeout(ApiConfig.timeout);
     } on TimeoutException {
       throw ApiException(
@@ -163,4 +210,14 @@ class ApiClient {
 
   Map<String, Object?> _parseEnvelope(http.Response res) =>
       parseEnvelope(res.body, res.statusCode);
+}
+
+/// Normalisasi respons list: array langsung atau `{items|...}`.
+/// Dipakai semua daftar agar tidak ada cabang mati di call-site.
+List<Object?> apiList(Object? json, [String key = 'items']) {
+  if (json is List) return json.cast<Object?>();
+  final m = (json as Map?)?.cast<String, Object?>();
+  final inner = m?[key];
+  if (inner is List) return inner.cast<Object?>();
+  return const [];
 }

@@ -1,4 +1,4 @@
-// Model ringan cermin kontrak `frontend/shared`.
+// Model data ringan cermin kontrak `frontend/shared`.
 // ignore_for_file: avoid_dynamic_calls
 
 /// Peran pengguna (sama persis dengan backend).
