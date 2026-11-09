@@ -6,6 +6,7 @@
 	import { invalidateMyCourses } from '$lib/stores/instructor-courses.svelte';
 	import { uploadFile } from '$lib/api/uploads';
 	import { BackendRequestError } from '$lib/api/backend';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	const CATEGORIES = [
 		'Pengembangan Web',
@@ -19,7 +20,6 @@
 	];
 	const LEVELS = ['Pemula', 'Menengah', 'Lanjutan'];
 
-	let submitted = $state(false);
 	let errorSummaryEl = $state<HTMLElement | null>(null);
 
 	// ---- Satu-satunya langkah: info dasar + hasil + langsung upcoming ----
@@ -40,7 +40,6 @@
 	let tools = $state<string[]>(['']);
 
 	let errors = $state<Record<string, string>>({});
-	let createdId = $state<number | null>(null);
 	let isLoading = $state(false);
 
 	const coverSrc = $derived(
@@ -193,16 +192,19 @@
 				outcomes: validOutcomes,
 				tools: validTools
 			});
-			createdId = course.id;
-			submitted = true;
-			// Sukses terkonfirmasi server: daftar kursus wajib memuat kursus baru.
+			const courseTitle = title.trim();
+			// Sukses terkonfirmasi server: toast + langsung ke Kelola kursus baru.
+			// Daftar kursus wajib memuat kursus baru saat kembali nanti.
 			invalidateMyCourses();
-			window.scrollTo({ top: 0, behavior: 'smooth' });
+			toast.success(`Pelatihan “${courseTitle}” berhasil dibuat sebagai draf.`);
+			await goto(`/instruktur/kursusku/${course.id}?src=server`);
 		} catch (err) {
-			errors['server'] =
+			const message =
 				err instanceof BackendRequestError
 					? err.message
 					: 'Gagal menyimpan kursus. Periksa koneksi ke backend lalu coba lagi.';
+			errors['server'] = message;
+			toast.error(message);
 			requestAnimationFrame(() => errorSummaryEl?.focus());
 			window.scrollTo({ top: 0, behavior: 'smooth' });
 		} finally {
@@ -230,73 +232,6 @@
 </svelte:head>
 
 <div class="p-4 sm:p-6 lg:p-8">
-	{#if submitted}
-		<div
-			class="mx-auto max-w-2xl overflow-hidden rounded-2xl border border-slate-200/70 bg-white text-center shadow-sm"
-		>
-			<div
-				class="bg-gradient-to-br from-emerald-600 via-emerald-600 to-teal-600 px-6 py-10 text-white"
-			>
-				<span
-					class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white/20 backdrop-blur"
-					aria-hidden="true"
-				>
-					<i class="fa-solid fa-circle-check text-2xl"></i>
-				</span>
-				<h1 class="mt-4 text-xl font-extrabold sm:text-2xl">Pelatihan tersimpan sebagai draf!</h1>
-				<p class="mx-auto mt-1.5 max-w-md text-sm text-emerald-50">
-					“{title.trim()}” terjadwal mulai {startMonthLabel} (periode Akan Datang), tetapi
-					masih berstatus Draf — terbitkan dari halaman Kelola Kurikulum agar tampil di katalog.
-					Susun modul dan materinya dari halaman Kelola Kurikulum.
-				</p>
-			</div>
-			<dl class="grid grid-cols-2 gap-3 p-5 text-left sm:grid-cols-4">
-				<div class="rounded-xl bg-slate-50 p-3 text-center">
-					<dt class="sr-only">Kategori</dt>
-					<dd class="truncate text-sm font-bold text-slate-900">{category}</dd>
-					<dd class="text-[10px] font-bold tracking-wide text-slate-500 uppercase">Kategori</dd>
-				</div>
-				<div class="rounded-xl bg-slate-50 p-3 text-center">
-					<dt class="sr-only">Durasi</dt>
-					<dd class="text-sm font-bold text-slate-900">{durationLabel}</dd>
-					<dd class="text-[10px] font-bold tracking-wide text-slate-500 uppercase">Durasi</dd>
-				</div>
-				<div class="rounded-xl bg-slate-50 p-3 text-center">
-					<dt class="sr-only">Harga</dt>
-					<dd class="truncate text-sm font-bold text-slate-900">{priceLabel}</dd>
-					<dd class="text-[10px] font-bold tracking-wide text-slate-500 uppercase">Harga</dd>
-				</div>
-				<div class="rounded-xl bg-slate-50 p-3 text-center">
-					<dt class="sr-only">Hasil belajar</dt>
-					<dd class="text-sm font-bold text-slate-900">{validOutcomes.length} hasil</dd>
-					<dd class="text-[10px] font-bold tracking-wide text-slate-500 uppercase">Hasil</dd>
-				</div>
-			</dl>
-			<div class="flex flex-col gap-2 border-t border-slate-100 p-5 sm:flex-row sm:justify-center">
-				{#if createdId !== null}
-					<a
-						href={`/instruktur/kursusku/${createdId}?src=server`}
-						class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-					>
-						<i class="fa-solid fa-list-check" aria-hidden="true"></i> Kelola Kurikulum
-					</a>
-				{/if}
-				<a
-					href="/instruktur/kursusku"
-					class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-				>
-					<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Kembali ke Kursusku
-				</a>
-				<button
-					type="button"
-					onclick={() => goto('/instruktur/kursusku/tambah')}
-					class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
-				>
-					<i class="fa-solid fa-plus" aria-hidden="true"></i> Buat Pelatihan Lain
-				</button>
-			</div>
-		</div>
-	{:else}
 		<nav aria-label="Breadcrumb" class="mb-4 flex items-center gap-2 text-xs text-slate-500">
 			<a
 				href="/instruktur/kursusku"
@@ -832,5 +767,4 @@
 				</div>
 			</aside>
 		</div>
-	{/if}
 </div>

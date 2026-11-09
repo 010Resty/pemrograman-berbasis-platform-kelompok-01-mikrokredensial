@@ -2,13 +2,13 @@ import { apiRequest } from './backend';
 import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svelte';
 
 /**
- * Kontrak API sertifikat instruktur — USULAN frontend, belum dikonfirmasi backend.
+ * Kontrak API sertifikat instruktur — terkonfirmasi backend Fase B.
  *
  * Seluruh fungsi di bawah hanya memanggil endpoint backend dan TIDAK PERNAH
- * mengarang hasil: bila endpoint belum tersedia, `apiRequest` melempar
+ * mengarang hasil: bila backend tidak terjangkau, `apiRequest` melempar
  * `BackendRequestError` dan UI wajib menampilkan state error/empty + retry.
  *
- * Endpoint usulan (butuh konfirmasi tim backend):
+ * Endpoint backend (kontrak `backend/docs/API_CONTRACT.md` §9):
  * - GET    /instructor/certificates/summary
  * - GET    /instructor/modules/:moduleId/certificate-status
  * - GET    /instructor/eligibility?courseId=&moduleId=&status=&q=
@@ -30,7 +30,7 @@ function req<T>(path: string, options: { method?: string; body?: unknown } = {})
 	});
 }
 
-export type CertificateStatus = 'aktif' | 'dicabut';
+export type CertificateStatus = 'aktif' | 'dicabut' | 'digantikan';
 
 /** Status kelayakan sesuai spesifikasi fitur. */
 export type EligibilityStatus =
@@ -73,6 +73,7 @@ export interface ModuleCertificateStatus {
 	issuedCount: number;
 	notEligibleCount: number;
 	revokedCount: number;
+	supersededCount: number;
 }
 
 export interface EligibilityEntry {
@@ -112,8 +113,9 @@ export interface CertificateRecord {
 	printedName: string;
 	courseId: number;
 	courseTitle: string;
-	moduleId: number;
-	moduleTitle: string;
+	/** null = baris sertifikat level kursus. */
+	moduleId: number | null;
+	moduleTitle: string | null;
 	issuedAt: string;
 	status: CertificateStatus;
 	revokedAt: string | null;
@@ -250,12 +252,10 @@ export async function revokeCertificate(
 }
 
 /**
- * Tautan verifikasi publik. Halaman verifikasi publik khusus
- * (`/verifikasi`) belum ada di frontend — untuk sementara arahkan ke
- * section verifikasi landing. Jangan mengarang route baru.
+ * Tautan verifikasi publik sertifikat (halaman `/verifikasi`).
  */
-export function publicVerifyHref(): string {
-	return '/#verifikasi';
+export function publicVerifyHref(code?: string): string {
+	return code ? `/verifikasi?code=${encodeURIComponent(code)}` : '/verifikasi';
 }
 
 /** Kelayakan sertifikat milik sendiri per modul (GET /api/v1/me/modules/:id/certificate-status). */
@@ -301,5 +301,7 @@ export function eligibilityLabel(s: EligibilityStatus): string {
 
 /** Label Indonesia untuk status sertifikat. */
 export function certificateStatusLabel(s: CertificateStatus): string {
-	return s === 'aktif' ? 'Aktif' : 'Dicabut';
+	if (s === 'aktif') return 'Aktif';
+	if (s === 'digantikan') return 'Digantikan';
+	return 'Dicabut';
 }

@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import {
 		fetchCertificateSummary as apiSummary,
 		fetchModuleCertificateStatus as apiModuleStatus,
@@ -16,23 +17,15 @@
 		type ModuleCertificateStatus,
 		type CertificateStatus
 	} from '$lib/api/certificates';
-	import {
-		mockSummary,
-		mockModuleStatus,
-		mockEligibility,
-		mockCertificates
-	} from '$lib/api/certificates.mock';
 	import { fetchMyCourses, fetchModules } from '$lib/api/courses';
 
 	/**
 	 * Menu Sertifikat instruktur — 4 tab: ringkasan, kursus, kelayakan, riwayat.
 	 *
-	 * Sumber kebenaran = backend. Frontend tidak menghitung kelulusan sendiri.
-	 * Bila endpoint sertifikat belum tersedia, tiap tab menampilkan state
-	 * error jujur + tombol coba lagi (TIDAK ada sukses palsu).
-	 *
-	 * Mock DEV: hanya bila `import.meta.env.DEV` dan URL `?mock=sertifikat`;
-	 * selalu tampil banner penanda dan tidak pernah dipakai di produksi.
+	 * Sumber kebenaran = backend (kontrak terkonfirmasi di `lib/api/certificates`).
+	 * Frontend tidak menghitung kelulusan sendiri. Tiap tab menampilkan state
+	 * error jujur + tombol coba lagi bila backend tidak terjangkau
+	 * (TIDAK ada sukses palsu, TIDAK ada data contoh).
 	 */
 
 	type TabId = 'ringkasan' | 'kursus' | 'kelayakan' | 'riwayat';
@@ -48,12 +41,6 @@
 		return t === 'kursus' || t === 'kelayakan' || t === 'riwayat' ? t : 'ringkasan';
 	});
 
-	const useMock = $derived(
-		browser && import.meta.env.DEV && page.url.searchParams.get('mock') === 'sertifikat'
-	);
-	/** Diteruskan ke link detail agar mode mock DEV tidak terputus saat navigasi. */
-	const mockSuffix = $derived(useMock ? '?mock=sertifikat' : '');
-
 	function switchTab(id: TabId, extra: Record<string, string> = {}): void {
 		const sp = new URLSearchParams(page.url.searchParams);
 		sp.set('tab', id);
@@ -61,7 +48,6 @@
 			if (v) sp.set(k, v);
 			else sp.delete(k);
 		}
-		if (useMock) sp.set('mock', 'sertifikat');
 		void goto(`?${sp.toString()}`, { replaceState: true, noScroll: true, keepFocus: true });
 		void ensureLoaded(id);
 	}
@@ -109,13 +95,6 @@
 	async function loadCourses(): Promise<void> {
 		if (coursesLoaded) return;
 		if (coursesPending) return coursesPending;
-		if (useMock) {
-			courses = [
-				{ id: 1, title: 'Pengembangan Web Frontend' },
-				{ id: 2, title: 'Basis Data & SQL' }
-			];
-			return;
-		}
 		const task = (async () => {
 			try {
 				const list = await fetchMyCourses();
@@ -143,22 +122,12 @@
 		modulesLoading[courseId] = true;
 		const task = (async () => {
 			try {
-				if (useMock) {
-					modulesByCourse[courseId] =
-						courseId === 1
-							? [
-									{ id: 11, courseId: 1, title: 'Dasar HTML & CSS' },
-									{ id: 12, courseId: 1, title: 'JavaScript Interaktif' }
-								]
-							: [{ id: 21, courseId: 2, title: 'Desain Skema Relasional' }];
-				} else {
-					const mods = await fetchModules(courseId);
-					modulesByCourse[courseId] = mods.map((m) => ({
-						id: m.id,
-						courseId: m.courseId,
-						title: m.title
-					}));
-				}
+				const mods = await fetchModules(courseId);
+				modulesByCourse[courseId] = mods.map((m) => ({
+					id: m.id,
+					courseId: m.courseId,
+					title: m.title
+				}));
 			} catch (e) {
 				modulesError[courseId] = e instanceof Error ? e.message : 'Gagal memuat modul.';
 			} finally {
@@ -181,7 +150,7 @@
 		summary.phase = 'loading';
 		summary.error = '';
 		try {
-			const data = useMock ? await mockSummary() : await apiSummary();
+			const data = await apiSummary();
 			if (my !== summaryReq) return;
 			summary.data = data;
 			summary.phase = 'ready';
@@ -207,6 +176,20 @@
 		if (typeof selCourseId === 'number') void loadModules(selCourseId);
 	});
 
+	// Terapkan moduleId dari URL sekali saja setelah daftar modul tiba
+	// (mendukung deep-link ?tab=kursus&courseId=..&moduleId=.. dan refresh).
+	let kursusModuleUrlInit = $state(false);
+	$effect(() => {
+		if (!browser || tab !== 'kursus' || kursusModuleUrlInit) return;
+		if (typeof selCourseId !== 'number') return;
+		const mods = modulesByCourse[selCourseId];
+		if (!mods) return;
+		kursusModuleUrlInit = true;
+		const raw = page.url.searchParams.get('moduleId');
+		const mid = Number(raw);
+		if (raw && Number.isInteger(mid) && mods.some((m) => m.id === mid)) selModuleId = mid;
+	});
+
 	let moduleStatusReq = 0;
 	async function loadModuleStatus(): Promise<void> {
 		if (selModuleId === '') return;
@@ -215,9 +198,7 @@
 		moduleStatus.phase = 'loading';
 		moduleStatus.error = '';
 		try {
-			const data = useMock
-				? await mockModuleStatus(target)
-				: await apiModuleStatus(target);
+			const data = await apiModuleStatus(target);
 			if (my !== moduleStatusReq || target !== selModuleId) return;
 			moduleStatus.data = data;
 			moduleStatus.phase = 'ready';
@@ -249,19 +230,12 @@
 		eligibility.phase = 'loading';
 		eligibility.error = '';
 		try {
-			const rows = useMock
-				? await mockEligibility({
-						courseId: kCourseId === '' ? undefined : kCourseId,
-						moduleId: kModuleId === '' ? undefined : kModuleId,
-						status: kStatus,
-						q: kQuery
-					})
-				: await apiEligibility({
-						courseId: kCourseId === '' ? undefined : kCourseId,
-						moduleId: kModuleId === '' ? undefined : kModuleId,
-						status: kStatus,
-						q: kQuery
-					});
+			const rows = await apiEligibility({
+				courseId: kCourseId === '' ? undefined : kCourseId,
+				moduleId: kModuleId === '' ? undefined : kModuleId,
+				status: kStatus,
+				q: kQuery
+			});
 			if (my !== eligibilityReq) return;
 			eligibility.data = rows;
 			eligibility.phase = rows.length === 0 ? 'empty' : 'ready';
@@ -288,23 +262,14 @@
 		history.phase = 'loading';
 		history.error = '';
 		try {
-			const rows = useMock
-				? await mockCertificates({
-						courseId: rCourseId === '' ? undefined : rCourseId,
-						moduleId: rModuleId === '' ? undefined : rModuleId,
-						status: rStatus,
-						q: rQuery,
-						from: rFrom || undefined,
-						to: rTo || undefined
-					})
-				: await apiCertificates({
-						courseId: rCourseId === '' ? undefined : rCourseId,
-						moduleId: rModuleId === '' ? undefined : rModuleId,
-						status: rStatus,
-						q: rQuery,
-						from: rFrom || undefined,
-						to: rTo || undefined
-					});
+			const rows = await apiCertificates({
+				courseId: rCourseId === '' ? undefined : rCourseId,
+				moduleId: rModuleId === '' ? undefined : rModuleId,
+				status: rStatus,
+				q: rQuery,
+				from: rFrom || undefined,
+				to: rTo || undefined
+			});
 			if (my !== historyReq) return;
 			history.data = rows;
 			history.phase = rows.length === 0 ? 'empty' : 'ready';
@@ -321,7 +286,11 @@
 		if (t === 'ringkasan') await loadSummary();
 		if (t === 'kursus') {
 			await loadCourses();
-			if (selCourseId === '' && courses.length > 0) selCourseId = courses[0].id;
+			if (selCourseId === '' && courses.length > 0) {
+				const urlCid = Number(page.url.searchParams.get('courseId'));
+				const match = Number.isInteger(urlCid) ? courses.find((c) => c.id === urlCid) : undefined;
+				selCourseId = match ? match.id : courses[0].id;
+			}
 		}
 		if (t === 'kelayakan') {
 			await Promise.all([loadCourses(), loadEligibility()]);
@@ -336,7 +305,13 @@
 		void ensureLoaded(tab);
 	});
 
-	// Preset dari tab kursus
+	// Preset dari tab lain
+	function gotoKursus(courseId: number): void {
+		selCourseId = courseId;
+		selModuleId = '';
+		switchTab('kursus', { courseId: String(courseId), moduleId: '' });
+		void loadModules(courseId);
+	}
 	function gotoEligibility(courseId: number, moduleId: number): void {
 		kCourseId = courseId;
 		kModuleId = moduleId;
@@ -363,7 +338,9 @@
 		}
 	}
 	function certBadge(s: CertificateStatus): string {
-		return s === 'aktif' ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700';
+		if (s === 'aktif') return 'bg-emerald-100 text-emerald-700';
+		if (s === 'digantikan') return 'bg-blue-100 text-blue-700';
+		return 'bg-red-100 text-red-700';
 	}
 	function quizBadge(s: string): string {
 		if (s === 'lulus') return 'bg-emerald-100 text-emerald-700';
@@ -401,28 +378,12 @@
 	/>
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-6">
-		<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">Menu Utama · Sertifikat</p>
-		<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Sertifikat</h1>
-		<p class="mt-1 text-sm text-slate-500">
-			Hanya data kursus yang Anda kelola. Sertifikat terbit otomatis oleh sistem bila seluruh
-			syarat modul terpenuhi — tidak ada penerbitan manual.
-		</p>
-	</div>
-
-	{#if useMock}
-		<p
-			role="status"
-			class="mb-4 flex items-start gap-2 rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800"
-		>
-			<i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
-			<span
-				>Mode demo DEV (<span class="font-mono">?mock=sertifikat</span>) — seluruh angka dan nama di
-				halaman ini ilustratif, bukan data produksi.</span
-			>
-		</p>
-	{/if}
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Menu Utama · Sertifikat"
+		title="Sertifikat"
+		description="Hanya data kursus yang Anda kelola. Sertifikat terbit otomatis oleh sistem bila seluruh syarat modul terpenuhi — tidak ada penerbitan manual."
+	/>
 
 	<!-- Tab internal -->
 	<div
@@ -472,8 +433,7 @@
 					</p>
 					<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{summary.error}</p>
 					<p class="mx-auto mt-1 max-w-md text-xs text-red-600/80">
-						Endpoint <span class="font-mono">GET /instructor/certificates/summary</span> belum
-						tersedia atau backend tidak terjangkau.
+						Periksa koneksi backend lalu coba lagi.
 					</p>
 					<button
 						type="button"
@@ -542,7 +502,7 @@
 										</div>
 										<button
 											type="button"
-											onclick={() => switchTab('kursus')}
+											onclick={() => gotoKursus(row.courseId)}
 											class="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2 text-[11px] font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 											aria-label="Lihat modul {row.courseTitle}"
 										>
@@ -645,14 +605,31 @@
 			{:else}
 				<div class="grid grid-cols-1 gap-4 lg:grid-cols-3">
 					<div class="rounded-2xl border border-slate-200 bg-white p-5">
-						<label for="sel-course" class="mb-1.5 block text-xs font-bold text-slate-700">
-							Kursus yang Anda kelola
-						</label>
+						<div class="mb-1.5 flex items-center justify-between gap-2">
+							<label for="sel-course" class="flex items-center gap-2 text-xs font-bold text-slate-700">
+								<span class="flex h-5 w-5 items-center justify-center rounded-md bg-blue-600 text-[10px] font-black text-white" aria-hidden="true">1</span>
+								Pilih kursus
+							</label>
+							<button
+								type="button"
+								title="Muat ulang daftar kursus"
+								aria-label="Muat ulang daftar kursus"
+								onclick={() => {
+									coursesLoaded = false;
+									void loadCourses();
+								}}
+								class="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+							>
+								<i class="fa-solid fa-rotate-right text-xs" aria-hidden="true"></i>
+							</button>
+						</div>
 						<select
 							id="sel-course"
 							bind:value={selCourseId}
-							onchange={() => {
+							onchange={(e) => {
 								selModuleId = '';
+								const v = (e.currentTarget as HTMLSelectElement).value;
+								switchTab('kursus', { courseId: v, moduleId: '' });
 							}}
 							class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 						>
@@ -662,8 +639,31 @@
 							{/each}
 						</select>
 
+						{#if selCourse}
+							<div class="mt-3 flex items-center gap-2.5 rounded-xl bg-blue-50/60 px-3.5 py-2.5 ring-1 ring-blue-100">
+								<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-blue-600 text-xs text-white" aria-hidden="true">
+									<i class="fa-solid fa-book-open"></i>
+								</span>
+								<div class="min-w-0">
+									<p class="truncate text-xs font-extrabold text-slate-900" title={selCourse.title}>{selCourse.title}</p>
+									<p class="text-[11px] text-slate-500">
+										{#if modulesLoading[selCourse.id]}
+											Memuat modul…
+										{:else if modulesError[selCourse.id]}
+											Gagal memuat modul
+										{:else}
+											{selModules.length} modul · pilih satu untuk melihat status
+										{/if}
+									</p>
+								</div>
+							</div>
+						{/if}
+
 						{#if typeof selCourseId === 'number'}
-							<p class="mt-4 mb-1.5 text-xs font-bold text-slate-700">Modul dalam kursus</p>
+							<p class="mt-4 mb-1.5 flex items-center gap-2 text-xs font-bold text-slate-700">
+								<span class="flex h-5 w-5 items-center justify-center rounded-md bg-blue-600 text-[10px] font-black text-white" aria-hidden="true">2</span>
+								Pilih modul{#if modulesByCourse[selCourseId]} ({selModules.length}){/if}
+							</p>
 							{#if modulesLoading[selCourseId]}
 								<p class="py-4 text-center text-xs text-slate-500">
 									<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat modul…
@@ -678,21 +678,31 @@
 								</p>
 							{:else}
 								<ul class="space-y-2">
-									{#each selModules as m (m.id)}
+									{#each selModules as m, i (m.id)}
 										<li>
 											<button
 												type="button"
 												onclick={() => {
 													selModuleId = m.id;
+													switchTab('kursus', {
+														courseId: String(selCourseId),
+														moduleId: String(m.id)
+													});
 												}}
 												aria-pressed={selModuleId === m.id}
-												class="flex min-h-11 w-full items-center justify-between gap-2 rounded-xl border px-3.5 py-2.5 text-left text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 {selModuleId === m.id
+												title={m.title}
+												class="flex min-h-11 w-full items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 {selModuleId === m.id
 													? 'border-blue-300 bg-blue-50 text-blue-800'
 													: 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'}"
 											>
-												<span class="truncate">{m.title}</span>
+												<span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[11px] font-black tabular-nums {selModuleId === m.id ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-500'}" aria-hidden="true">
+													{String(i + 1).padStart(2, '0')}
+												</span>
+												<span class="min-w-0 flex-1 truncate">{m.title}</span>
 												{#if selModuleId === m.id}
 													<i class="fa-solid fa-circle-check shrink-0 text-blue-600" aria-hidden="true"></i>
+												{:else}
+													<i class="fa-solid fa-chevron-right shrink-0 text-[10px] text-slate-300" aria-hidden="true"></i>
 												{/if}
 											</button>
 										</li>
@@ -704,10 +714,18 @@
 
 					<div class="lg:col-span-2">
 						{#if selModuleId === ''}
-							<div class="flex h-full min-h-48 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
-								<p class="max-w-xs text-xs leading-relaxed text-slate-500">
-									Pilih kursus lalu modul untuk melihat status sertifikat dan peserta terkait.
-								</p>
+							<div class="flex h-full min-h-48 items-center justify-center rounded-2xl border border-dashed border-slate-300 bg-white p-8">
+								<div class="max-w-xs">
+									<p class="flex items-center justify-center gap-2 text-sm font-extrabold text-slate-700">
+										<span class="flex h-6 w-6 items-center justify-center rounded-lg bg-blue-600 text-[11px] font-black text-white" aria-hidden="true">3</span>
+										Lihat status modul
+									</p>
+									<ol class="mt-3 space-y-1.5 text-left text-xs leading-relaxed text-slate-500">
+										<li class="flex gap-2"><span class="font-black text-slate-300" aria-hidden="true">1.</span> Pilih kursus yang Anda kelola di panel kiri.</li>
+										<li class="flex gap-2"><span class="font-black text-slate-300" aria-hidden="true">2.</span> Pilih salah satu modul bernomor untuk melihat ringkasannya.</li>
+										<li class="flex gap-2"><span class="font-black text-slate-300" aria-hidden="true">3.</span> Buka kelayakan peserta atau riwayat sertifikat dari tombol di bawah ringkasan.</li>
+									</ol>
+								</div>
 							</div>
 						{:else if moduleStatus.phase === 'loading' || moduleStatus.phase === 'idle'}
 							<div class="animate-pulse rounded-2xl border border-slate-200 bg-white p-6">
@@ -723,9 +741,7 @@
 								<p class="text-sm font-bold text-red-700">Status modul belum dapat dimuat</p>
 								<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{moduleStatus.error}</p>
 								<p class="mx-auto mt-1 max-w-md text-xs text-red-600/80">
-									Endpoint
-									<span class="font-mono">GET /instructor/modules/{selModuleId}/certificate-status</span>
-									belum tersedia atau backend tidak terjangkau.
+									Periksa koneksi backend lalu coba lagi.
 								</p>
 								<button
 									type="button"
@@ -886,8 +902,7 @@
 					<p class="text-sm font-bold text-red-700">Kelayakan belum dapat dimuat</p>
 					<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{eligibility.error}</p>
 					<p class="mx-auto mt-1 max-w-md text-xs text-red-600/80">
-						Endpoint <span class="font-mono">GET /instructor/eligibility</span> belum tersedia atau
-						backend tidak terjangkau.
+						Periksa koneksi backend lalu coba lagi.
 					</p>
 					<button
 						type="button"
@@ -948,7 +963,7 @@
 									</td>
 									<td class="px-5 py-4 text-right">
 										<a
-											href="/instruktur/sertifikat/kelayakan/{encodeURIComponent(String(row.id))}{mockSuffix}"
+											href="/instruktur/sertifikat/kelayakan/{encodeURIComponent(String(row.id))}"
 											class="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2 text-[11px] font-bold text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 											aria-label="Lihat detail kelayakan {row.studentName} pada {row.moduleTitle}"
 										>
@@ -977,7 +992,7 @@
 								Tugas {taskText(row.taskStatus)}
 							</p>
 							<a
-								href="/instruktur/sertifikat/kelayakan/{encodeURIComponent(String(row.id))}{mockSuffix}"
+								href="/instruktur/sertifikat/kelayakan/{encodeURIComponent(String(row.id))}"
 								class="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2 text-[11px] font-bold text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 								aria-label="Lihat detail kelayakan {row.studentName} pada {row.moduleTitle}"
 							>
@@ -1057,6 +1072,7 @@
 							<option value="semua">Semua</option>
 							<option value="aktif">{certificateStatusLabel('aktif')}</option>
 							<option value="dicabut">{certificateStatusLabel('dicabut')}</option>
+							<option value="digantikan">{certificateStatusLabel('digantikan')}</option>
 						</select>
 					</div>
 					<div>
@@ -1114,8 +1130,7 @@
 					<p class="text-sm font-bold text-red-700">Riwayat belum dapat dimuat</p>
 					<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{history.error}</p>
 					<p class="mx-auto mt-1 max-w-md text-xs text-red-600/80">
-						Endpoint <span class="font-mono">GET /instructor/certificates</span> belum tersedia atau
-						backend tidak terjangkau.
+						Periksa koneksi backend lalu coba lagi.
 					</p>
 					<button
 						type="button"
@@ -1157,7 +1172,7 @@
 									</td>
 									<td class="max-w-56 px-4 py-4 text-[13px] text-slate-600">
 										{row.courseTitle}
-										<span class="block text-[11px] text-slate-400">{row.moduleTitle}</span>
+										<span class="block text-[11px] text-slate-400">{row.moduleTitle ?? 'Sertifikat kursus'}</span>
 									</td>
 									<td class="px-4 py-4 text-[13px] whitespace-nowrap text-slate-600">{formatDate(row.issuedAt)}</td>
 									<td class="px-4 py-4">
@@ -1167,7 +1182,7 @@
 									</td>
 									<td class="px-5 py-4 text-right">
 										<a
-											href="/instruktur/sertifikat/{encodeURIComponent(String(row.id))}{mockSuffix}"
+											href="/instruktur/sertifikat/{encodeURIComponent(String(row.id))}"
 											class="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2 text-[11px] font-bold text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 											aria-label="Lihat detail sertifikat {row.code} milik {row.studentName}"
 										>
@@ -1186,14 +1201,14 @@
 								<div class="min-w-0">
 									<p class="font-mono text-xs font-bold text-slate-800">{row.code}</p>
 									<p class="mt-0.5 truncate text-sm font-bold text-slate-900">{row.studentName}</p>
-									<p class="mt-0.5 text-[11px] text-slate-500">{row.courseTitle} · {row.moduleTitle}</p>
+									<p class="mt-0.5 text-[11px] text-slate-500">{row.courseTitle} · {row.moduleTitle ?? 'Sertifikat kursus'}</p>
 								</div>
 								<span class="inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[10px] font-bold whitespace-nowrap {certBadge(row.status)}">
 									{certificateStatusLabel(row.status)}
 								</span>
 							</div>
 							<a
-								href="/instruktur/sertifikat/{encodeURIComponent(String(row.id))}{mockSuffix}"
+								href="/instruktur/sertifikat/{encodeURIComponent(String(row.id))}"
 								class="mt-3 inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-4 py-2 text-[11px] font-bold text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 								aria-label="Lihat detail sertifikat {row.code} milik {row.studentName}"
 							>

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
+	import { resolve } from '$app/paths';
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
@@ -8,6 +9,7 @@
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
 	import { fetchInstructorDashboard } from '$lib/api/dashboard';
 	import { fetchCertificateSummary } from '$lib/api/certificates';
+	import { fileUrl } from '$lib/api/courses';
 	import { untrack } from 'svelte';
 
 	let { children } = $props();
@@ -50,7 +52,6 @@
 
 	let sidebarOpen = $state(false);
 	let isCollapsed = $state(false);
-	let searchQuery = $state('');
 	let showProfileMenu = $state(false);
 
 	// Badge sidebar dari backend: kursus aktif + antrean penilaian (dasbor)
@@ -79,7 +80,8 @@
 		{ label: 'Kursusku', icon: 'fa-book-open', href: '/instruktur/kursusku', badge: courseBadge },
 		{ label: 'Penilaian', icon: 'fa-clipboard-check', href: '/instruktur/penilaian', badge: reviewBadge },
 		{ label: 'Pendapatan', icon: 'fa-wallet', href: '/instruktur/pendapatan' },
-		{ label: 'Sertifikat', icon: 'fa-award', href: '/instruktur/sertifikat', badge: certBadge }
+		{ label: 'Sertifikat', icon: 'fa-award', href: '/instruktur/sertifikat', badge: certBadge },
+		{ label: 'Profil', icon: 'fa-user', href: '/instruktur/profile' }
 	]);
 
 	function toggleProfileMenu() {
@@ -101,6 +103,8 @@
 	const displayInitials = $derived(
 		(displayName.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('') || 'IN').toUpperCase()
 	);
+	// Foto dari sesi (relatif server) → absolut backend; null = inisial.
+	const avatarSrc = $derived(session?.avatarUrl ? fileUrl(session.avatarUrl) : null);
 </script>
 
 <svelte:window onkeydown={handleWindowKeydown} />
@@ -126,6 +130,7 @@
 		profileName={displayName}
 		profileRole="Instruktur"
 		profileAlt={`Foto profil ${displayName}`}
+		profileAvatarUrl={avatarSrc}
 	/>
 
 	<div class="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -143,64 +148,35 @@
 				<i class="fa-solid {sidebarOpen ? 'fa-xmark' : 'fa-bars'} text-lg" aria-hidden="true"></i>
 			</button>
 			<Logo size="sm" showText={true} textSize="md" />
-			<button
-				type="button"
+			<a
+				href={resolve('/instruktur/penilaian')}
 				class="relative flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-				aria-label="Notifikasi, 12 penilaian menunggu"
+				aria-label={reviewBadge ? `${reviewBadge} tugas menunggu dinilai — buka Penilaian` : 'Buka Penilaian'}
 			>
 				<i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
-				<span class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500" aria-hidden="true"
-				></span>
-			</button>
+				{#if reviewBadge && reviewBadge !== '0'}
+					<span class="absolute top-0.5 right-0.5 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white" aria-hidden="true"
+						>{reviewBadge}</span
+					>
+				{/if}
+			</a>
 		</div>
 
 		<header
 			class="sticky top-0 z-20 border-b border-slate-200 bg-white/80 px-4 py-3 backdrop-blur-md sm:px-6 lg:px-8"
 		>
-			<div class="flex items-center justify-between gap-4">
-				<div class="max-w-md flex-1">
-					<form role="search" aria-label="Pencarian instruktur" onsubmit={(e) => e.preventDefault()}>
-						<div class="relative">
-							<div
-								class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400"
-							>
-								<i class="fa-solid fa-magnifying-glass text-sm" aria-hidden="true"></i>
-							</div>
-							<label for="instruktur-search" class="sr-only">Cari kursus, peserta, atau penilaian</label>
-							<input
-								id="instruktur-search"
-								type="search"
-								placeholder="Cari kursus, peserta, penilaian..."
-								bind:value={searchQuery}
-								autocomplete="off"
-								class="w-full rounded-xl border border-transparent bg-slate-100 py-2.5 pr-4 pl-10 text-sm text-slate-800 transition-all placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
-							/>
-							{#if searchQuery}
-								<button
-									type="button"
-									class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 transition-colors hover:text-slate-600"
-									onclick={() => (searchQuery = '')}
-									aria-label="Hapus pencarian"
-								>
-									<i class="fa-solid fa-xmark text-sm" aria-hidden="true"></i>
-								</button>
-							{/if}
-						</div>
-					</form>
-				</div>
-
+			<div class="flex items-center justify-end gap-4">
 				<div class="flex items-center gap-3">
-					<button
-						type="button"
+					<a
+						href={resolve('/instruktur/penilaian')}
 						class="relative hidden min-h-11 min-w-11 items-center justify-center rounded-xl p-2.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 sm:flex"
-						aria-label="Notifikasi, 12 penilaian menunggu"
+						aria-label={reviewBadge ? `${reviewBadge} tugas menunggu dinilai — buka Penilaian` : 'Buka Penilaian'}
 					>
 						<i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
-						<span
-							class="absolute top-2 right-2 h-2 w-2 rounded-full border-2 border-white bg-red-500"
-							aria-hidden="true"
-						></span>
-					</button>
+						{#if reviewBadge && reviewBadge !== '0'}
+							<span class="absolute top-1 right-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold text-white" aria-hidden="true">{reviewBadge}</span>
+						{/if}
+					</a>
 
 					<div class="relative">
 						<button
@@ -212,10 +188,14 @@
 							aria-haspopup="menu"
 						>
 							<span
-								class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-sm font-bold text-white shadow-md"
+								class="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-emerald-500 to-teal-600 text-sm font-bold text-white shadow-md"
 								aria-hidden="true"
 							>
-								{displayInitials}
+								{#if avatarSrc}
+									<img src={avatarSrc} alt="" class="h-full w-full object-cover" />
+								{:else}
+									{displayInitials}
+								{/if}
 							</span>
 							<span class="hidden text-left sm:block">
 								<span class="block text-sm leading-tight font-semibold text-slate-800"

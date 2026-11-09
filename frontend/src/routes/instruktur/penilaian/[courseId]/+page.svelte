@@ -3,15 +3,10 @@
 	import { page } from '$app/state';
 	import { getCourseById } from '$lib/data/courses';
 	import { getCourseMeta } from '$lib/data/course-meta';
-	import { resolveTaskKey, tasksOfCourse } from '$lib/data/grading';
-	import { allReviews, ensureGradingLoaded, gradingLoading } from '$lib/stores/grading.svelte';
+	import { tasksOfCourse } from '$lib/data/grading';
 	import { loadCourseTree, loadMyCourses } from '$lib/stores/instructor-courses.svelte';
 	import { fetchMaterialSubmissions } from '$lib/api/submissions';
 	import type { BackendCourse } from '$lib/api/courses';
-
-	$effect(() => {
-		ensureGradingLoaded();
-	});
 
 	const courseId = $derived(Number(page.params.courseId));
 	const course = $derived(getCourseById(courseId));
@@ -104,8 +99,7 @@
 		void loadServer(cid);
 	});
 
-	const loading = $derived(serverLoading || gradingLoading());
-	const reviews = $derived(allReviews());
+	const loading = $derived(serverLoading);
 
 	/* Header terpadu: server bila ada, jika tidak statis lokal. */
 	const header = $derived(
@@ -153,6 +147,7 @@
 					total: t.total
 				}));
 		}
+		// Materi statis/pratinjau: tanpa antrean server — angka nol yang jujur.
 		const list: TaskRow[] = [];
 		for (const info of tasks) {
 			if (
@@ -163,7 +158,6 @@
 			) {
 				continue;
 			}
-			const items = reviews.filter((r) => resolveTaskKey(r) === info.key);
 			list.push({
 				key: info.key,
 				materialId: info.materialId,
@@ -171,8 +165,8 @@
 				moduleLabel: `Modul ${info.moduleIndex + 1}: ${info.moduleTitle}`,
 				duration: info.duration,
 				excerpt: info.brief ?? 'Penugasan praktik dari modul ini.',
-				pending: items.filter((r) => r.status === 'Menunggu').length,
-				total: items.length
+				pending: 0,
+				total: 0
 			});
 		}
 		return list;
@@ -333,9 +327,13 @@
 									<i class="fa-solid fa-hourglass-half text-[10px]" aria-hidden="true"></i>
 									{row.pending} menunggu
 								</span>
-							{:else}
+							{:else if serverCourse}
 								<span class="inline-flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-bold text-emerald-700">
 									<i class="fa-solid fa-check text-[10px]" aria-hidden="true"></i> Tuntas
+								</span>
+							{:else}
+								<span class="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold text-slate-500">
+									Pratinjau
 								</span>
 							{/if}
 						</div>

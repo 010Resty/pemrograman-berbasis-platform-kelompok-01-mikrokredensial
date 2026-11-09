@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import UiStatCard from '$lib/components/ui/StatCard.svelte';
 	import { getCurrentUser } from '$lib/stores/auth.svelte';
 	import {
 		fetchInstructorDashboard,
@@ -7,13 +10,13 @@
 		type InstructorDashboard
 	} from '$lib/api/dashboard';
 
-	interface StatCard {
+	interface StatItem {
 		label: string;
 		value: string;
 		sub: string;
 		icon: string;
-		color: string;
-		bgColor: string;
+		tone: 'blue' | 'emerald' | 'amber';
+		href?: string;
 	}
 
 	const session = $derived(getCurrentUser());
@@ -49,30 +52,29 @@
 		void load();
 	});
 
-	const stats = $derived<StatCard[]>([
+	const stats = $derived<StatItem[]>([
 		{
 			label: 'Kursus Aktif',
 			value: String(dashboard?.totals.activeCourses ?? 0),
 			sub: `${dashboard?.totals.draftCourses ?? 0} draft menunggu terbit`,
 			icon: 'fa-book-open',
-			color: 'text-blue-600',
-			bgColor: 'bg-blue-50'
+			tone: 'blue',
+			href: resolve('/instruktur/kursusku')
 		},
 		{
 			label: 'Total Peserta',
 			value: (dashboard?.totals.totalStudents ?? 0).toLocaleString('id-ID'),
 			sub: 'peserta aktif di kursusmu',
 			icon: 'fa-users',
-			color: 'text-emerald-600',
-			bgColor: 'bg-emerald-50'
+			tone: 'emerald'
 		},
 		{
 			label: 'Menunggu Dinilai',
 			value: String(dashboard?.totals.pendingReviews ?? 0),
 			sub: 'tugas peserta menunggu nilai',
 			icon: 'fa-clipboard-check',
-			color: 'text-amber-600',
-			bgColor: 'bg-amber-50'
+			tone: 'amber',
+			href: resolve('/instruktur/penilaian')
 		}
 	]);
 
@@ -90,18 +92,12 @@
 	<meta name="description" content="Dashboard instruktur Aristoteles untuk mengelola kursus, penilaian, dan pendapatan." />
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-8">
-		<div
-			class="mb-3 inline-flex items-center gap-1.5 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700"
-		>
-			<i class="fa-solid fa-chalkboard-user" aria-hidden="true"></i> Dashboard Instruktur
-		</div>
-		<h1 class="mb-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-			Selamat Datang, {firstName}!
-		</h1>
-		<p class="text-sm text-slate-500">Kelola kursus dan nilai tugas peserta di sini.</p>
-	</div>
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Dashboard Instruktur"
+		title={`Selamat datang, ${firstName}!`}
+		description="Kelola kursus dan nilai tugas peserta di sini."
+	/>
 
 	{#if loading}
 		<div
@@ -125,20 +121,9 @@
 			</button>
 		</div>
 	{:else}
-		<div class="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-3">
+		<div class="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
 			{#each stats as stat (stat.label)}
-				<div
-					class="rounded-2xl border border-slate-200/60 bg-white p-5 transition-all duration-200 ease-smooth hover:shadow-lg hover:shadow-slate-200/50"
-				>
-					<div class="mb-3 flex items-center justify-between">
-						<div class="flex h-11 w-11 items-center justify-center rounded-xl {stat.bgColor}">
-							<i class="fa-solid {stat.icon} {stat.color} text-lg" aria-hidden="true"></i>
-						</div>
-					</div>
-					<div class="text-2xl font-bold text-slate-900">{stat.value}</div>
-					<div class="mt-0.5 text-xs font-semibold text-slate-700">{stat.label}</div>
-					<div class="mt-0.5 text-[11px] text-slate-500">{stat.sub}</div>
-				</div>
+				<UiStatCard label={stat.label} value={stat.value} sub={stat.sub} icon={stat.icon} tone={stat.tone} href={stat.href} />
 			{/each}
 		</div>
 

@@ -6,7 +6,6 @@
 		eligibilityLabel,
 		type EligibilityDetail
 	} from '$lib/api/certificates';
-	import { mockEligibilityDetail } from '$lib/api/certificates.mock';
 
 	/**
 	 * Detail kelayakan satu peserta pada satu modul: rincian materi/kuis/tugas
@@ -15,10 +14,6 @@
 	 */
 
 	const eligibilityId = $derived(decodeURIComponent(page.params.id ?? ''));
-	const useMock = $derived(
-		browser && import.meta.env.DEV && page.url.searchParams.get('mock') === 'sertifikat'
-	);
-	const mockSuffix = $derived(useMock ? '&mock=sertifikat' : '');
 
 	type Phase = 'loading' | 'error' | 'ready';
 	let phase = $state<Phase>('loading');
@@ -29,7 +24,7 @@
 		phase = 'loading';
 		loadError = '';
 		try {
-			detail = useMock ? await mockEligibilityDetail(eligibilityId) : await apiDetail(eligibilityId);
+			detail = await apiDetail(eligibilityId);
 			phase = 'ready';
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Gagal memuat detail kelayakan.';
@@ -65,7 +60,7 @@
 <div class="p-4 sm:p-6 lg:p-8">
 	<div class="mb-6">
 		<a
-			href="/instruktur/sertifikat?tab=kelayakan{mockSuffix}"
+			href="/instruktur/sertifikat?tab=kelayakan"
 			class="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 		>
 			<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Kembali ke kelayakan
@@ -75,16 +70,6 @@
 		</p>
 		<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Detail Kelayakan</h1>
 	</div>
-
-	{#if useMock}
-		<p
-			role="status"
-			class="mb-4 flex items-start gap-2 rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800"
-		>
-			<i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
-			<span>Mode demo DEV — data ilustratif, bukan data produksi.</span>
-		</p>
-	{/if}
 
 	{#if phase === 'loading'}
 		<div class="animate-pulse rounded-2xl border border-slate-200 bg-white p-6" aria-label="Memuat detail">
@@ -100,8 +85,7 @@
 			<p class="text-sm font-bold text-red-700">Detail belum dapat dimuat</p>
 			<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{loadError}</p>
 			<p class="mx-auto mt-1 max-w-md text-xs text-red-600/80">
-				Endpoint <span class="font-mono">GET /instructor/eligibility/{eligibilityId}</span> belum
-				tersedia atau backend tidak terjangkau.
+				Periksa koneksi backend lalu coba lagi.
 			</p>
 			<button
 				type="button"
@@ -154,7 +138,7 @@
 				</a>
 				{#if detail.certificateId !== null}
 					<a
-						href="/instruktur/sertifikat/{encodeURIComponent(String(detail.certificateId))}{mockSuffix}"
+						href="/instruktur/sertifikat/{encodeURIComponent(String(detail.certificateId))}"
 						class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 					>
 						<i class="fa-solid fa-award" aria-hidden="true"></i> Lihat sertifikat terbit

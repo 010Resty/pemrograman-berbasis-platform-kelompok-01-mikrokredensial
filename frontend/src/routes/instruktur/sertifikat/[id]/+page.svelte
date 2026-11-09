@@ -10,7 +10,6 @@
 		certificateStatusLabel,
 		type CertificateRecord
 	} from '$lib/api/certificates';
-	import { mockCertificateDetail, mockRevoke } from '$lib/api/certificates.mock';
 
 	/**
 	 * Detail satu sertifikat: identitas snapshot, status terbaru, info
@@ -19,10 +18,6 @@
 	 */
 
 	const certId = $derived(decodeURIComponent(page.params.id ?? ''));
-	const useMock = $derived(
-		browser && import.meta.env.DEV && page.url.searchParams.get('mock') === 'sertifikat'
-	);
-	const mockSuffix = $derived(useMock ? '&mock=sertifikat' : '');
 
 	type Phase = 'loading' | 'error' | 'ready';
 	let phase = $state<Phase>('loading');
@@ -38,7 +33,7 @@
 		phase = 'loading';
 		loadError = '';
 		try {
-			cert = useMock ? await mockCertificateDetail(certId) : await apiDetail(certId);
+			cert = await apiDetail(certId);
 			phase = 'ready';
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Gagal memuat detail sertifikat.';
@@ -56,7 +51,7 @@
 		revoking = true;
 		revokeError = '';
 		try {
-			cert = useMock ? await mockRevoke(cert.id, reason) : await apiRevoke(cert.id, reason);
+			cert = await apiRevoke(cert.id, reason);
 			showRevoke = false;
 			toast.success(`Sertifikat ${cert.code} dicabut dan tercatat di riwayat.`);
 		} catch (e) {
@@ -94,7 +89,7 @@
 <div class="p-4 sm:p-6 lg:p-8">
 	<div class="mb-6">
 		<a
-			href="/instruktur/sertifikat?tab=riwayat{mockSuffix}"
+			href="/instruktur/sertifikat?tab=riwayat"
 			class="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 		>
 			<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Kembali ke riwayat
@@ -102,16 +97,6 @@
 		<p class="mt-4 text-xs font-bold tracking-widest text-blue-600 uppercase">Menu Utama · Sertifikat · Detail</p>
 		<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Detail Sertifikat</h1>
 	</div>
-
-	{#if useMock}
-		<p
-			role="status"
-			class="mb-4 flex items-start gap-2 rounded-xl border border-dashed border-amber-400 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800"
-		>
-			<i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
-			<span>Mode demo DEV — data ilustratif, bukan data produksi.</span>
-		</p>
-	{/if}
 
 	{#if phase === 'loading'}
 		<div class="animate-pulse rounded-2xl border border-slate-200 bg-white p-6" aria-label="Memuat detail">
@@ -147,10 +132,12 @@
 					<div
 						class="mt-3 inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-bold {cert.status === 'aktif'
 							? 'bg-emerald-500/20 text-emerald-300'
-							: 'bg-red-500/20 text-red-300'}"
+							: cert.status === 'digantikan'
+								? 'bg-blue-500/20 text-blue-300'
+								: 'bg-red-500/20 text-red-300'}"
 					>
 						<i
-							class="fa-solid {cert.status === 'aktif' ? 'fa-circle-check' : 'fa-ban'}"
+							class="fa-solid {cert.status === 'aktif' ? 'fa-circle-check' : cert.status === 'digantikan' ? 'fa-arrows-rotate' : 'fa-ban'}"
 							aria-hidden="true"
 						></i>
 						{certificateStatusLabel(cert.status)}
@@ -170,8 +157,10 @@
 						sertifikat yang sudah terbit.
 					</p>
 					<div class="flex justify-between gap-3 border-b border-slate-100 pb-3">
-						<dt class="text-slate-500">Modul</dt>
-						<dd class="text-right font-semibold text-slate-800">{cert.moduleTitle}</dd>
+						<dt class="text-slate-500">{cert.moduleTitle === null ? 'Tingkat' : 'Modul'}</dt>
+						<dd class="text-right font-semibold text-slate-800">
+							{cert.moduleTitle ?? 'Kursus (seluruh modul)'}
+						</dd>
 					</div>
 					<div class="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
 						<dt class="text-slate-500">Kode sertifikat</dt>
@@ -195,7 +184,7 @@
 						<dt class="text-slate-500">Verifikasi publik</dt>
 						<dd>
 							<a
-								href={publicVerifyHref()}
+								href={publicVerifyHref(cert.code)}
 								class="inline-flex min-h-11 items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
 								<i class="fa-solid fa-shield-halved" aria-hidden="true"></i> Buka halaman verifikasi
@@ -219,7 +208,7 @@
 						<p class="mt-3 text-[11px] leading-relaxed text-slate-500">
 							Catatan tetap tersimpan di riwayat dan tidak dapat dihapus dari UI ini.
 						</p>
-					{:else}
+					{:else if cert.status === 'aktif'}
 						<p class="mt-2 text-xs leading-relaxed text-slate-500">
 							Sertifikat aktif. Pencabutan membutuhkan alasan tertulis dan dicatat permanen di
 							riwayat.
@@ -234,6 +223,11 @@
 						>
 							<i class="fa-solid fa-ban" aria-hidden="true"></i> Cabut sertifikat
 						</button>
+					{:else}
+						<p class="mt-2 text-xs leading-relaxed text-slate-500">
+							Sertifikat modul ini telah digantikan sertifikat kursus
+							{cert.revokeReason ? `(${cert.revokeReason}).` : '.'} Tidak perlu dicabut.
+						</p>
 					{/if}
 				</div>
 			</div>

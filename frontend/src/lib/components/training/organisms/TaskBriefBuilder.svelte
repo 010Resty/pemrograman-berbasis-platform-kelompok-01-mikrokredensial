@@ -273,4 +273,46 @@
 			</button>
 		</div>
 	</section>
+
+	<!-- Rubrik: tetap nasional, tidak dapat diubah per tugas (K-06) -->
+	<section
+		aria-labelledby="task-rubric-heading"
+		class="overflow-hidden rounded-2xl border border-slate-200/80 bg-white"
+	>
+		<div class="flex items-center gap-2.5 border-b border-slate-100 bg-slate-50/70 px-4 py-3 sm:px-5">
+			<span
+				class="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-emerald-600 text-xs font-extrabold text-white"
+				aria-hidden="true"
+			>
+				4
+			</span>
+			<div>
+				<h3 id="task-rubric-heading" class="text-sm font-extrabold text-slate-900">
+					Rubrik Penilaian
+				</h3>
+				<p class="text-[11px] text-slate-500">
+					Seragam nasional — 3 kriteria tetap dengan bobot sama.
+				</p>
+			</div>
+		</div>
+		<div class="p-4 sm:p-5">
+			<ul class="space-y-2">
+				<li class="flex items-center justify-between rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs">
+					<span class="font-bold text-slate-700">Kelengkapan</span>
+					<span class="font-semibold text-slate-400">0–100</span>
+				</li>
+				<li class="flex items-center justify-between rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs">
+					<span class="font-bold text-slate-700">Ketepatan isi</span>
+					<span class="font-semibold text-slate-400">0–100</span>
+				</li>
+				<li class="flex items-center justify-between rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs">
+					<span class="font-bold text-slate-700">Kerapian</span>
+					<span class="font-semibold text-slate-400">0–100</span>
+				</li>
+			</ul>
+			<p role="note" class="mt-2.5 rounded-xl bg-emerald-50 px-3.5 py-2.5 text-[11px] leading-relaxed font-semibold text-emerald-800">
+				Nilai akhir = rata-rata ketiga kriteria. Rubrik tidak dapat diubah per tugas; penilaian dilakukan di halaman Penilaian.
+			</p>
+		</div>
+	</section>
 </div>

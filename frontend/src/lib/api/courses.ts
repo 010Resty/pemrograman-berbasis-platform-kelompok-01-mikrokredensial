@@ -54,6 +54,8 @@ export interface BackendMaterial {
 	contentSchemaVersion: number;
 	passScore: number | null;
 	position: number;
+	/** Cap waktu server (ISO) — dipakai deteksi konflik K-08. */
+	updatedAt: string;
 }
 
 function req<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
@@ -266,6 +268,31 @@ export async function updateMaterial(id: number, input: Record<string, unknown>)
 	return req(`/materials/${id}`, { method: 'PATCH', body: input });
 }
 
+/** Klasifikasi perubahan K-08 (diputus instruktur pemilik saat menyimpan). */
+export type ChangeSignificance = 'ringan' | 'penting';
+
+export interface MaterialChangeRow {
+	id: number;
+	action: string;
+	actorUserId: number | null;
+	actorName: string | null;
+	metadata: {
+		materialId?: number;
+		changed?: string[];
+		significance?: ChangeSignificance;
+		reason?: string;
+	} | null;
+	createdAt: string;
+}
+
+/** Riwayat perubahan resmi materi dari audit (K-08; pengelola kursus saja). */
+export async function fetchMaterialChanges(
+	materialId: number,
+	limit = 20
+): Promise<MaterialChangeRow[]> {
+	return req<MaterialChangeRow[]>(`/materials/${materialId}/changes?limit=${limit}`);
+}
+
 /** Detail satu materi (termasuk passScore server untuk kuis). */
 export async function fetchMaterialDetail(id: number): Promise<BackendMaterial> {
 	const data = await req<{ material?: BackendMaterial } | BackendMaterial>(`/materials/${id}`);
@@ -346,7 +373,7 @@ export async function fetchCourseTree(courseId: number): Promise<CourseModule[]>
 }
 
 /** Adaptasi kursus backend ke bentuk Course UI (untuk daftar & header kelola). */
-export function toCourseView(b: BackendCourse): Course & { publishState: string; instructorNames: string } {
+export function toCourseView(b: BackendCourse): Course & { publishState: string; instructorNames: string; period: string } {
 	return {
 		id: b.id,
 		title: b.title,
@@ -363,14 +390,18 @@ export function toCourseView(b: BackendCourse): Course & { publishState: string;
 		lastAccessed: '-',
 		modules: [],
 		publishState: b.status,
+		period: b.period ?? 'upcoming',
 		instructorNames: (b.instructors ?? []).map((i) => i.name).join(', ') || 'Instruktur'
 	};
 }
 
-/** URL absolut berkas untuk <img src> dkk (same backend). */
+/** URL absolut berkas untuk <img src> dkk (same backend).
+ * Path /api/v1/... dipotong prefixnya karena getApiBase() sudah mengandungnya. */
 export function fileUrl(path: string): string {
 	if (/^https?:\/\//i.test(path)) return path;
-	return `${getApiBase()}${path.startsWith('/') ? path : `/${path}`}`;
+	const base = getApiBase().replace(/\/+$/, '');
+	const rel = path.startsWith('/api/v1/') ? path.slice('/api/v1'.length) : path;
+	return `${base}${rel.startsWith('/') ? rel : `/${rel}`}`;
 }
 
 /** Registry sesi: id kursus server yg sedang dikelola (agar drill-down + back-nav jalan). */

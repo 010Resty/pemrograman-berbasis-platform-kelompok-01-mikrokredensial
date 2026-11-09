@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { page as routePage } from '$app/state';
+	import { resolve } from '$app/paths';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatCard from '$lib/components/ui/StatCard.svelte';
 	import type { Course } from '$lib/data/courses';
 	import {
 		periodBadgeClass,
@@ -22,6 +26,7 @@
 	import { toast } from '$lib/stores/toast.svelte';
 
 	type Status = 'all' | 'Aktif' | 'Draft' | 'Diarsipkan';
+	type SortKey = 'newest' | 'name' | 'priceAsc' | 'priceDesc';
 
 	/** Sampul pengganti bila kursus belum punya gambar (hindari <img> rusak). */
 	const COVER_FALLBACK =
@@ -30,6 +35,8 @@
 	/** Kursus server milik instruktur login + jumlah modul/materi dari pohon. */
 	let serverCourses = $state<Array<Course & { publishState: string }>>([]);
 	let backendPeriod = $state<Record<number, { period: MetaPeriod; startMonth?: string }>>({});
+	/** Data mentah backend per id (harga + tanggal) — tanpa mengubah store/API. */
+	let backendById = $state<Record<number, BackendCourse>>({});
 	let loading = $state(true);
 	let loadError = $state('');
 
@@ -75,6 +82,9 @@
 			const list: BackendCourse[] = await loadMyCourses();
 			const adapted = list.map(toCourseView);
 			serverCourses = adapted;
+			const byId: Record<number, BackendCourse> = {};
+			for (const b of list) byId[b.id] = b;
+			backendById = byId;
 			for (const c of adapted) markServerKelola(c.id);
 			const periods: Record<number, { period: MetaPeriod; startMonth?: string }> = {};
 			for (const b of list) {
@@ -105,7 +115,9 @@
 	});
 
 	let activeFilter = $state<Status>('all');
-	let search = $state('');
+	let activeSort = $state<SortKey>('newest');
+	// Kata kunci awal boleh datang dari header portal (?q=…).
+	let search = $state(routePage.url.searchParams.get('q') ?? '');
 
 	const filters: { value: Status; label: string }[] = [
 		{ value: 'all', label: 'Semua' },
@@ -113,6 +125,39 @@
 		{ value: 'Draft', label: 'Draft' },
 		{ value: 'Diarsipkan', label: 'Diarsipkan' }
 	];
+
+	const sortOptions: { value: SortKey; label: string }[] = [
+		{ value: 'newest', label: 'Terbaru' },
+		{ value: 'name', label: 'Nama A–Z' },
+		{ value: 'priceAsc', label: 'Harga terendah' },
+		{ value: 'priceDesc', label: 'Harga tertinggi' }
+	];
+
+	/** Ringkasan status dari data server aktual (tanpa status fiktif). */
+	const statusCounts = $derived.by(() => {
+		let aktif = 0;
+		let draft = 0;
+		let arsip = 0;
+		for (const c of serverCourses) {
+			const st = courseStatus(c);
+			if (st === 'Aktif') aktif += 1;
+			else if (st === 'Draft') draft += 1;
+			else arsip += 1;
+		}
+		return { aktif, draft, arsip };
+	});
+
+	/** Format tanggal pembaruan dari server; '—' bila tak valid. */
+	function updatedLabel(courseId: number): string {
+		const raw = backendById[courseId]?.updatedAt ?? backendById[courseId]?.createdAt ?? '';
+		const t = Date.parse(raw);
+		if (!raw || Number.isNaN(t)) return '—';
+		return new Date(t).toLocaleDateString('id-ID', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric'
+		});
+	}
 
 	/** Status server 3 nilai (published/archived/draft); tanpa ini arsip salah tampil sebagai Draft. */
 	function courseStatus(c: Course & { publishState?: string }): 'Aktif' | 'Draft' | 'Diarsipkan' {
@@ -140,6 +185,34 @@
 			return { course: c, meta: ov ?? { period: 'ongoing' as MetaPeriod } };
 		})
 	);
+
+	/** Sortir sisi klien (tanpa mengubah API): terbaru / nama / harga. */
+	const sorted = $derived(
+		filteredWithMeta.toSorted((a, b) => {
+			const pa = backendById[a.course.id]?.priceNominal ?? 0;
+			const pb = backendById[b.course.id]?.priceNominal ?? 0;
+			switch (activeSort) {
+				case 'name':
+					return a.course.title.localeCompare(b.course.title, 'id');
+				case 'priceAsc':
+					return pa - pb;
+				case 'priceDesc':
+					return pb - pa;
+				case 'newest':
+				default: {
+					const ta =
+						Date.parse(backendById[a.course.id]?.updatedAt ?? '') ||
+						Date.parse(backendById[a.course.id]?.createdAt ?? '') ||
+						0;
+					const tb =
+						Date.parse(backendById[b.course.id]?.updatedAt ?? '') ||
+						Date.parse(backendById[b.course.id]?.createdAt ?? '') ||
+						0;
+					return tb - ta;
+				}
+			}
+		})
+	);
 </script>
 
 <svelte:head>
@@ -150,25 +223,48 @@
 	/>
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-		<div>
-			<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">Menu Utama · Kursusku</p>
-			<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Kursusku</h1>
-			<p class="mt-1 text-sm text-slate-500">
-				{serverCourses.length} kursus kamu ampu · {serverCourses.reduce(
-					(n, c) => n + c.modules.length,
-					0
-				)} modul ·
-				{serverCourses.reduce((n, c) => n + c.totalMaterials, 0)} materi.
-			</p>
-		</div>
-		<a
-			href="/instruktur/kursusku/tambah"
-			class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
-		>
-			<i class="fa-solid fa-plus" aria-hidden="true"></i> Buat Kursus Baru
-		</a>
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Menu Utama · Kursusku"
+		title="Kursusku"
+		description={`${serverCourses.length} kursus kamu ampu · ${serverCourses.reduce((n, c) => n + c.modules.length, 0)} modul · ${serverCourses.reduce((n, c) => n + c.totalMaterials, 0)} materi.`}
+	>
+		{#snippet actions()}
+			<a
+				href={resolve('/instruktur/kursusku/tambah')}
+				class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
+			>
+				<i class="fa-solid fa-plus" aria-hidden="true"></i> Buat Kursus Baru
+			</a>
+		{/snippet}
+	</PageHeader>
+
+	<div
+		class="grid grid-cols-1 gap-4 sm:grid-cols-3"
+		role="region"
+		aria-label="Ringkasan status kursus"
+	>
+		<StatCard
+			label="Kursus Aktif"
+			value={String(statusCounts.aktif)}
+			sub="Terbit dan tampil di katalog"
+			icon="fa-eye"
+			tone="emerald"
+		/>
+		<StatCard
+			label="Kursus Draft"
+			value={String(statusCounts.draft)}
+			sub="Belum diterbitkan"
+			icon="fa-pen"
+			tone="amber"
+		/>
+		<StatCard
+			label="Diarsipkan"
+			value={String(statusCounts.arsip)}
+			sub="Tidak tampil di katalog"
+			icon="fa-box-archive"
+			tone="violet"
+		/>
 	</div>
 
 	<div class="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -190,7 +286,7 @@
 				/>
 			</div>
 		</div>
-		<div class="flex flex-wrap gap-2" role="group" aria-label="Filter status kursus">
+		<div class="flex flex-wrap items-center gap-2" role="group" aria-label="Filter status kursus">
 			{#each filters as f (f.value)}
 				<button
 					type="button"
@@ -206,10 +302,39 @@
 				</button>
 			{/each}
 		</div>
+		<div class="max-w-xs flex-1 lg:max-w-56">
+			<label for="sort-kursus" class="sr-only">Urutkan kursus</label>
+			<div class="relative">
+				<div
+					class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400"
+				>
+					<i class="fa-solid fa-arrow-down-wide-short text-sm" aria-hidden="true"></i>
+				</div>
+				<select
+					id="sort-kursus"
+					bind:value={activeSort}
+					aria-label="Urutkan kursus"
+					class="w-full cursor-pointer appearance-none rounded-xl border border-slate-200 bg-white py-2.5 pr-10 pl-10 text-xs font-bold text-slate-700 transition-all focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+				>
+					{#each sortOptions as o (o.value)}
+						<option value={o.value}>{o.label}</option>
+					{/each}
+				</select>
+				<div
+					class="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400"
+				>
+					<i class="fa-solid fa-chevron-down text-xs" aria-hidden="true"></i>
+				</div>
+			</div>
+		</div>
 	</div>
 
 	{#if loading}
-		<div class="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-12 text-sm font-semibold text-slate-500" role="status" aria-label="Memuat kursus">
+		<div
+			class="flex items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-white p-12 text-sm font-semibold text-slate-500"
+			role="status"
+			aria-label="Memuat kursus"
+		>
 			<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat kursus dari server...
 		</div>
 	{:else if loadError}
@@ -232,8 +357,9 @@
 		</div>
 	{:else}
 		<div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
-			{#each filteredWithMeta as { course, meta: kMeta } (course.id)}
+			{#each sorted as { course, meta: kMeta } (course.id)}
 				{@const st = courseStatus(course)}
+				{@const price = backendById[course.id]?.priceLabel ?? '—'}
 				<article
 					class="group flex flex-col overflow-hidden rounded-2xl border border-slate-200/70 bg-white transition-all duration-300 ease-smooth hover:-translate-y-1 hover:shadow-xl"
 				>
@@ -244,8 +370,12 @@
 							class="h-44 w-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-105"
 							loading="lazy"
 						/>
+						<div
+							class="absolute inset-0 bg-gradient-to-t from-slate-900/70 via-slate-900/10 to-transparent"
+							aria-hidden="true"
+						></div>
 						<span
-							class={`absolute top-3 left-3 rounded-md border px-2.5 py-1 text-[10px] font-extrabold uppercase ${st === 'Aktif' ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-600 border-slate-200'}`}
+							class={`absolute top-3 left-3 rounded-md border px-2.5 py-1 text-[10px] font-extrabold uppercase backdrop-blur ${st === 'Aktif' ? 'border-emerald-200/70 bg-emerald-50/95 text-emerald-700' : 'bg-slate-900/60 text-white border-white/20'}`}
 						>
 							{st}
 						</span>
@@ -259,36 +389,73 @@
 									? 'Berjalan'
 									: 'Lewat'}
 						</span>
+						<span
+							class="absolute right-3 bottom-3 rounded-lg bg-white/95 px-2.5 py-1 text-xs font-black text-slate-900 shadow backdrop-blur"
+						>
+							{price}
+						</span>
 					</div>
 					<div class="flex flex-1 flex-col p-5">
-						<p class="text-[11px] font-bold tracking-wide text-blue-600 uppercase">
+						<p class="flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-blue-600 uppercase">
+							<span class="h-1.5 w-1.5 rounded-full bg-blue-600" aria-hidden="true"></span>
 							{course.category}
 						</p>
-						<h2 class="mt-1 line-clamp-2 text-base font-bold text-slate-900">
+						<h2 class="mt-1.5 line-clamp-2 text-lg leading-snug font-extrabold text-slate-900">
 							<a
-								href={`/instruktur/kursusku/${course.id}?src=server`}
+								href={resolve(`/instruktur/kursusku/${course.id}?src=server`)}
 								class="rounded transition-colors duration-200 ease-smooth hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
 								{course.title}
 							</a>
 						</h2>
-						<p class="mt-1 text-xs text-slate-500">
-							{course.modules.length} modul · {course.totalMaterials} materi
-						</p>
+						{#if course.description?.trim()}
+							<p class="mt-1.5 line-clamp-2 text-xs leading-relaxed text-slate-500">
+								{course.description.trim()}
+							</p>
+						{/if}
+						<ul class="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500">
+							<li class="inline-flex items-center gap-1.5">
+								<i class="fa-solid fa-layer-group text-[11px] text-blue-500" aria-hidden="true"></i>
+								<span><strong class="text-slate-800">{course.modules.length}</strong> modul</span>
+							</li>
+							<li class="inline-flex items-center gap-1.5">
+								<i class="fa-solid fa-file-lines text-[11px] text-violet-500" aria-hidden="true"></i>
+								<span><strong class="text-slate-800">{course.totalMaterials}</strong> materi</span>
+							</li>
+							<li class="inline-flex items-center gap-1.5">
+								<i class="fa-solid fa-clock-rotate-left text-[11px] text-slate-400" aria-hidden="true"></i>
+								<span>Diperbarui {updatedLabel(course.id)}</span>
+							</li>
+						</ul>
 
-						<div class="mt-5 flex gap-2">
+						<div class="mt-4 flex gap-2 border-t border-slate-100 pt-4">
 							<a
-								href={`/instruktur/kursusku/${course.id}?src=server`}
-								class="flex flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2.5 text-xs font-bold text-white transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
+								href={resolve(`/instruktur/kursusku/${course.id}?src=server#kurikulum`)}
+								aria-label={`Kelola materi kursus ${course.title}: buka bagian kurikulum`}
+								title="Buka bagian kurikulum — susun modul, sub-modul, dan materi"
+								class="flex min-h-11 flex-1 items-center gap-3 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-2.5 text-white shadow-lg shadow-blue-600/25 transition-all duration-200 ease-smooth hover:from-blue-700 hover:to-indigo-700 active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
-								<i class="fa-solid fa-list-check" aria-hidden="true"></i> Kelola Kurikulum
+								<span
+									class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-white/20"
+									aria-hidden="true"
+								>
+									<i class="fa-solid fa-list-check text-xs"></i>
+								</span>
+								<span class="flex min-w-0 flex-1 flex-col items-start leading-tight">
+									<span class="text-xs font-bold">Kelola Materi</span>
+									<span class="truncate text-[11px] font-medium text-blue-100"
+										>Buka bagian kurikulum</span
+									>
+								</span>
+								<i class="fa-solid fa-arrow-right shrink-0 text-xs opacity-80" aria-hidden="true"
+								></i>
 							</a>
 							<button
 								type="button"
 								onclick={() => askDeleteCourse(course.id, course.title)}
 								aria-label={`Hapus kursus ${course.title}`}
 								title="Hapus kursus beserta seluruh kurikulumnya"
-								class="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-red-200 text-red-600 transition-colors duration-200 ease-smooth hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-600"
+								class="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl border border-red-200 text-red-600 transition-colors duration-200 ease-smooth hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-600"
 							>
 								<i class="fa-solid fa-trash-can" aria-hidden="true"></i>
 							</button>
@@ -300,7 +467,10 @@
 	{/if}
 
 	{#if deleteError}
-		<p role="alert" class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700">
+		<p
+			role="alert"
+			class="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-xs font-semibold text-red-700"
+		>
 			<i class="fa-solid fa-triangle-exclamation mr-1.5" aria-hidden="true"></i>{deleteError}
 		</p>
 	{/if}
@@ -315,7 +485,9 @@
 		: 'Kursus beserta seluruh kurikulumnya akan dihapus permanen.'}
 	confirmText="Ya, hapus kursus"
 	cancelText="Batal"
-	confirmAriaLabel={deleteTarget ? `Konfirmasi hapus kursus ${deleteTarget.title}` : 'Konfirmasi hapus kursus'}
+	confirmAriaLabel={deleteTarget
+		? `Konfirmasi hapus kursus ${deleteTarget.title}`
+		: 'Konfirmasi hapus kursus'}
 	loading={deleting}
 	onconfirm={() => void confirmDeleteCourse()}
 />

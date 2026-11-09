@@ -1,11 +1,13 @@
 <script lang="ts">
 	import type { JSONContent } from '@tiptap/core';
+	import { browser } from '$app/environment';
 	import { generateHTML } from '@tiptap/html';
+	import { sanitizeTiptapHtml } from '$lib/security/sanitize';
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { getCourseById, normalizeMaterialType } from '$lib/data/courses';
 	import type { CourseModule } from '$lib/data/courses';
-	import { resolveServerCourse, isServerKelola, isServerId, updateMaterial, fetchMaterialDetail } from '$lib/api/courses';
+	import { resolveServerCourse, isServerKelola, isServerId, updateMaterial, fetchMaterialDetail, fetchMaterialChanges, type ChangeSignificance, type MaterialChangeRow } from '$lib/api/courses';
 	import { fetchQuizQuestions, saveQuizSet } from '$lib/api/quiz';
 	import {
 		loadCurriculumDraft,
@@ -16,7 +18,8 @@
 	import {
 		countDocWords,
 		loadMaterialDoc,
-		saveMaterialDoc
+		saveMaterialDoc,
+		clearMaterialDoc
 	} from '$lib/stores/material-docs';
 	import { createEditorExtensions } from '$lib/tiptap/extensions';
 	import {
@@ -25,6 +28,7 @@
 		loadQuizDraft,
 		normalizePassScore,
 		saveQuizDraft,
+		clearQuizDraft,
 		validateQuizDraft,
 		type QuizDraft
 	} from '$lib/stores/quiz-drafts';
@@ -33,6 +37,7 @@
 		countTaskPoints,
 		loadTaskDraft,
 		saveTaskDraft,
+		clearTaskDraft,
 		validateTaskDraft,
 		type TaskDraft
 	} from '$lib/stores/task-drafts';
@@ -104,6 +109,128 @@
 	let showOverwriteQuiz = $state(false);
 	let quizSavingServer = $state(false);
 	let pendingServerQuiz = $state<QuizDraft | null>(null);
+
+	/* ---- K-08: lindungi dari timpa diam-diam + catat signifikansi resmi ---- */
+	/** Cap server saat editor dibuka / terakhir sinkron (ISO). */
+	let baseUpdatedAt = $state<string | null>(null);
+	let baseLoadedFor = $state<string | null>(null);
+	/** Klasifikasi perubahan K-08 (diputus pemilik materi ini). */
+	let significance = $state<ChangeSignificance>('ringan');
+	let changeReason = $state('');
+	/** Konflik tulis: server berubah sejak dibuka. */
+	let showConflict = $state(false);
+	let conflictMessage = $state('');
+	/** True = timpa dengan sadar (lepas penjaga sekali, kirim base terbaru). */
+	let overwriteArmed = false;
+	let pendingSaveKind = $state<'tugas' | 'kuis' | 'materi' | null>(null);
+	/** Riwayat perubahan resmi dari audit. */
+	let changes = $state<MaterialChangeRow[]>([]);
+	let changesLoading = $state(false);
+	let changesError = $state('');
+	/** Draf basi dibuang manual agar spanduk hilang. */
+	let staleDismissed = $state(false);
+
+	/* Muat cap + riwayat server sekali per materi (server numerik saja). */
+	$effect(() => {
+		if (!browser || !serverMode || !isServerId(materialId)) return;
+		const key = `${courseId}::${materialId}`;
+		if (baseLoadedFor === key) return;
+		baseLoadedFor = key;
+		staleDismissed = false;
+		const mid = Number(materialId);
+		void fetchMaterialDetail(mid)
+			.then((d) => {
+				baseUpdatedAt = d.updatedAt ?? null;
+			})
+			.catch(() => {
+				baseUpdatedAt = null;
+			});
+		changesLoading = true;
+		changesError = '';
+		void fetchMaterialChanges(mid, 20)
+			.then((rows) => {
+				changes = rows;
+			})
+			.catch((e) => {
+				changesError = e instanceof Error ? e.message : 'Gagal memuat riwayat.';
+			})
+			.finally(() => {
+				changesLoading = false;
+			});
+	});
+
+	/** Buang draf lokal lalu mulai dari keadaan server. */
+	function discardLocalDraft(): void {
+		if (kind === 'kuis') clearQuizDraft(courseId, moduleId, subId, materialId);
+		else if (kind === 'tugas') clearTaskDraft(courseId, moduleId, subId, materialId);
+		else clearMaterialDoc(courseId, moduleId, subId, materialId);
+		staleDismissed = true;
+		latestQuiz = null;
+		latestTask = null;
+		latestJson = null;
+		dirty = false;
+		initializedFor = '';
+		quizEditorKey += 1;
+	}
+
+	/**
+	 * Penjaga tulis: baca ulang server, tolak diam-diam bila berubah.
+	 * Kembalikan true bila aman menyimpan (atau overwriteArmed dikonsumsi).
+	 */
+	async function ensureFreshBase(): Promise<boolean> {
+		if (!serverMode || !isServerId(materialId)) return true;
+		if (overwriteArmed) {
+			overwriteArmed = false;
+			return true;
+		}
+		try {
+			const fresh = await fetchMaterialDetail(Number(materialId));
+			const freshTs = fresh.updatedAt ?? null;
+			if (baseUpdatedAt && freshTs && freshTs !== baseUpdatedAt) {
+				baseUpdatedAt = freshTs;
+				conflictMessage =
+					'Materi ini berubah di server setelah Anda membukanya (oleh Anda di perangkat lain atau rekan pengampu). Muat ulang untuk melihat versi terbaru, atau timpa dengan sadar bila draf ini yang benar.';
+				pendingSaveKind = kind;
+				showConflict = true;
+				return false;
+			}
+			if (freshTs) baseUpdatedAt = freshTs;
+			return true;
+		} catch {
+			// Gagal verifikasi: lanjutkan, penjaga server (409) jadi lapis kedua.
+			return true;
+		}
+	}
+
+	/** Timpa dengan sadar: kunci ke versi server terbaru lalu simpan ulang. */
+	function confirmOverwriteConflict(): void {
+		showConflict = false;
+		overwriteArmed = true;
+		const k = pendingSaveKind;
+		pendingSaveKind = null;
+		if (k) void handleSave();
+	}
+
+	/** Label Indonesia untuk aksi audit kurikulum. */
+	function changeActionLabel(action: string): string {
+		if (action === 'curriculum.material.create') return 'Dibuat';
+		if (action === 'curriculum.material.update') return 'Diubah';
+		if (action === 'curriculum.material.delete') return 'Dihapus';
+		return action.replace(/^curriculum\.(material|module|submodule)\./, '');
+	}
+
+	function formatChangeTime(iso: string | null): string {
+		if (!iso) return '-';
+		const d = new Date(iso);
+		if (Number.isNaN(d.getTime())) return '-';
+		return d.toLocaleString('id-ID', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	}
 	/** Draf tugas (tipe tugas): disunting via TaskBriefBuilder (3 bagian). */
 	let latestTask = $state<TaskDraft | null>(null);
 	let taskCount = $state(0);
@@ -167,6 +294,16 @@
 			: kind === 'tugas'
 				? (storedTask?.updatedAt ?? '')
 				: (storedDoc?.updatedAt ?? '')
+	);
+
+	/** Draf lokal lebih tua dari server → kemungkinan basi (beda perangkat/penyunting). */
+	const showStaleBanner = $derived(
+		!staleDismissed &&
+			serverMode &&
+			isServerId(materialId) &&
+			!!storedUpdatedAt &&
+			!!baseUpdatedAt &&
+			new Date(baseUpdatedAt).getTime() > new Date(storedUpdatedAt).getTime()
 	);
 
 	function handleUpdate(info: { json: JSONContent; words: number }) {
@@ -240,20 +377,54 @@
 	}
 
 	/**
+	 * PATCH materi dengan penjaga konflik K-08.
+	 * Mengembalikan detail terbaru bila sukses; null bila konflik (modal tampil)
+	 * atau gagal lain (saveError terisi). Selalu kirim cap + signifikansi + alasan.
+	 */
+	async function patchMaterialGuarded(patch: Record<string, unknown>): Promise<unknown | null> {
+		if (!isServerId(materialId)) return {};
+		try {
+			const res = await updateMaterial(Number(materialId), {
+				...patch,
+				...(baseUpdatedAt ? { expectedUpdatedAt: baseUpdatedAt } : {}),
+				changeSignificance: significance,
+				...(changeReason.trim() ? { changeReason: changeReason.trim().slice(0, 500) } : {})
+			});
+			if (typeof res === 'object' && res !== null) {
+				const ts = (res as { updatedAt?: unknown }).updatedAt;
+				if (typeof ts === 'string' && ts) baseUpdatedAt = ts;
+			}
+			return res;
+		} catch (e) {
+			if (e instanceof BackendRequestError && e.httpStatus === 409) {
+				try {
+					const fresh = await fetchMaterialDetail(Number(materialId));
+					if (fresh.updatedAt) baseUpdatedAt = fresh.updatedAt;
+				} catch {
+					// Abaikan — base lama tetap dipakai penanda.
+				}
+				conflictMessage =
+					'Server menolak penyimpanan: materi berubah setelah Anda membukanya (kode MATERIAL_CONFLICT). Muat ulang untuk melihat versi terbaru, atau timpa dengan sadar bila draf ini yang benar.';
+				pendingSaveKind = kind;
+				showConflict = true;
+				return null;
+			}
+			saveError = serverMessage(e, 'Gagal menyimpan ke server.');
+			return null;
+		}
+	}
+
+	/**
 	 * Sinkronkan judul ke server (draf isi/kuis/tugas tetap lokal).
-	 * Mengembalikan false bila sinkronisasi gagal (pengguna tetap di halaman).
+	 * Mengembalikan false bila sinkronisasi gagal atau konflik (pengguna tetap di halaman).
 	 */
 	async function pushTitleToServer(title: string): Promise<boolean> {
 		if (!serverMode || !isServerId(materialId)) return true;
-		try {
-			await updateMaterial(Number(materialId), { title });
-			// Judul tampil di tree: tandai basi setelah sukses.
-			invalidateCourseTree(courseId);
-			return true;
-		} catch (e) {
-			saveError = serverMessage(e, 'Gagal menyimpan judul ke server.');
-			return false;
-		}
+		const res = await patchMaterialGuarded({ title });
+		if (res === null) return false;
+		// Judul tampil di tree: tandai basi setelah sukses.
+		invalidateCourseTree(courseId);
+		return true;
 	}
 
 	/** Pesan error server + rincian field (agar "Data materi tidak valid" bisa ditindaklanjuti). */
@@ -272,13 +443,11 @@
 	 */
 	async function pushContentToServer(content: JSONContent): Promise<boolean> {
 		if (!serverMode || !isServerId(materialId)) return true;
-		try {
-			await updateMaterial(Number(materialId), { content: JSON.stringify(content) });
-			return true;
-		} catch (e) {
-			saveError = serverMessage(e, 'Gagal menyimpan isi materi ke server.');
-			return false;
-		}
+		const res = await patchMaterialGuarded({ content: JSON.stringify(content) });
+		if (res === null) return false;
+		// Isi ikut di-PATCH: tandai tree basi seperti judul/kuis.
+		invalidateCourseTree(courseId);
+		return true;
 	}
 
 	/* Muat status kuis server (jumlah soal + ambang) untuk materi kuis numerik.
@@ -338,10 +507,11 @@
 		quizSavingServer = true;
 		try {
 			await saveQuizSet(Number(materialId), quizDraftToPayload(draft));
-			await updateMaterial(Number(materialId), {
+			const res = await patchMaterialGuarded({
 				title,
 				passScore: normalizePassScore(draft.passScore)
 			});
+			if (res === null) return false;
 			// Judul ikut di-PATCH: tandai tree basi (isi soal tidak tersimpan di tree).
 			invalidateCourseTree(courseId);
 			await loadServerQuiz(Number(materialId));
@@ -400,6 +570,8 @@
 	async function handleSave() {
 		saveError = '';
 		if (moduleIndex < 0 || subIndex < 0 || matIndex < 0) return;
+		// Penjaga tulis K-08: tolak diam-diam bila server berubah sejak dibuka.
+		if (!(await ensureFreshBase())) return;
 		const title =
 			editableModules[moduleIndex].subModules![subIndex].materials[matIndex].title.trim();
 		if (!title) {
@@ -763,6 +935,51 @@
 						</button>
 					</div>
 				</div>
+				{#if showStaleBanner}
+					<p
+						role="status"
+						class="mb-3 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800"
+					>
+						<i class="fa-solid fa-triangle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
+						<span class="flex-1">
+							Server lebih baru dari draf di browser ini — kemungkinan diubah di perangkat lain atau oleh rekan. Simpan akan meminta konfirmasi bila bentrok.
+							<button
+								type="button"
+								onclick={discardLocalDraft}
+								class="ml-1 font-bold underline hover:text-amber-900 focus-visible:outline-2 focus-visible:outline-amber-600"
+							>
+								Buang draf & mulai dari server
+							</button>
+						</span>
+					</p>
+				{/if}
+				{#if serverMode && isServerId(materialId)}
+					<div class="mb-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-[180px_minmax(0,1fr)]">
+						<div>
+							<label for="change-significance" class="mb-1.5 block text-xs font-bold text-slate-700">Signifikansi (K-08)</label>
+							<select
+								id="change-significance"
+								bind:value={significance}
+								class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+							>
+								<option value="ringan">Ringan — typo/format/sampul/judul</option>
+								<option value="penting">Penting — isi kuis/tugas/ambang</option>
+							</select>
+						</div>
+						<div>
+							<label for="change-reason" class="mb-1.5 block text-xs font-bold text-slate-700">Alasan perubahan <span class="font-normal text-slate-400">(opsional, tercatat resmi)</span></label>
+							<input
+								id="change-reason"
+								type="text"
+								bind:value={changeReason}
+								maxlength={500}
+								placeholder="cth. Perbaiki kunci jawaban soal 3"
+								autocomplete="off"
+								class="w-full rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+							/>
+						</div>
+					</div>
+				{/if}
 				{#if savedMessage}
 					<p
 						role="status"
@@ -968,7 +1185,8 @@
 									Deskripsi Penugasan
 								</p>
 								{#if taskBriefHtml}
-									<div class="mdoc">{@html taskBriefHtml}</div>
+									<!-- eslint-disable-next-line svelte/no-at-html-tags -- disanitasi via sanitizeTiptapHtml -->
+									<div class="mdoc">{@html sanitizeTiptapHtml(taskBriefHtml)}</div>
 								{:else}
 									<p class="text-sm text-slate-400">(belum diisi)</p>
 								{/if}
@@ -1012,6 +1230,48 @@
 			</a>
 		</div>
 
+		{#if serverMode && isServerId(materialId)}
+			<section aria-labelledby="heading-riwayat" class="mt-6 overflow-hidden rounded-2xl border border-slate-200/60 bg-white">
+				<div class="border-b border-slate-100 bg-slate-50/70 px-5 py-4 sm:px-6">
+					<h2 id="heading-riwayat" class="text-sm font-extrabold text-slate-900">
+						<i class="fa-solid fa-clock-rotate-left mr-1.5 text-slate-400" aria-hidden="true"></i>Riwayat perubahan resmi (K-08)
+					</h2>
+					<p class="mt-0.5 text-xs text-slate-500">Tercatat di server setiap kali materi disimpan — siapa, kapan, bagian apa, seberapa penting.</p>
+				</div>
+				<div class="px-5 py-4 sm:px-6">
+					{#if changesLoading}
+						<p role="status" class="flex items-center gap-2 text-xs font-semibold text-slate-500">
+							<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat riwayat…
+						</p>
+					{:else if changesError}
+						<p role="alert" class="text-xs font-semibold text-red-600">{changesError}</p>
+					{:else if changes.length === 0}
+						<p class="text-xs text-slate-500">Belum ada perubahan tercatat untuk materi ini.</p>
+					{:else}
+						<ol class="space-y-2">
+							{#each changes as c (c.id)}
+								<li class="flex flex-wrap items-center gap-x-2 gap-y-0.5 rounded-xl bg-slate-50 px-3.5 py-2.5 text-xs">
+									<span class="font-bold text-slate-800">{changeActionLabel(c.action)}</span>
+									{#if c.metadata?.significance}
+										<span class={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-extrabold uppercase ${c.metadata.significance === 'penting' ? 'border-red-200 bg-red-50 text-red-700' : 'border-slate-200 bg-white text-slate-500'}`}>
+											{c.metadata.significance}
+										</span>
+									{/if}
+									<span class="text-slate-500">{c.actorName ?? 'Sistem'} · {formatChangeTime(c.createdAt)}</span>
+									{#if c.metadata?.changed?.length}
+										<span class="w-full font-mono text-[11px] text-slate-600">ubah: {c.metadata.changed.join(', ')}</span>
+									{/if}
+									{#if c.metadata?.reason}
+										<span class="w-full text-slate-600">“{c.metadata.reason}”</span>
+									{/if}
+								</li>
+							{/each}
+						</ol>
+					{/if}
+				</div>
+			</section>
+		{/if}
+
 		<WarningModal
 			bind:open={showLeave}
 			type="warning"
@@ -1033,6 +1293,16 @@
 			cancelText="Batal"
 			loading={quizSavingServer}
 			onconfirm={() => void confirmOverwriteQuiz()}
+		/>
+
+		<WarningModal
+			bind:open={showConflict}
+			type="danger"
+			title="Materi berubah di server"
+			message={conflictMessage}
+			confirmText="Ya, timpa dengan draf ini"
+			cancelText="Batal (muat ulang dulu)"
+			onconfirm={confirmOverwriteConflict}
 		/>
 	{/if}
 </div>

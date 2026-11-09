@@ -85,6 +85,21 @@ export function saveTaskDraft(
 	}
 }
 
+/** Hapus draf tugas (dipakai saat draf basi vs server). */
+export function clearTaskDraft(
+	courseId: number,
+	moduleId: string,
+	subId: string,
+	materialId: string
+): void {
+	if (!storageAvailable()) return;
+	try {
+		localStorage.removeItem(taskKey(courseId, moduleId, subId, materialId));
+	} catch {
+		// Abaikan.
+	}
+}
+
 /** Validasi draf tugas untuk tombol simpan. */
 export function validateTaskDraft(draft: TaskDraft): string | null {
 	if (countDocWords(draft.brief) === 0) return 'Isi deskripsi penugasan terlebih dahulu.';

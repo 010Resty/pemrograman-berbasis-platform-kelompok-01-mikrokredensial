@@ -8,6 +8,7 @@
 	} from '$lib/stores/quiz-drafts';
 	import type { QuizQuestion } from '$lib/data/material-details';
 	import { uploadFile } from '$lib/api/uploads';
+	import { resolveMediaSrc } from '$lib/tiptap/extensions';
 
 	/**
 	 * Pembuat kuis instruktur: susun soal pilihan ganda (4 opsi + kunci)
@@ -403,7 +404,7 @@
 						<div class="grid gap-2 sm:grid-cols-3">
 							<div class="rounded-lg border border-slate-200 bg-white p-2">
 								{#if q.imageUrl}
-									<img src={q.imageUrl} alt={`Lampiran foto soal ${qi + 1}`} class="mb-1.5 max-h-28 w-full rounded-lg object-cover" loading="lazy" />
+									<img src={resolveMediaSrc(q.imageUrl)} alt={`Lampiran foto soal ${qi + 1}`} class="mb-1.5 max-h-28 w-full rounded-lg object-cover" loading="lazy" />
 									<button
 										type="button"
 										onclick={() => removeMedia(qi, 'image')}
@@ -424,7 +425,7 @@
 							</div>
 							<div class="rounded-lg border border-slate-200 bg-white p-2">
 								{#if q.audioUrl}
-									<audio src={q.audioUrl} controls preload="none" class="mb-1.5 w-full" aria-label={`Lampiran audio soal ${qi + 1}`}></audio>
+									<audio src={resolveMediaSrc(q.audioUrl)} controls preload="none" class="mb-1.5 w-full" aria-label={`Lampiran audio soal ${qi + 1}`}></audio>
 									<button
 										type="button"
 										onclick={() => removeMedia(qi, 'audio')}

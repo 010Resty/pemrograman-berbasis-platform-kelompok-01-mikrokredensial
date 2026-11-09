@@ -1,23 +1,49 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { resolve } from '$app/paths';
 	import type { Course } from '$lib/data/courses';
 	import type { CourseMeta } from '$lib/data/course-meta';
 	import { canAccessCourse, isCoursePaid, isPeriodLocked } from '$lib/stores/enrollment.svelte';
+	import { fetchCoursePromo, type CoursePromoQuote } from '$lib/api/promos';
+	import { formatIDR } from '$lib/data/payment';
 
 	let {
 		course,
 		meta,
-		mode
+		mode,
+		enrolled = true,
+		enrolling = false,
+		enrollError = '',
+		onEnroll = () => {}
 	}: {
 		course: Course;
 		meta: CourseMeta;
 		mode: 'public' | 'user';
+		/** False = tampilkan tombol Ikuti (kursus gratis, mode user). */
+		enrolled?: boolean;
+		enrolling?: boolean;
+		enrollError?: string;
+		onEnroll?: () => void;
 	} = $props();
 
 	const locked = $derived(
 		mode === 'user' && isCoursePaid(course.id) && !canAccessCourse(course.id)
 	);
 	const periodLocked = $derived(mode === 'user' && isPeriodLocked(course.id));
+
+	/** Promo aktif kursus ini (server = kebenaran; null = tidak ada). */
+	let promoQuote = $state<CoursePromoQuote | null>(null);
+
+	$effect(() => {
+		if (!browser || mode !== 'user' || !locked) return;
+		let cancelled = false;
+		void fetchCoursePromo(course.id).then((q) => {
+			if (!cancelled) promoQuote = q;
+		});
+		return () => {
+			cancelled = true;
+		};
+	});
 </script>
 
 <aside
@@ -63,13 +89,29 @@
 				Masuk untuk melihat modul dan mulai belajar.
 			</p>
 		{:else if locked}
-			<div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center">
-				<p class="text-[11px] font-extrabold tracking-widest text-amber-800 uppercase">
-					Pelatihan Berbayar
-				</p>
-				<p class="mt-0.5 text-2xl font-black text-slate-900">{meta.price}</p>
-				<p class="mt-0.5 text-[11px] text-slate-600">Sekali bayar · Akses selamanya</p>
-			</div>
+			{#if promoQuote}
+				<div class="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-center">
+					<p class="inline-flex items-center gap-1.5 text-[11px] font-extrabold tracking-widest text-red-700 uppercase">
+						<i class="fa-solid fa-tags" aria-hidden="true"></i>
+						{promoQuote.badgeLabel ?? promoQuote.title} −{promoQuote.discountPercent}%
+					</p>
+					<p class="mt-0.5 text-sm text-slate-500 line-through">{meta.price}</p>
+					<p class="text-2xl font-black text-slate-900">{formatIDR(promoQuote.promoPrice)}</p>
+					{#if promoQuote.endsAt}
+						<p class="mt-0.5 text-[11px] font-semibold text-red-600">
+							Berakhir {new Date(promoQuote.endsAt).toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' })}
+						</p>
+					{/if}
+				</div>
+			{:else}
+				<div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center">
+					<p class="text-[11px] font-extrabold tracking-widest text-amber-800 uppercase">
+						Pelatihan Berbayar
+					</p>
+					<p class="mt-0.5 text-2xl font-black text-slate-900">{meta.price}</p>
+					<p class="mt-0.5 text-[11px] text-slate-600">Sekali bayar · Akses selamanya</p>
+				</div>
+			{/if}
 			<a
 				href={mode === 'user'
 					? resolve(`/user/pembayaran/${course.id}`)
@@ -80,6 +122,29 @@
 			</a>
 			<p class="text-center text-[11px] text-slate-500">
 				QRIS · VA · E-wallet · Kartu · Gerai retail
+			</p>
+		{:else if mode === 'user' && !enrolled}
+			{#if enrollError}
+				<p role="alert" class="rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700">
+					<i class="fa-solid fa-circle-exclamation mr-1.5" aria-hidden="true"></i>{enrollError}
+				</p>
+			{/if}
+			<button
+				type="button"
+				onclick={onEnroll}
+				disabled={enrolling}
+				class="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-lg shadow-emerald-600/25 transition-all duration-200 ease-smooth hover:bg-emerald-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-emerald-600 disabled:cursor-not-allowed disabled:bg-emerald-400"
+			>
+				{#if enrolling}
+					<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
+					<span>Mendaftarkan...</span>
+				{:else}
+					<i class="fa-solid fa-user-plus" aria-hidden="true"></i>
+					<span>Ikuti Kursus Gratis</span>
+				{/if}
+			</button>
+			<p class="text-center text-[11px] text-slate-500">
+				Gratis · Langsung terdaftar di Kursusku
 			</p>
 		{:else if periodLocked}
 			<div class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-center">

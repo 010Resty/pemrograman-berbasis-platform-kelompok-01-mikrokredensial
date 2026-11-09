@@ -54,6 +54,21 @@ export function saveMaterialDoc(
 	}
 }
 
+/** Hapus draf dokumen materi (dipakai saat draf basi vs server). */
+export function clearMaterialDoc(
+	courseId: number,
+	moduleId: string,
+	subId: string,
+	materialId: string
+): void {
+	if (!storageAvailable()) return;
+	try {
+		localStorage.removeItem(docKey(courseId, moduleId, subId, materialId));
+	} catch {
+		// Abaikan.
+	}
+}
+
 /** Hitung kata dalam dokumen Tiptap (untuk badge status & statistik). */
 export function countDocWords(content: JSONContent | null | undefined): number {
 	if (!content) return 0;

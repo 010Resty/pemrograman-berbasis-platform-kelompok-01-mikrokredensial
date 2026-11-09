@@ -101,6 +101,21 @@ export function saveQuizDraft(
 	}
 }
 
+/** Hapus draf kuis (dipakai saat draf basi vs server). */
+export function clearQuizDraft(
+	courseId: number,
+	moduleId: string,
+	subId: string,
+	materialId: string
+): void {
+	if (!storageAvailable()) return;
+	try {
+		localStorage.removeItem(quizKey(courseId, moduleId, subId, materialId));
+	} catch {
+		// Abaikan.
+	}
+}
+
 /** Validasi draf kuis untuk tombol simpan. */
 export function validateQuizDraft(draft: QuizDraft): string | null {
 	const raw = (draft as { passScore?: unknown }).passScore;

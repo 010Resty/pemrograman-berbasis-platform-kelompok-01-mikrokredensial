@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { JSONContent } from '@tiptap/core';
 	import { generateHTML } from '@tiptap/html';
+	import { sanitizeTiptapHtml } from '$lib/security/sanitize';
 	import '$lib/tiptap/content.css';
 	import { createEditorExtensions } from '$lib/tiptap/extensions';
 
@@ -62,7 +63,8 @@
 				</p>
 			</div>
 		{:else}
-			<div class="mdoc">{@html html}</div>
+			<!-- eslint-disable-next-line svelte/no-at-html-tags -- disanitasi via sanitizeTiptapHtml -->
+			<div class="mdoc">{@html sanitizeTiptapHtml(html)}</div>
 		{/if}
 	</div>
 </article>

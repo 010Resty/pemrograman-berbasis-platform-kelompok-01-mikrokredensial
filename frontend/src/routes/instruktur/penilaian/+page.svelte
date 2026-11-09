@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import UiStatCard from '$lib/components/ui/StatCard.svelte';
 	import { loadInstructorReviewQueue, type QueueCourse } from '$lib/api/grading-queue';
 
 	/**
@@ -79,38 +81,17 @@
 	<meta name="description" content="Daftar course untuk antrean penilaian tugas dan kuis peserta." />
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-6">
-		<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">Menu Utama · Penilaian</p>
-		<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Penilaian</h1>
-		<p class="mt-1 text-sm text-slate-500">
-			{pendingTotal} menunggu dinilai · {gradedTotal} sudah dinilai · rata-rata nilai {avgScore ?? '-'}.
-			Pilih course untuk melihat penugasannya.
-		</p>
-	</div>
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Menu Utama · Penilaian"
+		title="Penilaian"
+		description={`${pendingTotal} menunggu dinilai · ${gradedTotal} sudah dinilai · rata-rata nilai ${avgScore ?? '-'}. Pilih course untuk melihat penugasannya.`}
+	/>
 
-	<div class="mb-6 grid grid-cols-3 gap-4">
-		<div class="rounded-2xl border border-amber-200/70 bg-amber-50 p-4 sm:p-5">
-			<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-500 text-white">
-				<i class="fa-solid fa-hourglass-half text-sm" aria-hidden="true"></i>
-			</div>
-			<div class="mt-3 text-2xl font-bold text-slate-900">{pendingTotal}</div>
-			<div class="text-xs font-semibold text-slate-600">Menunggu</div>
-		</div>
-		<div class="rounded-2xl border border-emerald-200/70 bg-emerald-50 p-4 sm:p-5">
-			<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white">
-				<i class="fa-solid fa-circle-check text-sm" aria-hidden="true"></i>
-			</div>
-			<div class="mt-3 text-2xl font-bold text-slate-900">{gradedTotal}</div>
-			<div class="text-xs font-semibold text-slate-600">Dinilai</div>
-		</div>
-		<div class="rounded-2xl border border-blue-200/70 bg-blue-50 p-4 sm:p-5">
-			<div class="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-600 text-white">
-				<i class="fa-solid fa-star text-sm" aria-hidden="true"></i>
-			</div>
-			<div class="mt-3 text-2xl font-bold text-slate-900">{avgScore ?? '-'}</div>
-			<div class="text-xs font-semibold text-slate-600">Rata-rata</div>
-		</div>
+	<div class="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+		<UiStatCard label="Menunggu" value={String(pendingTotal)} icon="fa-hourglass-half" tone="amber" />
+		<UiStatCard label="Dinilai" value={String(gradedTotal)} icon="fa-circle-check" tone="emerald" />
+		<UiStatCard label="Rata-rata" value={avgScore === null ? '-' : String(avgScore)} icon="fa-star" tone="blue" />
 	</div>
 
 	<div class="mb-4 max-w-md">
