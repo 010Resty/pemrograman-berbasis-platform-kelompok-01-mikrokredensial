@@ -7,10 +7,9 @@ import { getSpotServer } from '$lib/server/public-catalog';
  * progresif di browser. `origin` dipakai untuk canonical absolut per domain.
  */
 export const load: PageServerLoad = async ({ url }) => {
-	const [spot, wide] = await getSpotServer();
+	const spot = await getSpotServer();
 	return {
 		origin: url.origin,
-		spot,
-		gratis: wide.filter((c) => (c.priceNominal ?? -1) === 0).slice(0, 3)
+		spot
 	};
 };

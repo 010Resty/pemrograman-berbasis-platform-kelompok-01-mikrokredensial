@@ -1,9 +1,12 @@
 <script lang="ts">
 	import '../../app.css';
+	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import PublicHeader from '$lib/components/public/PublicHeader.svelte';
 	import PublicFooter from '$lib/components/public/PublicFooter.svelte';
 	import SeoHead from '$lib/components/SeoHead.svelte';
+import CertificateCover from '$lib/components/training/molecules/CertificateCover.svelte';
+import CertificateLightbox from '$lib/components/training/molecules/CertificateLightbox.svelte';
 	import { canonicalPath, getSiteUrl } from '$lib/seo/site';
 	import { reveal } from '$lib/actions/reveal';
 	import { apiRequest } from '$lib/api/backend';
@@ -12,8 +15,10 @@
 		code: string;
 		recipientName: string;
 		courseTitle: string;
-		moduleTitle: string;
+		moduleTitle: string | null;
+		instructorName: string | null;
 		status: string;
+		revokeReason: string | null;
 		issuedAt: string;
 		revokedAt: string | null;
 	}
@@ -47,6 +52,19 @@
 			verifyDone = true;
 		}
 	}
+
+	// QR sertifikat menaut ke ?code=… — verifikasi otomatis sekali saat dibuka.
+	let autoVerifyStarted = $state(false);
+	let showCert = $state(false);
+	$effect(() => {
+		if (autoVerifyStarted) return;
+		autoVerifyStarted = true;
+		const q = page.url.searchParams.get('code')?.trim();
+		if (q) {
+			verifyCode = q;
+			void verifyCertificate(new Event('submit'));
+		}
+	});
 
 	function formatTanggalID(iso: string): string {
 		const d = new Date(iso);
@@ -128,13 +146,12 @@
 		</div>
 	</section>
 
-	<section aria-labelledby="verifikasi-heading" class="border-t border-mist bg-ice/60 pb-20">
-		<h2 id="verifikasi-heading" class="sr-only">Formulir verifikasi sertifikat</h2>
+	<section aria-labelledby="verifikasi-form-title" class="border-t border-mist bg-ice/60 pb-20">
 		<div class="mx-auto max-w-7xl px-4 pt-10 sm:px-6 lg:px-8">
 			<div use:reveal class="rounded-2xl border border-mist bg-white p-8 md:p-12">
 				<div class="grid grid-cols-1 items-center gap-12 lg:grid-cols-12">
 					<div class="lg:col-span-7">
-						<h2 class="mb-4 font-heading text-2xl font-extrabold tracking-tight text-abyss sm:text-3xl">
+						<h2 id="verifikasi-form-title" class="mb-4 font-heading text-2xl font-extrabold tracking-tight text-abyss sm:text-3xl">
 							Periksa validitas sertifikat
 						</h2>
 						<p class="mb-8 max-w-xl text-sm leading-relaxed text-slate-600 sm:text-base">
@@ -195,6 +212,9 @@
 										{#if verifyResult.status === 'revoked'}
 											<i class="fa-solid fa-triangle-exclamation text-lg text-amber-500" aria-hidden="true"></i>
 											<span class="font-heading text-sm font-bold text-abyss">Status: Dicabut</span>
+										{:else if verifyResult.status === 'superseded'}
+											<i class="fa-solid fa-arrows-rotate text-lg text-blue-500" aria-hidden="true"></i>
+											<span class="font-heading text-sm font-bold text-abyss">Status: Digantikan</span>
 										{:else}
 											<i class="fa-solid fa-circle-check text-lg text-teal" aria-hidden="true"></i>
 											<span class="font-heading text-sm font-bold text-abyss">Status: Terdaftar &amp; Terverifikasi</span>
@@ -203,6 +223,33 @@
 									<span class="font-mono text-xs text-slate-400">{verifyResult.code}</span>
 								</div>
 								<div class="space-y-3 text-sm">
+									{#if verifyResult}
+								<CertificateLightbox bind:open={showCert} label={`Sertifikat ${verifyResult.code}`}>
+									<CertificateCover
+										code={verifyResult.code}
+										recipientName={verifyResult.recipientName}
+										instructorName={verifyResult.instructorName}
+										courseTitle={verifyResult.courseTitle}
+										moduleTitle={verifyResult.moduleTitle}
+										issuedLabel={formatTanggalID(verifyResult.issuedAt)}
+										status={verifyResult.status === 'revoked' ? 'revoked' : verifyResult.status === 'superseded' ? 'superseded' : 'issued'}
+										size="full"
+									/>
+								</CertificateLightbox>
+								{/if}
+								<div class="overflow-hidden rounded-xl border border-mist">
+										<CertificateCover
+											code={verifyResult.code}
+											recipientName={verifyResult.recipientName}
+											instructorName={verifyResult.instructorName}
+											courseTitle={verifyResult.courseTitle}
+											moduleTitle={verifyResult.moduleTitle}
+											issuedLabel={formatTanggalID(verifyResult.issuedAt)}
+											status={verifyResult.status === 'revoked' ? 'revoked' : verifyResult.status === 'superseded' ? 'superseded' : 'issued'}
+											size="full"
+											onview={() => (showCert = true)}
+										/>
+									</div>
 									<div class="flex justify-between gap-4">
 										<span class="text-slate-500">Pemilik Sertifikat:</span>
 										<span class="text-right font-semibold text-abyss">{verifyResult.recipientName}</span>
@@ -211,10 +258,17 @@
 										<span class="text-slate-500">Nama Pelatihan:</span>
 										<span class="text-right font-semibold text-abyss">{verifyResult.courseTitle}</span>
 									</div>
-									<div class="flex justify-between gap-4">
-										<span class="text-slate-500">Modul:</span>
-										<span class="text-right font-semibold text-abyss">{verifyResult.moduleTitle}</span>
-									</div>
+									{#if verifyResult.moduleTitle}
+										<div class="flex justify-between gap-4">
+											<span class="text-slate-500">Modul:</span>
+											<span class="text-right font-semibold text-abyss">{verifyResult.moduleTitle}</span>
+										</div>
+									{:else}
+										<div class="flex justify-between gap-4">
+											<span class="text-slate-500">Tingkat:</span>
+											<span class="text-right font-semibold text-abyss">Sertifikat kursus (seluruh modul)</span>
+										</div>
+									{/if}
 									<div class="flex justify-between gap-4">
 										<span class="text-slate-500">Tanggal Terbit:</span>
 										<span class="font-semibold text-abyss">{formatTanggalID(verifyResult.issuedAt)}</span>
@@ -222,6 +276,8 @@
 								</div>
 								{#if verifyResult.status === 'revoked'}
 									<p role="alert" class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-800">Sertifikat ini telah dicabut dan tidak lagi berlaku.</p>
+								{:else if verifyResult.status === 'superseded'}
+									<p role="status" class="rounded-xl border border-blue-200 bg-blue-50 px-4 py-2.5 text-xs font-semibold text-blue-800">Sertifikat modul ini telah digantikan sertifikat kursus. {verifyResult.revokeReason ?? ''}</p>
 								{/if}
 							{:else}
 								<div class="flex items-center justify-between border-b border-mist pb-3">

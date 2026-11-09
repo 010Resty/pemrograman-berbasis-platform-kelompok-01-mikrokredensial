@@ -72,11 +72,11 @@
 			<Logo size="md" showText={true} textSize="xl" />
 		</a>
 		<nav aria-label="Navigasi utama" class="hidden min-w-0 flex-1 items-center justify-center gap-5 font-semibold text-[13px] text-slate-700 lg:flex xl:gap-7">
-			<a href="/#beranda" class="whitespace-nowrap hover:text-blue-600">BERANDA</a>
+			<a href="/" class="whitespace-nowrap hover:text-blue-600">BERANDA</a>
 			<a href="/modules" aria-current="page" class="whitespace-nowrap text-blue-600">PELATIHAN</a>
-			<a href="/#peringkat" class="whitespace-nowrap hover:text-blue-600">PERINGKAT</a>
-			<a href="/#tentang" class="whitespace-nowrap hover:text-blue-600">TENTANG</a>
-			<a href="/#verifikasi" class="whitespace-nowrap hover:text-blue-600">VERIFIKASI</a>
+			<a href="/peringkat" class="whitespace-nowrap hover:text-blue-600">PERINGKAT</a>
+			<a href="/tentang" class="whitespace-nowrap hover:text-blue-600">TENTANG</a>
+			<a href="/verifikasi" class="whitespace-nowrap hover:text-blue-600">VERIFIKASI</a>
 		</nav>
 		<div class="hidden shrink-0 items-center gap-2.5 sm:flex">
 			<a href="/login" class="inline-flex min-h-[44px] items-center justify-center rounded-full border border-blue-600 px-5 text-xs font-bold text-blue-700 uppercase hover:bg-blue-50">Masuk</a>
@@ -88,12 +88,28 @@
 			type="button"
 			onclick={() => (menuOpen = !menuOpen)}
 			aria-expanded={menuOpen}
+			aria-controls="module-mobile-nav"
 			aria-label={menuOpen ? 'Tutup menu' : 'Buka menu'}
 			class="flex min-h-11 min-w-11 items-center justify-center rounded-xl p-2 text-slate-700 hover:bg-slate-100 lg:hidden"
 		>
 			<i class={`fa-solid ${menuOpen ? 'fa-xmark' : 'fa-bars'} text-xl`} aria-hidden="true"></i>
 		</button>
 	</div>
+	{#if menuOpen}
+		<nav id="module-mobile-nav" aria-label="Navigasi seluler" class="border-t border-slate-100 px-4 pt-2 pb-4 lg:hidden">
+			<div class="flex flex-col gap-1 text-sm font-semibold text-slate-700">
+				<a href="/" class="rounded-lg px-3 py-2.5 hover:bg-slate-50" onclick={() => (menuOpen = false)}>Beranda</a>
+				<a href="/modules" aria-current="page" class="rounded-lg bg-blue-50 px-3 py-2.5 text-blue-700" onclick={() => (menuOpen = false)}>Pelatihan</a>
+				<a href="/peringkat" class="rounded-lg px-3 py-2.5 hover:bg-slate-50" onclick={() => (menuOpen = false)}>Peringkat</a>
+				<a href="/tentang" class="rounded-lg px-3 py-2.5 hover:bg-slate-50" onclick={() => (menuOpen = false)}>Tentang</a>
+				<a href="/verifikasi" class="rounded-lg px-3 py-2.5 hover:bg-slate-50" onclick={() => (menuOpen = false)}>Verifikasi</a>
+			</div>
+			<div class="mt-3 flex gap-2 sm:hidden">
+				<a href="/login" class="inline-flex min-h-11 flex-1 items-center justify-center rounded-full border border-blue-600 px-5 text-xs font-bold text-blue-700 uppercase">Masuk</a>
+				<a href="/register" class="inline-flex min-h-11 flex-1 items-center justify-center rounded-full bg-blue-600 px-5 text-xs font-bold text-white uppercase">Mulai Belajar</a>
+			</div>
+		</nav>
+	{/if}
 </header>
 
 <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">

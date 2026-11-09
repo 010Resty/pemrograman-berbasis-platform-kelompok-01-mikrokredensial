@@ -186,7 +186,7 @@
 						href={resolve('/menjadi-instruktur/daftar')}
 						class="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-royal px-8 font-heading text-sm font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
 					>
-						Apply Sekarang
+						Daftar Sekarang
 						<i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
 					</a>
 					<a
@@ -448,7 +448,7 @@
 					href={resolve('/menjadi-instruktur/daftar')}
 					class="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-royal px-8 font-heading text-sm font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
 				>
-					Apply Sekarang
+					Daftar Sekarang
 					<i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
 				</a>
 			</div>

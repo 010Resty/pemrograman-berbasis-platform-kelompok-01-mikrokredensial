@@ -19,7 +19,10 @@
 	);
 
 	function goBack(): void {
-		window.history.back();
+		// Bila tidak ada riwayat (mis. tab baru / tautan langsung),
+		// history.back() tidak ke mana-mana — kembali ke beranda saja.
+		if (window.history.length > 1) window.history.back();
+		else window.location.assign(resolve('/'));
 	}
 </script>
 

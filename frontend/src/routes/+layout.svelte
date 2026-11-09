@@ -7,20 +7,8 @@
 
 <svelte:head>
 	<link rel="icon" type="image/png" href={favicon} />
-	<!-- Font Awesome 6.4.0 self-hosted (static/vendor): tanpa request CDN,
-		non-blocking agar tidak menahan first paint/LCP. Ikon muncul setelah
-		CSS tiba; tanpa JS fallback noscript. -->
-	<link
-		rel="stylesheet"
-		href="/vendor/fontawesome/css/all.min.css"
-		media="print"
-		onload={(e) => {
-			(e.currentTarget as HTMLLinkElement).media = 'all';
-		}}
-	/>
-	<noscript>
-		<link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css" />
-	</noscript>
+	<!-- Font Awesome 6.4.0 self-hosted (static/vendor): tanpa request CDN. Stylesheet biasa agar patuh CSP. -->
+	<link rel="stylesheet" href="/vendor/fontawesome/css/all.min.css" />
 </svelte:head>
 
 {@render children()}

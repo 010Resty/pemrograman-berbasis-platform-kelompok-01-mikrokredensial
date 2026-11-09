@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import {
 		listApplicationsRequest,
@@ -165,23 +167,21 @@
 	/>
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-		<div>
-			<p class="text-xs font-bold tracking-widest text-teal-600 uppercase">Admin · Pengajuan</p>
-			<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-				Pengajuan Instruktur
-			</h1>
-			<p class="mt-1 text-sm text-slate-500" role="status">
-				{total} pengajuan di database.
-			</p>
-			<p class="mt-1 text-xs text-slate-400">
-				Pendaftar mengisi <span class="font-semibold">/menjadi-instruktur/daftar</span>. Akun resmi
-				tetap diterbitkan via
-				<a href="/admin/invitations" class="font-semibold text-teal-700 hover:text-teal-800">Undangan</a>.
-			</p>
-		</div>
-	</div>
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Admin · Pengajuan"
+		title="Pengajuan Instruktur"
+		description={`${total} pengajuan di database. Pendaftar mengisi /menjadi-instruktur/daftar — akun resmi tetap diterbitkan via Undangan.`}
+	>
+		{#snippet actions()}
+			<a
+				href={resolve('/admin/invitations')}
+				class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-teal-600 px-5 py-2.5 text-xs font-bold text-white transition-colors hover:bg-teal-700 focus-visible:outline-2 focus-visible:outline-teal-600"
+			>
+				<i class="fa-solid fa-envelope-open-text" aria-hidden="true"></i> Buka Undangan
+			</a>
+		{/snippet}
+	</PageHeader>
 
 	<div class="mb-5 flex flex-col gap-3 lg:flex-row">
 		<div class="relative max-w-md flex-1">
@@ -248,8 +248,30 @@
 	{/if}
 
 	<div class="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm">
-		<div class="h-1 bg-gradient-to-r from-teal-600 via-cyan-500 to-teal-600" aria-hidden="true"></div>
-		<div class="overflow-x-auto">
+		<div class="h-1 bg-teal-600" aria-hidden="true"></div>
+		<ol class="divide-y divide-slate-100 md:hidden" aria-label="Daftar pengajuan">
+			{#each visible as p (p.id)}
+				<li>
+					<a
+						href={resolve(`/admin/pengajuan-instruktur/${p.id}`)}
+						class="flex items-center gap-3 px-4 py-3.5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-teal-600"
+						aria-label={`Lihat detail pengajuan ${p.nama}`}
+					>
+						<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-600 text-xs font-bold text-white" aria-hidden="true">
+							{initials(p.nama)}
+						</span>
+						<span class="min-w-0 flex-1">
+							<span class="block truncate font-semibold text-slate-900">{p.nama}</span>
+							<span class="block truncate text-xs text-slate-500">{p.email} · {formatDate(p.createdAt)}</span>
+						</span>
+						<span class={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${statusBadge(p.status)}`}>
+							{statusLabel(p.status)}
+						</span>
+					</a>
+				</li>
+			{/each}
+		</ol>
+		<div class="hidden overflow-x-auto md:block">
 			<table class="w-full min-w-[820px] text-sm">
 				<caption class="sr-only">Daftar pengajuan minat instruktur</caption>
 				<thead class="bg-teal-700 text-white">
@@ -276,7 +298,7 @@
 								<td class="px-6 py-3.5">
 									<div class="flex items-center gap-3">
 										<span
-											class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-teal-600 to-cyan-600 text-xs font-bold text-white shadow-sm"
+											class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-600 text-xs font-bold text-white shadow-sm"
 											aria-hidden="true"
 										>
 											{initials(p.nama)}

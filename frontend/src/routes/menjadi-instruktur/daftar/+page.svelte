@@ -360,7 +360,8 @@
 								</span>
 							{/if}
 							<div class="min-w-0">
-								<label for="foto" class="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl border border-mist bg-white px-5 font-heading text-xs font-bold text-abyss transition-colors duration-200 hover:border-royal hover:text-royal focus-visible:outline-2 focus-visible:outline-royal">
+								<input id="foto" type="file" accept="image/png,image/jpeg,image/webp" class="peer sr-only" onchange={(e) => void handleFoto(e.currentTarget.files?.[0])} />
+								<label for="foto" class="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl border border-mist bg-white px-5 font-heading text-xs font-bold text-abyss transition-colors duration-200 hover:border-royal hover:text-royal peer-focus-visible:outline-2 peer-focus-visible:outline-royal focus-visible:outline-2 focus-visible:outline-royal">
 									<i class="fa-solid fa-upload" aria-hidden="true"></i> Pilih foto
 								</label>
 								<input id="foto" type="file" accept="image/png,image/jpeg,image/webp" class="sr-only" onchange={(e) => void handleFoto(e.currentTarget.files?.[0])} />
@@ -379,7 +380,8 @@
 							</span>
 							<div class="min-w-0 flex-1">
 								<div class="flex flex-wrap items-center gap-2">
-									<label for="cv" class="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl border border-mist bg-white px-5 font-heading text-xs font-bold text-abyss transition-colors duration-200 hover:border-royal hover:text-royal focus-visible:outline-2 focus-visible:outline-royal">
+									<input id="cv" type="file" accept=".pdf,application/pdf" class="peer sr-only" onchange={(e) => void handleCv(e.currentTarget.files?.[0])} aria-invalid={!!errors.cv} aria-describedby="cv-hint" />
+									<label for="cv" class="inline-flex min-h-[44px] cursor-pointer items-center gap-2 rounded-xl border border-mist bg-white px-5 font-heading text-xs font-bold text-abyss transition-colors duration-200 hover:border-royal hover:text-royal peer-focus-visible:outline-2 peer-focus-visible:outline-royal focus-visible:outline-2 focus-visible:outline-royal">
 										<i class="fa-solid fa-upload" aria-hidden="true"></i> Pilih CV
 									</label>
 									{#if cvName}
@@ -393,7 +395,6 @@
 										</button>
 									{/if}
 								</div>
-								<input id="cv" type="file" accept=".pdf,application/pdf" class="sr-only" onchange={(e) => void handleCv(e.currentTarget.files?.[0])} aria-invalid={!!errors.cv} aria-describedby="cv-hint" />
 								<p class="mt-1.5 truncate text-xs text-slate-500">
 									{cvName ? `${cvName} · ${formatBytes(cvSize)}` : 'No file chosen'}
 								</p>

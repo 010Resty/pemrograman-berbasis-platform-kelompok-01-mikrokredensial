@@ -60,7 +60,9 @@
 		jsonLd
 			? (Array.isArray(jsonLd) ? jsonLd : [jsonLd])
 					.map((node) => {
-						const safe = JSON.stringify(node).replace(/<\//g, '<\\/');
+						// Escaping U+003C mencegah breakout tag script maupun
+						// komentar HTML dari data (valid dalam string JSON).
+						const safe = JSON.stringify(node).replace(/</g, '\\u003c');
 						return `<${TAG} type="application/ld+json">${safe}</${TAG}>`;
 					})
 					.join('')

@@ -8,6 +8,22 @@
 	let isLoading = $state(false);
 	let errorMessage = $state('');
 
+	/**
+	 * Jejak permintaan kode (bukan kode itu sendiri): email + waktu minta +
+	 * umur kode dari server. Dipakai halaman reset untuk hitung mundur
+	 * kedaluwarsa. Tidak ada rahasia di sini.
+	 */
+	function recordResetRequest(forEmail: string, expiresInSeconds: number): void {
+		try {
+			sessionStorage.setItem(
+				'aristoteles:reset-otp-req:v1',
+				JSON.stringify({ email: forEmail.trim(), at: Date.now(), expiresIn: expiresInSeconds })
+			);
+		} catch {
+			// Penyimpanan diblokir — halaman reset tampil tanpa hitung mundur.
+		}
+	}
+
 	async function handleSubmit(event: Event): Promise<void> {
 		event.preventDefault();
 		errorMessage = '';
@@ -24,6 +40,8 @@
 				return;
 			}
 			// Selalu lanjut ke reset demi tidak membocorkan daftar email terdaftar.
+			// Fallback 600 dtk bila backend lama belum mengirim umur kode.
+			recordResetRequest(email, result.expiresInSeconds ?? 600);
 			await goto(`/reset-password?email=${encodeURIComponent(email.trim())}`);
 		} finally {
 			isLoading = false;

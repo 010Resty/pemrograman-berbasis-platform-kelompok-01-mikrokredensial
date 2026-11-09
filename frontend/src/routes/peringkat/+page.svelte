@@ -516,7 +516,8 @@
 				</ol>
 
 				<div class="flex flex-col items-center justify-between gap-4 border-t border-mist bg-ice/60 px-6 py-5 sm:flex-row sm:px-8">
-					<p class="text-[11px] leading-relaxed text-slate-500">
+					<p role="note" class="inline-flex items-center gap-1.5 text-xs leading-relaxed font-semibold text-slate-600">
+						<i class="fa-solid fa-circle-info text-slate-400" aria-hidden="true"></i>
 						Data peringkat ilustratif untuk tampilan — bukan data penilaian live.
 					</p>
 					<a

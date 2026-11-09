@@ -7,6 +7,7 @@
 	let showPassword = $state(false);
 	let showConfirmPassword = $state(false);
 	let fullName = $state('');
+	let username = $state('');
 	let email = $state('');
 	let password = $state('');
 	let confirmPassword = $state('');
@@ -14,6 +15,7 @@
 	let agreeTerms = $state(false);
 	let isLoading = $state(false);
 	let errorMessage = $state('');
+	let usernameHint = $state('');
 
 	let passwordStrength = $state(0);
 	let passwordStrengthLabel = $state('');
@@ -64,8 +66,13 @@
 				'Pendaftaran mandiri untuk Teacher belum tersedia. Akun instruktur hanya dapat dibuat melalui undangan admin.';
 			return;
 		}
-		if (!fullName.trim() || !email.trim()) {
-			errorMessage = 'Nama lengkap dan email wajib diisi.';
+		if (!fullName.trim() || !username.trim() || !email.trim()) {
+			errorMessage = 'Nama lengkap, username, dan email wajib diisi.';
+			return;
+		}
+		if (!/^[a-z0-9._-]{3,30}$/.test(username.trim().toLowerCase())) {
+			errorMessage =
+				'Username 3–30 karakter: huruf kecil, angka, titik, underscore, atau strip.';
 			return;
 		}
 		if (!agreeTerms) {
@@ -84,7 +91,7 @@
 		try {
 			// Langkah 1: minta kode OTP. Akun BELUM dibuat di langkah ini —
 			// akun permanen dibuat server hanya setelah kode diverifikasi.
-			const result = await registerWithBackend(fullName, email, password);
+			const result = await registerWithBackend(fullName, username, email, password);
 			if (!result.ok) {
 				errorMessage = result.error;
 				return;
@@ -136,10 +143,11 @@
 				</div>
 
 				<!-- Heading -->
-				<h2 class="text-3xl xl:text-4xl font-bold text-white leading-tight mb-3">
+				<h1 class="sr-only">Daftar akun ARISTOTELES</h1>
+				<p class="mb-3 text-3xl leading-tight font-bold text-white xl:text-4xl" aria-hidden="true">
 					Mulai Perjalanan<br />
 					<span class="text-cyan-400">Akademik Anda</span>
-				</h2>
+				</p>
 
 				<!-- Description -->
 				<p class="text-blue-100 text-sm leading-relaxed mb-5 max-w-md">
@@ -182,21 +190,22 @@
 			</div>
 
 			<!-- Bottom Stats -->
-			<div class="grid grid-cols-3 gap-4 pt-5 border-t border-white/10">
+			<div class="grid grid-cols-3 gap-4 border-t border-white/10 pt-5" aria-label="Sorotan platform (angka ilustrasi)">
 				<div>
-					<div class="text-xl font-bold text-white">45.000+</div>
-					<div class="text-blue-200 text-xs">Mahasiswa Aktif</div>
+					<div class="text-xl font-bold text-white" aria-hidden="true">45.000+</div>
+					<div class="text-xs text-blue-200">Mahasiswa Aktif</div>
 				</div>
 
 				<div>
-					<div class="text-xl font-bold text-white">98.4%</div>
-					<div class="text-blue-200 text-xs">Tingkat Kelulusan</div>
+					<div class="text-xl font-bold text-white" aria-hidden="true">98.4%</div>
+					<div class="text-xs text-blue-200">Tingkat Kelulusan</div>
 				</div>
 
 				<div>
-					<div class="text-xl font-bold text-white">4.8/5</div>
-					<div class="text-blue-200 text-xs">Rating Platform</div>
+					<div class="text-xl font-bold text-white" aria-hidden="true">4.8/5</div>
+					<div class="text-xs text-blue-200">Rating Platform</div>
 				</div>
+				<p class="col-span-3 text-[11px] text-blue-300/80">* Angka ilustrasi tampilan, bukan data resmi.</p>
 			</div>
 		</div>
 	</div>
@@ -308,6 +317,45 @@
 						</div>
 					</div>
 
+					<!-- Username -->
+					<div>
+						<label for="reg-username" class="mb-1.5 block text-sm font-semibold text-slate-700">
+							Username <span class="text-red-500">*</span>
+						</label>
+						<div class="relative">
+							<div
+								class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400"
+							>
+								<i class="fa-solid fa-at" aria-hidden="true"></i>
+							</div>
+							<input
+								id="reg-username"
+								name="username"
+								type="text"
+								autocomplete="username"
+								placeholder="cth. rian.pratama"
+								bind:value={username}
+								oninput={() => {
+									const v = username.trim().toLowerCase();
+									usernameHint =
+										v.length === 0
+											? ''
+											: /^[a-z0-9._-]{3,30}$/.test(v)
+												? ''
+												: 'Username 3–30 karakter: huruf kecil, angka, titik, underscore, atau strip.';
+								}}
+								class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-4 pl-11 text-sm text-slate-800 transition-all placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+							/>
+						</div>
+						{#if usernameHint}
+							<p role="alert" class="mt-1.5 text-[11px] font-semibold text-red-500">{usernameHint}</p>
+						{:else}
+							<p class="mt-1.5 text-[11px] text-slate-500">
+								Username bersifat unik dan dipakai untuk patungan (tidak bisa diubah).
+							</p>
+						{/if}
+					</div>
+
 					<!-- Email -->
 					<div>
 						<label for="reg-email" class="mb-1.5 block text-sm font-semibold text-slate-700">
@@ -354,7 +402,8 @@
 							/>
 							<button
 								type="button"
-								aria-label="Tampilkan atau sembunyikan kata sandi"
+								aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi'}
+								aria-pressed={showPassword}
 								onclick={togglePassword}
 								class="absolute inset-y-0 right-0 flex items-center pr-4 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
@@ -406,7 +455,8 @@
 							/>
 							<button
 								type="button"
-								aria-label="Tampilkan atau sembunyikan kata sandi"
+								aria-label={showConfirmPassword ? 'Sembunyikan konfirmasi kata sandi' : 'Tampilkan konfirmasi kata sandi'}
+								aria-pressed={showConfirmPassword}
 								onclick={toggleConfirmPassword}
 								class="absolute inset-y-0 right-0 flex items-center pr-4 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-blue-600"
 							>

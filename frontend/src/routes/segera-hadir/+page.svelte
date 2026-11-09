@@ -47,6 +47,7 @@
 
 	let remaining = $state(COUNTDOWN_SECONDS);
 	let navigated = false;
+	let paused = $state(false);
 
 	function goNow() {
 		if (navigated) return;
@@ -54,8 +55,12 @@
 		void goto(target);
 	}
 
+	function togglePause() {
+		paused = !paused;
+	}
+
 	$effect(() => {
-		if (!browser || navigated) return;
+		if (!browser || navigated || paused) return;
 		if (remaining <= 0) {
 			goNow();
 			return;
@@ -132,17 +137,32 @@
 				></div>
 			</div>
 			<p class="mt-2 text-xs text-slate-400" aria-live="polite">
-				Mengalihkan ke {targetLabel} dalam {remaining} detik…
+				{#if paused}
+					Hitung mundur dijeda. Tekan "Lanjutkan" untuk kembali otomatis ke {targetLabel}.
+				{:else}
+					Mengalihkan ke {targetLabel} dalam {remaining} detik…
+				{/if}
 			</p>
 
-			<button
-				type="button"
-				onclick={goNow}
-				class="mt-6 inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-			>
-				<i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
-				Kembali ke {targetLabel} Sekarang
-			</button>
+			<div class="mt-6 flex flex-col gap-2">
+				<button
+					type="button"
+					onclick={togglePause}
+					aria-pressed={paused}
+					class="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+				>
+					<i class={`fa-solid ${paused ? 'fa-play' : 'fa-pause'}`} aria-hidden="true"></i>
+					{paused ? 'Lanjutkan hitung mundur' : 'Jeda hitung mundur'}
+				</button>
+				<button
+					type="button"
+					onclick={goNow}
+					class="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+				>
+					<i class="fa-solid fa-arrow-left" aria-hidden="true"></i>
+					Kembali ke {targetLabel} Sekarang
+				</button>
+			</div>
 		</div>
 	</main>
 </div>

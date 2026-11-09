@@ -3,22 +3,187 @@
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import OtpInput from '$lib/components/OtpInput.svelte';
-	import { resetPasswordWithBackend } from '$lib/stores/auth.svelte';
+	import { requestPasswordReset, resetPasswordWithBackend, verifyResetCodeWithBackend } from '$lib/stores/auth.svelte';
 
 	type Step = 'otp' | 'password';
 
 	let email = $state('');
 	let code = $state('');
+	/** Kode yang SUDAH lolos verifikasi server. Layar password hanya untuk nilai ini. */
+	let verifiedCode = $state('');
 	let newPassword = $state('');
 	let confirmPassword = $state('');
 	let showPassword = $state(false);
 	let step = $state<Step>('otp');
 	let isLoading = $state(false);
+	let isVerifying = $state(false);
 	let errorMessage = $state('');
 	let isDone = $state(false);
+	/** Panel khusus kode salah/kedaluwarsa — terpisah dari banner error umum. */
+	let otpFailed = $state(false);
+	let otpFailMessage = $state('');
 	/** Gagal simpan beruntun (anti-brute-force sisi UI; backend tetap otoritas). */
 	let failCount = $state(0);
 	const MAX_FAILS = 5;
+	/**
+	 * Batas UI persisten per email (sessionStorage, TTL 10 menit mengikuti
+	 * umur OTP backend). Refresh tidak me-reset friksi; backend tetap yang
+	 * mengikat. Disimpan hanya hitungan + email, bukan kode/password.
+	 */
+	const FAIL_KEY = 'aristoteles:reset-fails:v1';
+	const FAIL_TTL_MS = 10 * 60 * 1000;
+	function readFailStore(forEmail: string): number {
+		if (typeof window === 'undefined') return 0;
+		try {
+			const raw = sessionStorage.getItem(FAIL_KEY);
+			if (!raw) return 0;
+			const p = JSON.parse(raw) as { email?: unknown; count?: unknown; at?: unknown };
+			if (typeof p.email !== 'string' || typeof p.count !== 'number' || typeof p.at !== 'number')
+				return 0;
+			if (p.email.trim().toLowerCase() !== forEmail.trim().toLowerCase()) return 0;
+			if (!Number.isFinite(p.count) || p.count <= 0) return 0;
+			if (Date.now() - p.at > FAIL_TTL_MS) {
+				sessionStorage.removeItem(FAIL_KEY);
+				return 0;
+			}
+			return Math.min(Math.floor(p.count), MAX_FAILS);
+		} catch {
+			return 0;
+		}
+	}
+	function writeFailStore(forEmail: string, count: number): void {
+		if (typeof window === 'undefined') return;
+		try {
+			if (count <= 0 || !forEmail.trim()) {
+				sessionStorage.removeItem(FAIL_KEY);
+				return;
+			}
+			sessionStorage.setItem(
+				FAIL_KEY,
+				JSON.stringify({ email: forEmail.trim(), count, at: Date.now() })
+			);
+		} catch {
+			// Penyimpanan diblokir — friksi UI hilang, proteksi backend tetap jalan.
+		}
+	}
+
+	// ---------- Hitung mundur kedaluwarsa + kirim ulang ----------
+	const REQ_KEY = 'aristoteles:reset-otp-req:v1';
+	let otpDeadline = $state(0);
+	let otpValidityMin = $state(10);
+	let nowTick = $state(Date.now());
+	let resendNote = $state('');
+	let isResending = $state(false);
+	let resendCooldownUntil = $state(0);
+	let expiredShown = $state(false);
+
+	function readReqStore(forEmail: string): { deadline: number; minutes: number } | null {
+		if (typeof window === 'undefined') return null;
+		try {
+			const raw = sessionStorage.getItem(REQ_KEY);
+			if (!raw) return null;
+			const p = JSON.parse(raw) as { email?: unknown; at?: unknown; expiresIn?: unknown };
+			if (typeof p.email !== 'string' || typeof p.at !== 'number' || typeof p.expiresIn !== 'number')
+				return null;
+			if (p.email.trim().toLowerCase() !== forEmail.trim().toLowerCase()) return null;
+			if (!Number.isFinite(p.at) || !Number.isFinite(p.expiresIn) || p.expiresIn <= 0) return null;
+			return {
+				deadline: p.at + p.expiresIn * 1000,
+				minutes: Math.max(1, Math.round(p.expiresIn / 60))
+			};
+		} catch {
+			return null;
+		}
+	}
+	function writeReqStore(forEmail: string, expiresInSeconds: number): void {
+		if (typeof window === 'undefined') return;
+		try {
+			sessionStorage.setItem(
+				REQ_KEY,
+				JSON.stringify({ email: forEmail.trim(), at: Date.now(), expiresIn: expiresInSeconds })
+			);
+		} catch {
+			// Penyimpanan diblokir — halaman tampil tanpa hitung mundur.
+		}
+	}
+
+	// Detak tiap detik untuk hitung mundur.
+	$effect(() => {
+		if (typeof window === 'undefined') return;
+		const id = setInterval(() => {
+			nowTick = Date.now();
+		}, 1000);
+		return () => clearInterval(id);
+	});
+
+	// Muat tenggat kode untuk email ini (dicatat halaman lupa-password).
+	$effect(() => {
+		const em = email.trim();
+		if (!isValidEmail(em)) return;
+		const stored = readReqStore(em);
+		if (stored && stored.deadline > 0) {
+			otpDeadline = stored.deadline;
+			otpValidityMin = stored.minutes;
+		}
+	});
+
+	const remainingSec = $derived(
+		otpDeadline > 0 ? Math.max(0, Math.round((otpDeadline - nowTick) / 1000)) : -1
+	);
+	/** True bila kode dipastikan sudah lewat masa berlaku. */
+	const otpExpired = $derived(otpDeadline > 0 && remainingSec <= 0);
+	function formatCountdown(totalSec: number): string {
+		const m = Math.floor(totalSec / 60);
+		const s = totalSec % 60;
+		return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+	}
+	const resendCooldownSec = $derived(
+		Math.max(0, Math.ceil((resendCooldownUntil - nowTick) / 1000))
+	);
+
+	// Waktu habis saat di layar OTP → alihkan ke panel kirim ulang.
+	$effect(() => {
+		if (!otpExpired || isDone || otpFailed || step !== 'otp' || expiredShown) return;
+		expiredShown = true;
+		code = '';
+		verifiedCode = '';
+		window.scrollTo({ top: 0 });
+	});
+
+	/** Kirim ulang kode: server menerbitkan kode baru (kode lama hangus). */
+	async function resendCode(): Promise<void> {
+		errorMessage = '';
+		resendNote = '';
+		if (isResending || Date.now() < resendCooldownUntil) return;
+		if (!isValidEmail(email)) {
+			errorMessage = 'Email tidak valid.';
+			return;
+		}
+		isResending = true;
+		try {
+			const result = await requestPasswordReset(email);
+			if (!result.ok) {
+				errorMessage = result.error;
+				return;
+			}
+			writeReqStore(email, result.expiresInSeconds ?? 600);
+			otpDeadline = Date.now() + (result.expiresInSeconds ?? 600) * 1000;
+			otpValidityMin = Math.max(1, Math.round((result.expiresInSeconds ?? 600) / 60));
+			resendCooldownUntil = Date.now() + (result.resendCooldownSeconds || 60) * 1000;
+			writeFailStore(email, 0);
+			failCount = 0;
+			code = '';
+			verifiedCode = '';
+			otpFailed = false;
+			otpFailMessage = '';
+			expiredShown = false;
+			step = 'otp';
+			resendNote = `Kode baru dikirim ke ${email.trim()}.`;
+			window.scrollTo({ top: 0 });
+		} finally {
+			isResending = false;
+		}
+	}
 
 	const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 	function isValidEmail(value: string): boolean {
@@ -28,9 +193,15 @@
 	function isValidCode(value: string): boolean {
 		return /^\d{6}$/.test(value.trim());
 	}
+	function isOtpError(message: string): boolean {
+		// Hanya kegagalan kode (backend: "Kode salah atau kedaluwarsa.").
+		// Jangan samakan dengan error validasi umum agar masalah password
+		// tidak disangka kode salah.
+		return /kode|otp|kedaluwarsa/i.test(message);
+	}
 
-	// Email dari ?email= (dikirim halaman lupa-password) langsung dikunci:
-	// user tidak bisa mengubahnya lagi di halaman OTP ini. Kunci hanya bila
+	// Email dari ?email= (dikirim halaman lupa-password) langsung dikunci dan
+	// ditampilkan sebagai teks — bukan di dalam kotak input. Kunci hanya bila
 	// formatnya valid; tautan rusak tetap bisa dikoreksi manual.
 	const rawQueryEmail = $derived((page.url.searchParams.get('email') ?? '').trim());
 	const queryEmail = $derived(isValidEmail(rawQueryEmail) ? rawQueryEmail : '');
@@ -41,16 +212,52 @@
 		if (queryEmail && !email) email = queryEmail;
 	});
 
-	function goToOtpStep(event?: Event): void {
-		event?.preventDefault();
+	// Pulihkan hitungan gagal untuk email ini (refresh tidak me-reset batas).
+	// Dijaga sekali per email agar tidak menimpa hitungan sesi berjalan.
+	let restoredFor = $state('');
+	$effect(() => {
+		const em = email.trim().toLowerCase();
+		if (!isValidEmail(em) || em === restoredFor) return;
+		restoredFor = em;
+		const saved = readFailStore(em);
+		if (saved <= 0) return;
+		failCount = saved;
+		if (failCount >= MAX_FAILS) {
+			otpFailMessage =
+				'Terlalu banyak percobaan gagal. Minta kode baru lewat halaman lupa password.';
+			otpFailed = true;
+			code = '';
+		}
+	});
+
+	// Klik "minta kode baru" = kode lama hangus diganti server (attempts
+	// backend di-reset), jadi hitungan UI ikut dibuang.
+	function requestNewCode(): void {
+		writeFailStore(email, 0);
+		failCount = 0;
+	}
+
+	function retryCode(): void {
+		otpFailed = false;
+		otpFailMessage = '';
 		errorMessage = '';
+		code = '';
+		verifiedCode = '';
 		step = 'otp';
 		window.scrollTo({ top: 0 });
 	}
 
-	function goToPasswordStep(event: Event): void {
+	async function goToPasswordStep(event: Event): Promise<void> {
 		event.preventDefault();
 		errorMessage = '';
+		if (failCount >= MAX_FAILS) {
+			otpFailMessage =
+				'Terlalu banyak percobaan gagal. Minta kode baru lewat halaman lupa password.';
+			otpFailed = true;
+			code = '';
+			verifiedCode = '';
+			return;
+		}
 		if (!isValidEmail(email)) {
 			errorMessage = queryEmailBroken
 				? 'Tautan email tidak valid. Ulangi dari halaman lupa password.'
@@ -61,22 +268,54 @@
 			errorMessage = 'Masukkan 6 digit kode OTP dari email Anda.';
 			return;
 		}
-		step = 'password';
-		window.scrollTo({ top: 0 });
+		// Gerbang server: kode dicek ke backend DULU. Salah/kedaluwarsa =
+		// tetap di layar OTP, layar password tidak akan pernah terbuka.
+		isVerifying = true;
+		try {
+			const result = await verifyResetCodeWithBackend(email, code);
+			if (!result.ok) {
+				failCount += 1;
+				writeFailStore(email, failCount);
+				newPassword = '';
+				confirmPassword = '';
+				verifiedCode = '';
+				if (failCount >= MAX_FAILS) code = '';
+				otpFailMessage =
+					failCount >= MAX_FAILS
+						? 'Terlalu banyak percobaan gagal. Minta kode baru lewat halaman lupa password.'
+						: result.error;
+				otpFailed = true;
+				return;
+			}
+			verifiedCode = code.trim();
+			step = 'password';
+			window.scrollTo({ top: 0 });
+		} finally {
+			isVerifying = false;
+		}
 	}
 
 	async function handleSubmit(event: Event): Promise<void> {
 		event.preventDefault();
 		errorMessage = '';
 		if (failCount >= MAX_FAILS) {
-			errorMessage =
+			otpFailMessage =
 				'Terlalu banyak percobaan gagal. Minta kode baru lewat halaman lupa password.';
+			otpFailed = true;
 			code = '';
-			step = 'otp';
 			return;
 		}
 		if (!isValidEmail(email)) {
 			errorMessage = 'Email tidak valid.';
+			return;
+		}
+		// Pertahanan berlapis: submit hanya untuk kode yang sudah lolos
+		// verifikasi server di langkah OTP. Tanpa ini, tolak dan kunci.
+		if (!verifiedCode || verifiedCode !== code.trim()) {
+			verifiedCode = '';
+			errorMessage = 'Kode belum terverifikasi. Masukkan ulang kode OTP.';
+			step = 'otp';
+			window.scrollTo({ top: 0 });
 			return;
 		}
 		if (!isValidCode(code)) {
@@ -100,24 +339,27 @@
 			const result = await resetPasswordWithBackend(email, code, newPassword);
 			if (!result.ok) {
 				failCount += 1;
-				// Hapus password dari memori tiap gagal; kode dipertahankan agar bisa dibetulkan,
-				// kecuali sudah terlalu banyak gagal → buang kode dan minta kode baru.
+				writeFailStore(email, failCount);
+				// Hapus password dari memori tiap gagal. Kode yang ditolak
+				// server langsung dibuang — user wajib ketik ulang, tidak bisa
+				// submit ulang kode salah yang sama dari layar password.
 				newPassword = '';
 				confirmPassword = '';
-				if (failCount >= MAX_FAILS) {
+				if (failCount >= MAX_FAILS || isOtpError(result.error)) {
 					code = '';
-					step = 'otp';
-					errorMessage =
-						'Terlalu banyak percobaan gagal. Minta kode baru lewat halaman lupa password.';
+					otpFailMessage =
+						failCount >= MAX_FAILS
+							? 'Terlalu banyak percobaan gagal. Minta kode baru lewat halaman lupa password.'
+							: result.error;
+					otpFailed = true;
 					return;
 				}
-				// Kode salah/kedaluwarsa → kembalikan ke langkah OTP agar bisa dibetulkan.
-				if (/kode|otp|kedaluwarsa|tidak valid/i.test(result.error)) step = 'otp';
 				errorMessage = result.error;
 				return;
 			}
 			// Sukses TIDAK auto-login — user wajib masuk ulang dengan password baru.
 			// Hapus semua rahasia dari memori agar tidak tertinggal di state browser.
+			writeFailStore(email, 0);
 			failCount = 0;
 			code = '';
 			newPassword = '';
@@ -146,137 +388,262 @@
 	{#if isDone}
 		<div
 			role="status"
-			class="w-full max-w-md rounded-2xl border border-emerald-200 bg-white p-6 text-center shadow-xl shadow-slate-900/5 sm:p-8"
+			class="w-full max-w-md overflow-hidden rounded-2xl border border-emerald-200 bg-white text-center shadow-xl shadow-slate-900/5"
 		>
-			<span
-				class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-lg text-emerald-600"
-				aria-hidden="true"
-			>
-				<i class="fa-solid fa-check"></i>
-			</span>
-			<h1 class="mt-3 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-				Password berhasil diganti
-			</h1>
-			<p class="mt-1 text-xs text-slate-500 sm:text-sm">
-				Silakan masuk kembali menggunakan kata sandi baru Anda.
-			</p>
-			<a
-				href="/login"
-				class="mt-5 inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-blue-600 px-8 text-sm font-bold text-white shadow-lg shadow-blue-600/25 transition-all duration-200 hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-			>
-				Masuk Sekarang <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
-			</a>
-		</div>
-	{:else}
-		<div class="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-xl shadow-slate-900/5 sm:p-8">
-			<div class="mb-5 text-center">
+			<div class="h-1.5 bg-gradient-to-r from-emerald-500 via-emerald-600 to-teal-600" aria-hidden="true"></div>
+			<div class="p-6 sm:p-8">
 				<span
-					class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-lg text-blue-600"
+					class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-100 text-lg text-emerald-600"
 					aria-hidden="true"
 				>
-					<i class="fa-solid fa-lock" aria-hidden="true"></i>
+					<i class="fa-solid fa-check"></i>
 				</span>
 				<h1 class="mt-3 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
-					{step === 'otp' ? 'Verifikasi Kode OTP' : 'Buat Password Baru'}
+					Password berhasil diganti
 				</h1>
 				<p class="mt-1 text-xs text-slate-500 sm:text-sm">
-					{step === 'otp'
-						? 'Masukkan 6 digit kode yang dikirim ke email Anda.'
-						: 'Terakhir, buat kata sandi baru untuk akun Anda.'}
+					Silakan masuk kembali menggunakan kata sandi baru Anda.
 				</p>
+				<a
+					href="/login"
+					class="mt-5 inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl bg-blue-600 px-8 text-sm font-bold text-white shadow-lg shadow-blue-600/25 transition-all duration-200 hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+				>
+					Masuk Sekarang <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+				</a>
 			</div>
-
-			<ol aria-label="Langkah reset password" class="mb-5 flex items-center gap-1.5 text-[11px] font-bold">
-				<li
-					aria-current={step === 'otp' ? 'step' : undefined}
-					class="flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 {step === 'otp'
-						? 'bg-blue-600 text-white'
-						: 'bg-emerald-50 text-emerald-700'}"
+		</div>
+	{:else if otpFailed}
+		<div
+			role="alert"
+			class="w-full max-w-md overflow-hidden rounded-2xl border border-red-200 bg-white text-center shadow-xl shadow-slate-900/5"
+		>
+			<div class="h-1.5 bg-gradient-to-r from-red-500 via-red-600 to-orange-500" aria-hidden="true"></div>
+			<div class="p-6 sm:p-8">
+				<span
+					class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-red-100 text-2xl text-red-600"
+					aria-hidden="true"
 				>
-					{#if step === 'password'}
-						<i class="fa-solid fa-check" aria-hidden="true"></i>
-					{:else}
-						<span aria-hidden="true">1</span>
-					{/if}
-					Kode OTP
-				</li>
-				<li aria-hidden="true" class="h-px w-4 bg-slate-300"></li>
-				<li
-					aria-current={step === 'password' ? 'step' : undefined}
-					class="flex flex-1 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 {step === 'password'
-						? 'bg-blue-600 text-white'
-						: 'bg-slate-100 text-slate-500'}"
-				>
-					<span aria-hidden="true">2</span>
-					Password baru
-				</li>
-			</ol>
-
-			{#if errorMessage}
-				<p
-					role="alert"
-					class="mb-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700"
-				>
-					<i class="fa-solid fa-circle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
-					<span>{errorMessage}</span>
+					<i class="fa-solid fa-circle-xmark"></i>
+				</span>
+				<h1 class="mt-4 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+					Kode OTP salah
+				</h1>
+				<p class="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-slate-500 sm:text-sm">
+					{otpFailMessage ||
+						'Kode yang Anda masukkan tidak cocok atau sudah kedaluwarsa.'}
 				</p>
-			{/if}
-
-			{#if step === 'otp'}
-				<form class="space-y-4" onsubmit={goToPasswordStep} novalidate>
-					<div>
-						<label for="reset-email" class="mb-1.5 block text-sm font-semibold text-slate-700">
-							Email akun
-						</label>
-						<input
-							id="reset-email"
-							name="email"
-							type="email"
-							autocomplete="email"
-							placeholder="email@anda.com"
-							bind:value={email}
-							readonly={isEmailLocked}
-							aria-readonly={isEmailLocked}
-							title={isEmailLocked ? 'Email dikunci dari permintaan lupa password' : undefined}
-							class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-4 pl-4 text-sm text-slate-800 transition-all placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none {isEmailLocked
-								? 'cursor-not-allowed bg-slate-50 text-slate-600'
-								: ''}"
-						/>
-						{#if isEmailLocked}
-							<p class="mt-1.5 flex items-center gap-1.5 text-[11px] font-medium text-slate-500">
-								<i class="fa-solid fa-lock text-[10px]" aria-hidden="true"></i>
-								Email dikunci — kode dikirim ke alamat ini.
-								<a
-									href="/lupa-password"
-									class="rounded font-bold text-blue-600 hover:text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600"
-								>
-									Salah email?
-								</a>
-							</p>
-						{/if}
-					</div>
-					<OtpInput bind:value={code} disabled={isLoading} />
-					<button
-						type="submit"
-						class="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-blue-600/25 transition-all duration-200 hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
-					>
-						<span>Lanjut ke Password Baru</span>
-						<i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
-					</button>
-				</form>
-			{:else}
-				<div class="mb-4 rounded-xl bg-slate-50 px-4 py-2.5 text-xs text-slate-600">
-					Kode untuk <span class="font-bold text-slate-800">{email}</span>
+				<p class="mt-3 text-xs text-slate-500">
+					Untuk <span class="font-bold text-slate-800">{email || 'email Anda'}</span>
+					{#if failCount > 0}
+						<span class="mt-1 block font-semibold text-amber-700">
+							Percobaan gagal {Math.min(failCount, MAX_FAILS)} dari {MAX_FAILS}.
+						</span>
+					{/if}
+				</p>
+				<div class="mt-6 flex flex-col gap-2.5">
 					<button
 						type="button"
-						onclick={goToOtpStep}
-						class="ml-1 rounded font-bold text-blue-600 hover:text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600"
+						onclick={retryCode}
+						class="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-blue-600/25 transition-all duration-200 hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
 					>
-						Ubah kode
+						<i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Masukkan ulang kode
 					</button>
+					<a
+						href="/lupa-password"
+						onclick={requestNewCode}
+						class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-6 py-3 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+					>
+						<i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Minta kode baru
+					</a>
 				</div>
-				<form class="space-y-4" onsubmit={handleSubmit} novalidate>
-					<div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+			</div>
+		</div>
+	{:else if otpExpired && step === 'otp'}
+		<div
+			role="alert"
+			class="w-full max-w-md overflow-hidden rounded-2xl border border-amber-200 bg-white text-center shadow-xl shadow-slate-900/5"
+		>
+			<div class="h-1.5 bg-gradient-to-r from-amber-500 via-orange-500 to-red-500" aria-hidden="true"></div>
+			<div class="p-6 sm:p-8">
+				<span
+					class="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-amber-100 text-2xl text-amber-600"
+					aria-hidden="true"
+				>
+					<i class="fa-solid fa-clock-rotate-left"></i>
+				</span>
+				<h1 class="mt-4 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+					Kode kedaluwarsa
+				</h1>
+				<p class="mx-auto mt-2 max-w-sm text-xs leading-relaxed text-slate-500 sm:text-sm">
+					Kode untuk <span class="font-bold text-slate-800">{email || 'email Anda'}</span> hanya
+					berlaku {otpValidityMin} menit dan waktunya sudah habis (00:00). Minta kode baru untuk
+					melanjutkan.
+				</p>
+				{#if errorMessage}
+					<p
+						role="alert"
+						class="mt-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-left text-xs font-semibold text-red-700"
+					>
+						<i class="fa-solid fa-circle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
+						<span>{errorMessage}</span>
+					</p>
+				{/if}
+				<div class="mt-6 flex flex-col gap-2.5">
+					<button
+						type="button"
+						onclick={resendCode}
+						disabled={isResending || resendCooldownSec > 0}
+						class="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-blue-600/25 transition-all duration-200 hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-blue-400"
+					>
+						{#if isResending}
+							<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
+							<span>Mengirim kode...</span>
+						{:else if resendCooldownSec > 0}
+							<i class="fa-solid fa-hourglass-half" aria-hidden="true"></i>
+							<span>Kirim ulang dalam {resendCooldownSec} dtk</span>
+						{:else}
+							<i class="fa-solid fa-paper-plane" aria-hidden="true"></i>
+							<span>Kirim ulang kode</span>
+						{/if}
+					</button>
+					<a
+						href="/lupa-password"
+						class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-6 py-3 text-sm font-bold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+					>
+						<i class="fa-solid fa-envelope" aria-hidden="true"></i> Ganti email
+					</a>
+				</div>
+			</div>
+		</div>
+	{:else}
+		<div class="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-xl shadow-slate-900/5">
+			<div class="h-1.5 bg-gradient-to-r from-blue-600 via-sky-500 to-teal-500" aria-hidden="true"></div>
+			<div class="p-6 sm:p-8">
+				<div class="mb-6 text-center">
+					<span
+						class="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-100 text-lg text-blue-600"
+						aria-hidden="true"
+					>
+						<i class="fa-solid fa-key" aria-hidden="true"></i>
+					</span>
+					<h1 class="mt-3 text-xl font-bold tracking-tight text-slate-900 sm:text-2xl">
+						{step === 'otp' ? 'Cek Email Anda' : 'Buat Password Baru'}
+					</h1>
+					<p class="mt-1 text-xs text-slate-500 sm:text-sm">
+						{step === 'otp'
+							? 'Kami mengirim 6 digit kode ke'
+							: 'Terakhir, buat kata sandi baru untuk'}
+					</p>
+					{#if isEmailLocked}
+						<p class="mt-2 flex flex-wrap items-center justify-center gap-1.5 text-sm">
+							<i class="fa-solid fa-envelope text-xs text-slate-400" aria-hidden="true"></i>
+							<span class="font-bold break-all text-slate-900">{email}</span>
+							<span
+								class="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-bold tracking-wide text-slate-500 uppercase"
+							>
+								<i class="fa-solid fa-lock text-[9px]" aria-hidden="true"></i> Terkunci
+							</span>
+						</p>
+						<p class="mt-1.5 text-[11px] text-slate-500">
+							Bukan email Anda?
+							<a
+								href="/lupa-password"
+								class="rounded font-bold text-blue-600 hover:text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600"
+							>
+								Minta ulang kode
+							</a>
+						</p>
+					{/if}
+				</div>
+
+				{#if errorMessage}
+					<p
+						role="alert"
+						class="mb-4 flex items-start gap-2.5 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700"
+					>
+						<i class="fa-solid fa-circle-exclamation mt-0.5 shrink-0" aria-hidden="true"></i>
+						<span>{errorMessage}</span>
+					</p>
+				{/if}
+
+				{#if step === 'otp'}
+					<form class="space-y-5" onsubmit={goToPasswordStep} novalidate>
+						{#if !isEmailLocked}
+							<div>
+								<label for="reset-email" class="mb-1.5 block text-sm font-semibold text-slate-700">
+									Email akun
+								</label>
+								<input
+									id="reset-email"
+									name="email"
+									type="email"
+									autocomplete="email"
+									placeholder="email@anda.com"
+									bind:value={email}
+									class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-4 pl-4 text-sm text-slate-800 transition-all placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+								/>
+								{#if queryEmailBroken}
+									<p class="mt-1.5 text-[11px] font-medium text-amber-700">
+										Tautan email tidak valid — ketik ulang alamat email Anda.
+									</p>
+								{/if}
+							</div>
+						{/if}
+						<OtpInput bind:value={code} disabled={isLoading || isVerifying} />
+						{#if remainingSec >= 0}
+							<p
+								role="timer"
+								aria-label={`Kode kedaluwarsa dalam ${formatCountdown(remainingSec)}`}
+								class="flex items-center justify-center gap-1.5 text-xs font-semibold {remainingSec <= 60
+									? 'text-red-600'
+									: 'text-slate-500'}"
+							>
+								<i class="fa-solid fa-clock" aria-hidden="true"></i>
+								<span
+									>Kode kedaluwarsa dalam
+									<span class="font-mono tabular-nums">{formatCountdown(remainingSec)}</span></span
+								>
+							</p>
+						{:else}
+							<p class="text-center text-[11px] text-slate-400">
+								Kode berlaku terbatas setelah dikirim — minta ulang bila kedaluwarsa.
+							</p>
+						{/if}
+						{#if resendNote}
+							<p
+								role="status"
+								class="flex items-start gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-xs font-semibold text-emerald-700"
+							>
+								<i class="fa-solid fa-circle-check mt-0.5 shrink-0" aria-hidden="true"></i>
+								<span>{resendNote}</span>
+							</p>
+						{/if}
+						<button
+							type="submit"
+							disabled={!isValidCode(code) || isVerifying}
+							class="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-blue-600/25 transition-all duration-200 hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-blue-400"
+						>
+							{#if isVerifying}
+								<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
+								<span>Memeriksa kode...</span>
+							{:else}
+								<span>Lanjut</span>
+								<i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+							{/if}
+						</button>
+					</form>
+				{:else}
+					<p class="mb-4 text-center text-xs text-slate-500">
+						Menyetel ulang untuk <span class="font-bold text-slate-800">{email}</span>
+						<button
+							type="button"
+							onclick={retryCode}
+							class="ml-1 rounded font-bold text-blue-600 hover:text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600"
+						>
+							Ubah kode
+						</button>
+					</p>
+					<form class="space-y-4" onsubmit={handleSubmit} novalidate>
 						<div>
 							<label for="reset-password" class="mb-1.5 block text-sm font-semibold text-slate-700">
 								Password baru
@@ -303,7 +670,7 @@
 						</div>
 						<div>
 							<label for="reset-confirm" class="mb-1.5 block text-sm font-semibold text-slate-700">
-								Konfirmasi
+								Konfirmasi password
 							</label>
 							<input
 								id="reset-confirm"
@@ -315,51 +682,39 @@
 								class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-4 pl-4 text-sm text-slate-800 transition-all placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 							/>
 						</div>
-					</div>
-					{#if confirmPassword.length > 0 && newPassword !== confirmPassword}
-						<p role="alert" class="flex items-center gap-1 text-[11px] font-semibold text-red-500">
-							<i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
-							<span>Kata sandi tidak cocok.</span>
-						</p>
-					{/if}
-					{#if failCount > 0 && failCount < MAX_FAILS}
-						<p role="status" class="text-[11px] font-semibold text-amber-700">
-							Percobaan gagal {failCount} dari {MAX_FAILS}. Setelah batas, Anda wajib meminta
-							kode baru.
-						</p>
-					{/if}
-					<button
-						type="submit"
-						disabled={isLoading}
-						class="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-blue-600/25 transition-all duration-200 hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-blue-400"
-					>
-						{#if isLoading}
-							<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
-							<span>Menyimpan...</span>
-						{:else}
-							<span>Simpan Password Baru</span>
-							<i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+						{#if confirmPassword.length > 0 && newPassword !== confirmPassword}
+							<p role="alert" class="flex items-center gap-1 text-[11px] font-semibold text-red-500">
+								<i class="fa-solid fa-circle-exclamation" aria-hidden="true"></i>
+								<span>Kata sandi tidak cocok.</span>
+							</p>
 						{/if}
-					</button>
-					<button
-						type="button"
-						onclick={goToOtpStep}
-						class="flex w-full items-center justify-center gap-2 rounded-xl border border-slate-200 px-6 py-2.5 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
-					>
-						<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Kembali ke kode OTP
-					</button>
-				</form>
-			{/if}
+						<button
+							type="submit"
+							disabled={isLoading}
+							class="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-6 py-3 text-sm font-bold text-white shadow-lg shadow-blue-600/25 transition-all duration-200 hover:bg-blue-700 active:scale-[0.98] disabled:cursor-not-allowed disabled:bg-blue-400"
+						>
+							{#if isLoading}
+								<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
+								<span>Menyimpan...</span>
+							{:else}
+								<span>Simpan Password Baru</span>
+								<i class="fa-solid fa-check" aria-hidden="true"></i>
+							{/if}
+						</button>
+					</form>
+				{/if}
 
-			<p class="mt-4 text-center text-xs text-slate-500">
-				Belum menerima kode?
-				<a
-					href="/lupa-password"
-					class="ml-1 rounded font-bold text-blue-600 hover:text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600"
-				>
-					Minta ulang di sini
-				</a>
-			</p>
+				<p class="mt-5 border-t border-slate-100 pt-4 text-center text-xs text-slate-500">
+					Belum menerima kode?
+					<a
+						href="/lupa-password"
+						onclick={requestNewCode}
+						class="ml-1 rounded font-bold text-blue-600 hover:text-blue-700 hover:underline focus-visible:outline-2 focus-visible:outline-blue-600"
+					>
+						Minta ulang di sini
+					</a>
+				</p>
+			</div>
 		</div>
 	{/if}
 </div>

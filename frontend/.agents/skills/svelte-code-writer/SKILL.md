@@ -64,3 +64,9 @@ npx @sveltejs/mcp svelte-autofixer ./Component.svelte --svelte-version 4
 1. **Uncertain about syntax?** Run `list-sections` then `get-documentation` for relevant topics
 2. **Reviewing/debugging?** Run `svelte-autofixer` on the code to detect issues
 3. **Always validate** - Run `svelte-autofixer` before finalizing any Svelte component
+
+## ARISTOTELES — Project Guardrails (2026-11-04, append-only, precedence: frontend/AGENTS.md)
+
+- `svelte5-best-practices` adalah panduan utama Svelte 5/SvelteKit. Skill ini hanya alat opsional.
+- Klausul `MUST` dan `Always validate` DINONAKTIFKAN sebagai auto-trigger. Jangan jalankan `npx @sveltejs/mcp ...` atau `svelte-autofixer <path>` tanpa persetujuan eksplisit (setara `install` yang dilarang `AGENTS.md §1`).
+- Jangan tulis/ubah file via autofixer di luar scope permintaan. Tunduk pada `§6` (jangan hapus `markDone/normalizePassScore/withSyncedFlat`, jangan ganti pola modal).

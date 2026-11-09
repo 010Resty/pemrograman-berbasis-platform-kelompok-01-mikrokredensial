@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { page as routePage } from '$app/state';
+	import { focusTrap } from '$lib/actions/focusTrap';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 	import {
@@ -64,7 +67,7 @@
 		tools: string[];
 	}
 
-	let query = $state('');
+	let query = $state(routePage.url.searchParams.get('q') ?? '');
 	let debouncedQuery = $state('');
 	let filter = $state<Status>('all');
 	let page = $state(1);
@@ -95,6 +98,9 @@
 	let pendingDelete = $state<BackendCourse | null>(null);
 	let showDelete = $state(false);
 	let isDeleting = $state(false);
+	let pendingPhase = $state<{ course: BackendCourse; to: 'ongoing' | 'ended' } | null>(null);
+	let showPhase = $state(false);
+	let isPhasing = $state(false);
 	let addBtn: HTMLButtonElement | null = $state(null);
 	let firstField: HTMLInputElement | null = $state(null);
 	let detailCloseBtn: HTMLButtonElement | null = $state(null);
@@ -545,6 +551,39 @@
 			isDeleting = false;
 		}
 	}
+
+	function askPhase(c: BackendCourse) {
+		if (c.period !== 'upcoming' && c.period !== 'ongoing') return;
+		pendingPhase = { course: c, to: c.period === 'upcoming' ? 'ongoing' : 'ended' };
+		showPhase = true;
+	}
+
+	async function confirmPhase() {
+		if (!pendingPhase) {
+			showPhase = false;
+			return;
+		}
+		const target = pendingPhase;
+		isPhasing = true;
+		try {
+			const updated = await updateCourse(target.course.id, { period: target.to });
+			notice =
+				target.to === 'ongoing'
+					? `Batch “${updated.title}” berjalan. Materi terbuka untuk peserta.`
+					: `Batch “${updated.title}” diakhiri.`;
+			pendingPhase = null;
+			showPhase = false;
+			await load();
+			if (detailCourse && detailCourse.id === target.course.id) {
+				await openDetail(target.course.id, null);
+			}
+		} catch (e) {
+			actionError = serverMessage(e, 'Gagal mengubah fase batch.');
+			showPhase = false;
+		} finally {
+			isPhasing = false;
+		}
+	}
 </script>
 
 <svelte:head>
@@ -552,22 +591,18 @@
 	<meta name="description" content="Kelola kursus mikrokredensial Aristoteles." />
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-		<div>
-			<p class="text-xs font-bold tracking-widest text-emerald-600 uppercase">Admin · Kursus</p>
-			<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Kursus</h1>
-			<p class="mt-1 text-sm text-slate-500" role="status">
-				{courses.length} kursus ditampilkan
-				{#if !loading && !loadError && courses.length >= 100}
-					<span class="text-xs text-slate-400">(maks 100 pertama — persempit pencarian bila kurang)</span>
-				{/if}
-			</p>
-		</div>
-		<button type="button" bind:this={addBtn} onclick={openAdd} class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/25 transition-colors hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600">
-			<i class="fa-solid fa-plus" aria-hidden="true"></i> Buat Kursus
-		</button>
-	</div>
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Admin · Kursus"
+		title="Kursus"
+		description={`${courses.length} kursus ditampilkan${!loading && !loadError && courses.length >= 100 ? ' (maks 100 pertama — persempit pencarian bila kurang)' : ''}.`}
+	>
+		{#snippet actions()}
+			<button type="button" bind:this={addBtn} onclick={openAdd} class="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-emerald-600/25 transition-colors hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600">
+				<i class="fa-solid fa-plus" aria-hidden="true"></i> Buat Kursus
+			</button>
+		{/snippet}
+	</PageHeader>
 
 	{#if notice}
 		<p
@@ -632,8 +667,32 @@
 		</div>
 	{:else}
 		<div class="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm">
-			<div class="h-1 bg-gradient-to-r from-emerald-600 via-teal-500 to-emerald-600" aria-hidden="true"></div>
-			<div class="overflow-x-auto">
+			<div class="h-1 bg-emerald-600" aria-hidden="true"></div>
+			<ol class="divide-y divide-slate-100 md:hidden" aria-label="Daftar kursus">
+				{#each paged as c (c.id)}
+					<li class="px-4 py-3.5">
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0 flex-1">
+								<p class="truncate font-semibold text-slate-900">{c.title}</p>
+								<p class="mt-0.5 truncate text-xs text-slate-500">{instructorLabel(c)} · {c.priceLabel}</p>
+							</div>
+							<span class={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${statusClass(c.status)}`}><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{statusLabel(c.status)}</span>
+						</div>
+						<div class="mt-2.5 flex gap-2">
+							<button type="button" onclick={(e) => void openDetail(c.id, e.currentTarget)} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-emerald-600">
+								<i class="fa-solid fa-eye" aria-hidden="true"></i> Detail
+							</button>
+							<button type="button" onclick={(e) => void openEdit(c.id, e.currentTarget)} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-amber-600">
+								<i class="fa-solid fa-pen" aria-hidden="true"></i> Ubah
+							</button>
+							<button type="button" onclick={(e) => askDelete(c, e.currentTarget)} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-500">
+								<i class="fa-solid fa-trash" aria-hidden="true"></i> Hapus
+							</button>
+						</div>
+					</li>
+				{/each}
+			</ol>
+			<div class="hidden overflow-x-auto md:block">
 				<table class="w-full min-w-[640px] text-sm">
 					<caption class="sr-only">Daftar kursus platform Aristoteles</caption>
 					<thead class="bg-emerald-700 text-white">
@@ -687,7 +746,8 @@
 	{/if}
 
 	{#if showAdd}
-		<div class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="add-course-title" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) closeAdd(); }} onkeydown={(e) => { if (e.key === 'Escape') closeAdd(); }}>
+		<!-- svelte-ignore a11y_click_events_have_key_events : keyboard (Escape/Tab) ditangani use:focusTrap -->
+		<div class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4" role="dialog" aria-modal="true" aria-labelledby="add-course-title" tabindex="-1" use:focusTrap={{ onEscape: () => closeAdd() }} onclick={(e) => { if (e.target === e.currentTarget) closeAdd(); }}>
 			<form onsubmit={submitAdd} class="my-8 w-full max-w-2xl rounded-2xl bg-white p-6 shadow-2xl" novalidate>
 				<h2 id="add-course-title" class="text-lg font-bold text-slate-900">Buat Kursus</h2>
 				<p class="mt-0.5 text-xs text-slate-500">Kursus baru tersimpan sebagai Draf. Anda otomatis menjadi pengampu.</p>
@@ -917,6 +977,19 @@
 							>
 								<i class="fa-solid fa-pen" aria-hidden="true"></i> Ubah
 							</button>
+							{#if dc.period === 'upcoming' || dc.period === 'ongoing'}
+								<button
+									type="button"
+									onclick={() => askPhase(dc)}
+									class="inline-flex flex-1 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2.5 text-xs font-bold text-amber-700 hover:bg-amber-50 focus-visible:outline-2 focus-visible:outline-amber-600"
+								>
+									<i
+										class="fa-solid {dc.period === 'upcoming' ? 'fa-play' : 'fa-flag-checkered'}"
+										aria-hidden="true"
+									></i>
+									{dc.period === 'upcoming' ? 'Mulai Batch' : 'Akhiri Batch'}
+								</button>
+							{/if}
 							<button
 								type="button"
 								bind:this={detailCloseBtn}
@@ -1110,5 +1183,24 @@
 			showDelete = false;
 		}}
 		onconfirm={() => void confirmDelete()}
+	/>
+
+	<WarningModal
+		bind:open={showPhase}
+		type="warning"
+		title={pendingPhase?.to === 'ended' ? 'Akhiri batch?' : 'Mulai batch?'}
+		message={pendingPhase
+			? pendingPhase.to === 'ended'
+				? `Batch “${pendingPhase.course.title}” akan ditandai selesai. Pendaftaran baru ditutup dan tindakan ini tidak dapat dibatalkan.`
+				: `Batch “${pendingPhase.course.title}” akan berjalan dan materi terbuka untuk seluruh peserta terdaftar.`
+			: 'Ubah fase batch?'}
+		confirmText={pendingPhase?.to === 'ended' ? 'Ya, akhiri' : 'Ya, mulai'}
+		cancelText="Kembali"
+		loading={isPhasing}
+		oncancel={() => {
+			pendingPhase = null;
+			showPhase = false;
+		}}
+		onconfirm={() => void confirmPhase()}
 	/>
 </div>

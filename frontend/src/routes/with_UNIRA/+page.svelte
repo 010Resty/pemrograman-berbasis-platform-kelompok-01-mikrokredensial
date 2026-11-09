@@ -131,7 +131,7 @@
 							/>
 							<button
 								type="button"
-								aria-label="Tampilkan atau sembunyikan kata sandi"
+								aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi'}
 								aria-pressed={showPassword}
 								onclick={togglePassword}
 								class="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition-colors"
@@ -179,12 +179,12 @@
 				<div class="flex items-center justify-center gap-3 text-xs text-slate-500">
 					<span class="flex items-center gap-1">
 						<i class="fa-solid fa-shield-halved text-green-500" aria-hidden="true"></i>
-						Enkripsi TLS 1.3
+						Koneksi aman (HTTPS)
 					</span>
 					<span class="text-slate-300" aria-hidden="true">|</span>
 					<span class="flex items-center gap-1">
 						<i class="fa-solid fa-certificate text-green-500" aria-hidden="true"></i>
-						ISO 27001
+						Akun UNIRA terverifikasi
 					</span>
 				</div>
 			</div>

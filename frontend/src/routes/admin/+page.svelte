@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
 	import FeatureFlowCard, { type FeatureFlow } from '$lib/components/FeatureFlowCard.svelte';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import UiStatCard from '$lib/components/ui/StatCard.svelte';
 	import { getCurrentUser } from '$lib/stores/auth.svelte';
 	import {
 		fetchAdminOverview,
@@ -16,8 +19,8 @@
 		value: string;
 		change: string;
 		icon: string;
-		color: string;
-		bg: string;
+		tone: 'blue' | 'emerald' | 'amber' | 'violet';
+		href?: string;
 	}
 
 	const session = $derived(getCurrentUser());
@@ -94,10 +97,10 @@
 	}
 
 	const stats = $derived<Stat[]>([
-		{ label: 'Total Peserta', value: fmt(overview?.totalStudents ?? 0), change: 'akun terdaftar', icon: 'fa-users', color: 'text-blue-600', bg: 'bg-blue-50' },
-		{ label: 'Instruktur', value: fmt(overview?.totalTeachers ?? 0), change: 'akun pengampu', icon: 'fa-chalkboard-user', color: 'text-violet-600', bg: 'bg-violet-50' },
-		{ label: 'Kursus', value: fmt(overview?.totalCourses ?? 0), change: 'termasuk draft & arsip', icon: 'fa-layer-group', color: 'text-emerald-600', bg: 'bg-emerald-50' },
-		{ label: 'Sertifikat Terbit', value: fmt(overview?.totalCertificates ?? 0), change: 'status aktif', icon: 'fa-award', color: 'text-amber-600', bg: 'bg-amber-50' }
+		{ label: 'Total Peserta', value: fmt(overview?.totalStudents ?? 0), change: 'akun terdaftar', icon: 'fa-users', tone: 'blue', href: resolve('/admin/peserta') },
+		{ label: 'Instruktur', value: fmt(overview?.totalTeachers ?? 0), change: 'akun pengampu', icon: 'fa-chalkboard-user', tone: 'violet', href: resolve('/admin/instrukturs') },
+		{ label: 'Kursus', value: fmt(overview?.totalCourses ?? 0), change: 'termasuk draft & arsip', icon: 'fa-layer-group', tone: 'emerald', href: resolve('/admin/courses') },
+		{ label: 'Sertifikat Terbit', value: fmt(overview?.totalCertificates ?? 0), change: 'status aktif', icon: 'fa-award', tone: 'amber' }
 	]);
 
 	const flows: FeatureFlow[] = [
@@ -186,14 +189,12 @@
 	<meta name="description" content="Dasbor admin Aristoteles untuk mengelola peserta, instruktur, dan kursus." />
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-8">
-		<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">Admin · Dasbor</p>
-		<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-			Selamat Datang, {firstName}!
-		</h1>
-		<p class="mt-1 text-sm text-slate-500">Ringkasan aktivitas platform mikrokredensial hari ini.</p>
-	</div>
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Admin · Dasbor"
+		title={`Selamat datang, ${firstName}!`}
+		description="Ringkasan aktivitas platform mikrokredensial hari ini."
+	/>
 
 	{#if loading}
 		<div class="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4" aria-label="Memuat ringkasan">
@@ -230,16 +231,9 @@
 			</button>
 		</div>
 	{:else}
-	<div class="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
+	<div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
 		{#each stats as s (s.label)}
-			<div class="rounded-2xl border border-slate-200/60 bg-white p-5 transition-shadow hover:shadow-lg">
-				<div class="mb-3 flex h-11 w-11 items-center justify-center rounded-xl {s.bg}">
-					<i class="fa-solid {s.icon} {s.color} text-lg" aria-hidden="true"></i>
-				</div>
-				<div class="text-2xl font-bold text-slate-900">{s.value}</div>
-				<div class="mt-0.5 text-xs font-medium text-slate-500">{s.label}</div>
-				<div class="mt-1 text-[11px] font-semibold text-emerald-600">{s.change}</div>
-			</div>
+			<UiStatCard label={s.label} value={s.value} sub={s.change} icon={s.icon} tone={s.tone} href={s.href} />
 		{/each}
 	</div>
 

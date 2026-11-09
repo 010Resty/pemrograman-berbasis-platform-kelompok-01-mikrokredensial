@@ -1,7 +1,7 @@
 import { apiRequest } from './backend';
 import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svelte';
 
-export type UploadKind = 'image' | 'audio' | 'pdf' | 'cover' | 'assignment';
+export type UploadKind = 'image' | 'audio' | 'pdf' | 'cover' | 'assignment' | 'avatar' | 'profile_cover';
 
 export interface UploadedFile {
 	id: number;

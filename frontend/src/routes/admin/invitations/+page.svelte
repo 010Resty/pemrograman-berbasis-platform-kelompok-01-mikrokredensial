@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { onMount } from 'svelte';
+	import { focusTrap } from '$lib/actions/focusTrap';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 	import {
@@ -292,27 +294,23 @@
 	/>
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-		<div>
-			<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">Admin · Undangan Instruktur</p>
-			<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-				Undangan Instruktur
-			</h1>
-			<p class="mt-1 text-sm text-slate-500">
-				{filtered.length} dari {items.length} undangan ditampilkan · tersimpan di backend,
-				email dikirim otomatis via SMTP.
-			</p>
-		</div>
-		<button
-			type="button"
-			bind:this={addBtn}
-			onclick={openAdd}
-			class="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-violet-600/25 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-violet-600"
-		>
-			<i class="fa-solid fa-envelope-open-text" aria-hidden="true"></i> Undang Instruktur
-		</button>
-	</div>
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Admin · Undangan Instruktur"
+		title="Undangan Instruktur"
+		description={`${filtered.length} dari ${items.length} undangan ditampilkan · tersimpan di backend, email dikirim otomatis via SMTP.`}
+	>
+		{#snippet actions()}
+			<button
+				type="button"
+				bind:this={addBtn}
+				onclick={openAdd}
+				class="inline-flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-violet-600/25 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-violet-600"
+			>
+				<i class="fa-solid fa-envelope-open-text" aria-hidden="true"></i> Undang Instruktur
+			</button>
+		{/snippet}
+	</PageHeader>
 
 	<div
 		class="mb-6 flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900"
@@ -409,7 +407,36 @@
 				</button>
 			</div>
 		{:else}
-			<div class="overflow-x-auto">
+			<ol class="divide-y divide-slate-100 rounded-2xl border border-slate-200/70 bg-white md:hidden" aria-label="Daftar undangan">
+				{#each paged as inv (inv.id)}
+					{@const ui = toUiStatus(inv)}
+					<li class="px-4 py-3.5">
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0 flex-1">
+								<p class="truncate font-semibold text-slate-900">{inv.name ?? '-'}</p>
+								<p class="truncate text-xs text-slate-500">{inv.email}</p>
+								<p class="mt-0.5 text-[11px] text-slate-400">s.d. {formatDate(inv.expiresAt)}</p>
+							</div>
+							<span class={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${statusClass(ui)}`}>
+								<span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{statusLabel(ui)}
+							</span>
+						</div>
+						{#if ui === 'Pending' || ui === 'Expired'}
+							<div class="mt-2.5 flex gap-2">
+								<button type="button" onclick={() => void handleReissue(inv)} disabled={reissueBusyId === inv.id || revokeBusyId === inv.id} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-60">
+									<i class="fa-solid fa-paper-plane" aria-hidden="true"></i> Kirim ulang
+								</button>
+								{#if ui === 'Pending'}
+									<button type="button" onclick={askCancel.bind(null, inv)} disabled={revokeBusyId === inv.id || reissueBusyId === inv.id} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-60">
+										<i class="fa-solid fa-xmark" aria-hidden="true"></i> Batalkan
+									</button>
+								{/if}
+							</div>
+						{/if}
+					</li>
+				{/each}
+			</ol>
+			<div class="hidden overflow-x-auto md:block">
 				<table class="w-full min-w-[820px] text-sm">
 					<caption class="sr-only">Daftar undangan instruktur</caption>
 					<thead class="bg-violet-700 text-white">
@@ -490,17 +517,16 @@
 	</div>
 
 	{#if showAdd}
+		<!-- svelte-ignore a11y_click_events_have_key_events : keyboard (Escape/Tab) ditangani use:focusTrap -->
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="add-invite-title"
 			tabindex="-1"
+			use:focusTrap={{ onEscape: () => closeAdd() }}
 			onclick={(e) => {
 				if (e.target === e.currentTarget) closeAdd();
-			}}
-			onkeydown={(e) => {
-				if (e.key === 'Escape') closeAdd();
 			}}
 		>
 			<form

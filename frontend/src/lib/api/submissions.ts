@@ -28,6 +28,13 @@ export async function fetchTaskStatus(materialId: number): Promise<TaskStatus> {
 	}
 }
 
+/** Rincian rubrik K-06 (3 kriteria tetap, bobot sama). */
+export interface RubricScores {
+	kelengkapan: number;
+	ketepatan: number;
+	kerapian: number;
+}
+
 /** Satu baris pengumpulan versi backend (untuk penilai pengampu). */
 export interface MaterialSubmissionItem {
 	id: number;
@@ -42,6 +49,8 @@ export interface MaterialSubmissionItem {
 	note: string | null;
 	score: number | null;
 	feedback: string | null;
+	/** null = dinilai langsung tanpa rubrik. */
+	rubricScores: RubricScores | null;
 	status: string;
 	gradedBy: number | null;
 	gradedAt: string | null;
@@ -54,6 +63,22 @@ export interface MaterialSubmissionsResult {
 }
 
 /**
+ * Berkas hanya bisa diunduh bila menunjuk ke endpoint resmi
+ * `/api/v1/files/:id/content`. Path warisan (mis. `uploads/...` tanpa
+ * baris `files`) tidak dilayani backend mana pun dan pasti 404 —
+ * jangan tampilkan tombol unduh untuknya (tampilkan status saja).
+ */
+export function isServableSubmissionFile(fileUrl: string | null | undefined): boolean {
+	if (!fileUrl) return false;
+	try {
+		const path = fileUrl.startsWith('http') ? new URL(fileUrl).pathname : fileUrl;
+		return path.startsWith('/api/v1/files/');
+	} catch {
+		return false;
+	}
+}
+
+/**
  * Daftar pengumpulan satu materi (GET /api/v1/materials/:id/submissions).
  * Pengelola (teacher/admin pengampu) menerima semua baris + `manager: true`.
  */
@@ -61,10 +86,9 @@ export async function fetchMaterialSubmissions(
 	materialId: number
 ): Promise<MaterialSubmissionsResult> {
 	try {
-		return await apiRequest<MaterialSubmissionsResult>(
-			`/materials/${materialId}/submissions`,
-			{ token: getAccessToken() }
-		);
+		return await apiRequest<MaterialSubmissionsResult>(`/materials/${materialId}/submissions`, {
+			token: getAccessToken()
+		});
 	} catch (e) {
 		await handlePrivateRequestError(e);
 		throw e;
@@ -75,6 +99,8 @@ export interface GradeSubmissionInput {
 	score: number;
 	decision: 'passed' | 'failed' | 'revision_requested';
 	feedback?: string;
+	/** Bila diisi, server menghitung rata-rata (skor kiriman diabaikan). */
+	rubric?: RubricScores;
 }
 
 /**

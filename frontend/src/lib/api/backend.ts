@@ -29,8 +29,11 @@ export type BackendResponse<T> = BackendSuccess<T> | BackendFailure;
 export interface BackendUser {
 	id: string | number;
 	name: string;
+	username: string;
 	email: string;
 	role: 'student' | 'teacher' | 'admin';
+	/** Relatif server atau null; absen pada payload lama → null. */
+	avatarUrl?: string | null;
 }
 
 export interface AuthPayload {
@@ -217,12 +220,13 @@ export function loginRequest(
  */
 export function registerRequest(
 	name: string,
+	username: string,
 	email: string,
 	password: string
 ): Promise<OtpRequestResult> {
 	return apiRequest<OtpRequestResult>('/auth/register', {
 		method: 'POST',
-		body: { name, email, password }
+		body: { name, username, email, password }
 	});
 }
 
@@ -281,10 +285,25 @@ export function verifyEmailRequest(email: string, code: string): Promise<AuthPay
  * Langkah 1 lupa password: minta kode OTP reset.
  * Selalu dianggap berhasil di UI (backend menjawab generik).
  */
-export function forgotPasswordRequest(email: string): Promise<{ message: string }> {
-	return apiRequest<{ message: string }>('/auth/forgot-password', {
+export function forgotPasswordRequest(email: string): Promise<OtpRequestResult> {
+	return apiRequest<OtpRequestResult>('/auth/forgot-password', {
 		method: 'POST',
 		body: { email }
+	});
+}
+
+/**
+ * Verifikasi kode OTP reset SAJA (tanpa mengubah password).
+ * Gerbang layar password-baru: kode salah tidak boleh lanjut.
+ * Gagal memakai pesan generik yang sama agar tidak membocorkan status.
+ */
+export function verifyResetCodeRequest(
+	email: string,
+	code: string
+): Promise<{ message: string }> {
+	return apiRequest<{ message: string }>('/auth/verify-reset-code', {
+		method: 'POST',
+		body: { email, code }
 	});
 }
 

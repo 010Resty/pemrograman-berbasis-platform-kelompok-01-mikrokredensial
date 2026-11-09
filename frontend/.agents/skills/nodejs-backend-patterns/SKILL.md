@@ -637,3 +637,10 @@ Standardized `ApiResponse` helper with `success`, `error`, and `paginated` stati
 ## Testing Patterns
 
 See `javascript-testing-patterns` skill for comprehensive testing guidance.
+
+## ARISTOTELES — Project Guardrails (2026-11-04, append-only, precedence: frontend/AGENTS.md)
+
+- OUT-OF-SCOPE untuk repo frontend SvelteKit. Jangan scaffolding Express/Fastify/JWT/Redis/DB dari frontend. `docs/05-kebutuhan-backend.md` hanya usulan, bukan bukti endpoint ada.
+- Jika tugas menyentuh backend sungguhan, kerjakan di `backend/` mengikuti `backend/AGENTS.md` (Express 4 + Drizzle + Zod).
+- Jangan `npm install`, `npx`, atau tulis secret (`JWT_SECRET`, koneksi DB) ke kode/dokumen tanpa persetujuan eksplisit.
+- Duplikat diketahui: salinan di `backend/.agents/skills/nodejs-backend-patterns/` berbeda isi. Lihat `ARISTOTELES.md`. Jangan sinkronkan ulang tanpa persetujuan.

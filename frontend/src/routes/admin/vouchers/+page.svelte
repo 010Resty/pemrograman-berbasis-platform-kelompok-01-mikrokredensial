@@ -1,10 +1,13 @@
 <script lang="ts">
+	import { focusTrap } from '$lib/actions/focusTrap';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 	import {
 		createBackendVoucher,
 		disableVoucher,
 		enableVoucher,
+		fetchVoucherCounts,
 		fetchVoucherDetail,
 		fetchVouchers,
 		type BackendVoucher,
@@ -21,10 +24,11 @@
 	 * Kedaluarsa = expired (atau lewat tanggal); Dibatalkan = revoked.
 	 */
 
-	type KindFilter = 'all' | 'Personal' | 'Umum';
+	type KindFilter = 'all' | 'Personal' | 'Umum' | 'Diskon';
 	type StatusFilter = 'all' | 'Aktif' | 'Habis digunakan' | 'Kedaluarsa' | 'Dibatalkan';
 
 	let query = $state('');
+	let debouncedQuery = $state('');
 	let kindFilter = $state<KindFilter>('all');
 	let courseFilter = $state('all');
 	let statusFilter = $state<StatusFilter>('all');
@@ -33,6 +37,7 @@
 
 	let items = $state<BackendVoucher[]>([]);
 	let serverTotal = $state(0);
+	let stats = $state({ total: 0, aktif: 0, habis: 0, kedaluarsa: 0, batal: 0 });
 	let courses = $state<BackendCourse[]>([]);
 	let isLoading = $state(true);
 	let loadError = $state('');
@@ -40,11 +45,13 @@
 
 	/* --- Formulir tambah --- */
 	let showAdd = $state(false);
-	let formKind = $state<'Personal' | 'Umum'>('Personal');
+	let formKind = $state<'Personal' | 'Umum' | 'Diskon'>('Personal');
 	let formCourseId = $state('');
 	let formAssignee = $state('');
 	let formCode = $state('');
 	let formMaxUses = $state('10');
+	let formDiscountType = $state<'percent' | 'nominal'>('percent');
+	let formDiscountValue = $state('');
 	let useExpiry = $state(false);
 	let formExpiry = $state('');
 	let formError = $state('');
@@ -74,42 +81,35 @@
 		return 'Aktif';
 	}
 
-	function kindLabel(v: BackendVoucher): 'Personal' | 'Umum' {
-		return v.kind === 'personal' ? 'Personal' : 'Umum';
+	function kindLabel(v: BackendVoucher): 'Personal' | 'Umum' | 'Diskon' {
+		if (v.kind === 'personal') return 'Personal';
+		if (v.kind === 'diskon') return 'Diskon';
+		return 'Umum';
 	}
 
-	const filtered = $derived(
-		items.filter((v) => {
-			const mStatus = statusFilter === 'all' || uiStatus(v) === statusFilter;
-			const q = query.trim().toLowerCase();
-			const mQuery =
-				!q ||
-				v.code.toLowerCase().includes(q) ||
-				(v.courseTitle ?? '').toLowerCase().includes(q);
-			return mStatus && mQuery;
-		})
-	);
+	function serverStatusFilter(s: StatusFilter): 'active' | 'redeemed' | 'expired' | 'revoked' | undefined {
+		if (s === 'Aktif') return 'active';
+		if (s === 'Habis digunakan') return 'redeemed';
+		if (s === 'Kedaluarsa') return 'expired';
+		if (s === 'Dibatalkan') return 'revoked';
+		return undefined;
+	}
 
-	const stats = $derived({
-		total: serverTotal,
-		aktif: items.filter((v) => uiStatus(v) === 'Aktif').length,
-		habis: items.filter((v) => uiStatus(v) === 'Habis digunakan').length,
-		kedaluarsa: items.filter((v) => uiStatus(v) === 'Kedaluarsa').length,
-		batal: items.filter((v) => uiStatus(v) === 'Dibatalkan').length
-	});
+	// Statistik dari server (skala penuh, bukan halaman): 5 hitungan paralel.
+	async function loadStats(base: {
+		kind?: 'personal' | 'umum' | 'diskon';
+		courseId?: number;
+		q?: string;
+	}): Promise<void> {
+		try {
+			stats = await fetchVoucherCounts(base);
+		} catch {
+			stats = { total: serverTotal, aktif: 0, habis: 0, kedaluarsa: 0, batal: 0 };
+		}
+	}
 
-	/* Kembali ke halaman 1 setiap filter/pencarian/jumlah baris/data berubah. */
-	$effect(() => {
-		void query;
-		void kindFilter;
-		void courseFilter;
-		void statusFilter;
-		void perPage;
-		void items;
-		page = 1;
-	});
-
-	const paged = $derived(filtered.slice((page - 1) * perPage, page * perPage));
+	/* Halaman server = items apa adanya (filter + paginasi di backend). */
+	const paged = $derived(items);
 
 	function statusClass(s: StatusFilter): string {
 		if (s === 'Aktif') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
@@ -161,29 +161,61 @@
 		isLoading = true;
 		loadError = '';
 		try {
+			const base = {
+				kind: kindFilter === 'all' ? undefined : (kindFilter.toLowerCase() as BackendVoucherKind),
+				courseId: courseFilter === 'all' ? undefined : Number(courseFilter),
+				q: debouncedQuery.trim() || undefined
+			};
 			const [vouchers, courseList] = await Promise.all([
 				fetchVouchers({
-					kind: kindFilter === 'all' ? undefined : (kindFilter.toLowerCase() as BackendVoucherKind),
-					courseId: courseFilter === 'all' ? undefined : Number(courseFilter),
-					limit: 100
+					...base,
+					status: serverStatusFilter(statusFilter),
+					limit: perPage,
+					page
 				}),
-				courses.length === 0 ? fetchAdminCourses(100) : Promise.resolve(courses)
+				courses.length === 0 ? fetchAdminCourses(100) : Promise.resolve(courses),
+				loadStats(base)
 			]);
 			items = vouchers.items;
 			serverTotal = vouchers.total;
 			courses = courseList;
 		} catch (e) {
-			loadError = messageOf(e, 'Gagal memuat voucher dari backend.');
+			loadError = e instanceof Error ? e.message : 'Gagal memuat voucher dari backend.';
 		} finally {
 			isLoading = false;
 		}
 	}
 
-	/* Muat awal + muat ulang tiap filter server berubah. */
+	/* Muat ulang tiap filter server berubah (termasuk halaman). */
 	$effect(() => {
+		void debouncedQuery;
 		void kindFilter;
 		void courseFilter;
+		void statusFilter;
+		void perPage;
+		void page;
 		void load();
+	});
+
+	/* Kembali ke halaman 1 setiap filter berubah (bukan saat pindah halaman). */
+	let lastFilterKey = '';
+	$effect(() => {
+		const key = JSON.stringify([debouncedQuery, kindFilter, courseFilter, statusFilter, perPage]);
+		if (lastFilterKey !== '' && key !== lastFilterKey) page = 1;
+		lastFilterKey = key;
+	});
+
+	// Debounce pencarian 400 ms agar tidak membanjiri server.
+	let searchTimer: ReturnType<typeof setTimeout> | null = null;
+	$effect(() => {
+		const q = query;
+		if (searchTimer) clearTimeout(searchTimer);
+		searchTimer = setTimeout(() => {
+			if (debouncedQuery !== q) debouncedQuery = q;
+		}, 400);
+		return () => {
+			if (searchTimer) clearTimeout(searchTimer);
+		};
 	});
 
 	function openAdd() {
@@ -192,6 +224,8 @@
 		formAssignee = '';
 		formCode = '';
 		formMaxUses = '10';
+		formDiscountType = 'percent';
+		formDiscountValue = '';
 		useExpiry = false;
 		formExpiry = '';
 		formError = '';
@@ -226,7 +260,7 @@
 			return;
 		}
 
-		const kind: BackendVoucherKind = formKind === 'Personal' ? 'personal' : 'umum';
+		const kind: BackendVoucherKind = formKind === 'Personal' ? 'personal' : formKind === 'Diskon' ? 'diskon' : 'umum';
 		let assignedEmail: string | undefined;
 		if (kind === 'personal') {
 			assignedEmail = formAssignee.trim().toLowerCase();
@@ -238,10 +272,16 @@
 				formError = 'Format email penerima tidak valid.';
 				return;
 			}
+		} else if (kind === 'diskon' && formAssignee.trim()) {
+			assignedEmail = formAssignee.trim().toLowerCase();
+			if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assignedEmail)) {
+				formError = 'Format email penerima tidak valid.';
+				return;
+			}
 		}
 
 		let maxUses = 1;
-		if (kind === 'umum') {
+		if (kind === 'umum' || kind === 'diskon') {
 			const raw = String(formMaxUses ?? '').trim();
 			if (!/^\d+$/.test(raw)) {
 				formError = 'Batas penggunaan harus bilangan bulat positif tanpa desimal (contoh: 20).';
@@ -250,6 +290,26 @@
 			maxUses = parseInt(raw, 10);
 			if (maxUses < 1) {
 				formError = 'Batas penggunaan minimal 1.';
+				return;
+			}
+		}
+
+		let discountType: 'percent' | 'nominal' | undefined;
+		let discountValue: number | undefined;
+		if (kind === 'diskon') {
+			discountType = formDiscountType;
+			const rawVal = formDiscountValue.trim();
+			if (!/^\d+$/.test(rawVal)) {
+				formError = 'Nilai diskon harus bilangan bulat (contoh: 20 untuk 20% atau 25000 untuk Rp25.000).';
+				return;
+			}
+			discountValue = parseInt(rawVal, 10);
+			if (discountType === 'percent' && (discountValue < 1 || discountValue > 100)) {
+				formError = 'Diskon persen 1–100.';
+				return;
+			}
+			if (discountType === 'nominal' && discountValue < 1) {
+				formError = 'Nominal diskon minimal Rp1.';
 				return;
 			}
 		}
@@ -293,7 +353,8 @@
 				kind,
 				maxUses,
 				assignedEmail,
-				expiresAt
+				expiresAt,
+				...(kind === 'diskon' ? { discountType, discountValue } : {})
 			});
 			closeAdd();
 			notice = `Voucher ${created.code} dibuat (status ${created.status}). Keunikan global dan anti-race dijamin backend.`;
@@ -404,27 +465,23 @@
 	/>
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-		<div>
-			<p class="text-xs font-bold tracking-widest text-orange-600 uppercase">Admin · Voucher</p>
-			<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-				Manajemen Voucher
-			</h1>
-			<p class="mt-1 text-sm text-slate-500">
-				{filtered.length} ditampilkan · total {serverTotal} voucher resmi di backend
-				(K-03: 1 voucher = 1 kursus, anti-race server).
-			</p>
-		</div>
-		<button
-			type="button"
-			bind:this={addBtn}
-			onclick={openAdd}
-			class="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-orange-600/25 transition-colors hover:bg-orange-700 focus-visible:outline-2 focus-visible:outline-orange-600"
-		>
-			<i class="fa-solid fa-ticket" aria-hidden="true"></i> Tambah Voucher
-		</button>
-	</div>
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Admin · Voucher"
+		title="Manajemen Voucher"
+		description={`Menampilkan ${items.length} dari total ${serverTotal} voucher resmi di backend (K-03: 1 voucher = 1 kursus, anti-race server).`}
+	>
+		{#snippet actions()}
+			<button
+				type="button"
+				bind:this={addBtn}
+				onclick={openAdd}
+				class="inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-orange-600/25 transition-colors hover:bg-orange-700 focus-visible:outline-2 focus-visible:outline-orange-600"
+			>
+				<i class="fa-solid fa-ticket" aria-hidden="true"></i> Tambah Voucher
+			</button>
+		{/snippet}
+	</PageHeader>
 
 	<div
 		class="mb-6 flex items-start gap-3 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-xs leading-relaxed text-blue-900"
@@ -497,7 +554,7 @@
 				/>
 			</div>
 			<div class="flex flex-wrap gap-2" role="group" aria-label="Filter jenis voucher">
-				{#each (['all', 'Personal', 'Umum'] as KindFilter[]) as k (k)}
+				{#each (['all', 'Personal', 'Umum', 'Diskon'] as KindFilter[]) as k (k)}
 					<button
 						type="button"
 						onclick={() => (kindFilter = k)}
@@ -565,7 +622,37 @@
 				</button>
 			</div>
 		{:else}
-			<div class="overflow-x-auto">
+			<ol class="divide-y divide-slate-100 rounded-2xl border border-slate-200/70 bg-white md:hidden" aria-label="Daftar voucher">
+				{#each paged as v (v.code)}
+					{@const st = uiStatus(v)}
+					<li class="px-4 py-3.5">
+						<div class="flex items-start justify-between gap-3">
+							<div class="min-w-0 flex-1">
+								<p class="font-mono text-[13px] font-bold text-slate-900">{v.code}</p>
+								<p class="mt-0.5 truncate text-xs text-slate-500">{v.courseTitle ?? '-'} · {kindLabel(v)}</p>
+							</div>
+							<span class={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold whitespace-nowrap ${statusClass(st)}`}>
+								<span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{st}
+							</span>
+						</div>
+						<p class="mt-1.5 text-[11px] text-slate-500">Terpakai {v.usedCount}/{v.maxUses}{#if v.expiresAt} · s.d. {formatDate(v.expiresAt)}{:else} · tanpa batas{/if}</p>
+						<div class="mt-2.5 flex gap-2">
+							<button type="button" onclick={() => void openDetail(v)} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-orange-600">
+								<i class="fa-solid fa-eye" aria-hidden="true"></i> Detail
+							</button>
+							<button type="button" onclick={() => copyCode(v.code)} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600">
+								<i class={`fa-solid ${copiedId === v.code ? 'fa-check text-emerald-600' : 'fa-copy'}`} aria-hidden="true"></i> Salin
+							</button>
+							{#if st === 'Aktif'}
+								<button type="button" onclick={() => askCancel(v)} disabled={actionBusy === v.code} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-60">
+									<i class="fa-solid fa-ban" aria-hidden="true"></i> Nonaktif
+								</button>
+							{/if}
+						</div>
+					</li>
+				{/each}
+			</ol>
+			<div class="hidden overflow-x-auto md:block">
 				<table class="w-full min-w-[900px] text-sm">
 					<caption class="sr-only">Daftar voucher kursus resmi</caption>
 					<thead class="bg-orange-700 text-white">
@@ -588,7 +675,7 @@
 									<span class="font-mono text-[13px] font-bold text-slate-900">{v.code}</span>
 								</td>
 								<td class="px-6 py-3.5">
-									<span class={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${kindLabel(v) === 'Personal' ? 'bg-orange-100 text-orange-700' : 'bg-sky-100 text-sky-700'}`}>
+									<span class={`inline-flex rounded-full px-2.5 py-0.5 text-[11px] font-bold ${kindLabel(v) === 'Personal' ? 'bg-orange-100 text-orange-700' : kindLabel(v) === 'Diskon' ? 'bg-emerald-100 text-emerald-700' : 'bg-sky-100 text-sky-700'}`}>
 										{kindLabel(v)}
 									</span>
 								</td>
@@ -679,30 +766,29 @@
 				</table>
 			</div>
 		{/if}
-		{#if !isLoading && !loadError && filtered.length === 0}
+		{#if !isLoading && !loadError && items.length === 0}
 			<p class="border-t border-dashed border-slate-200 p-8 text-center text-sm text-slate-500">
-				{items.length === 0
+				{serverTotal === 0
 					? 'Belum ada voucher. Buat voucher pertama lewat tombol Tambah Voucher.'
 					: 'Tidak ada voucher yang cocok dengan pencarian atau filter.'}
 			</p>
 		{/if}
 		<div class="border-t border-slate-100 bg-slate-50/70">
-			<Pagination bind:page bind:perPage totalItems={filtered.length} itemLabel="voucher" label="Navigasi halaman tabel voucher" id="voucher-pagination" activeClass="bg-orange-600 text-white shadow-lg shadow-orange-600/25" />
+			<Pagination bind:page bind:perPage totalItems={serverTotal} itemLabel="voucher" label="Navigasi halaman tabel voucher" id="voucher-pagination" activeClass="bg-orange-600 text-white shadow-lg shadow-orange-600/25" />
 		</div>
 	</div>
 
 	{#if showAdd}
+		<!-- svelte-ignore a11y_click_events_have_key_events : keyboard (Escape/Tab) ditangani use:focusTrap -->
 		<div
 			class="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-900/50 p-4"
 			role="dialog"
 			aria-modal="true"
 			aria-labelledby="add-voucher-title"
 			tabindex="-1"
+			use:focusTrap={{ onEscape: () => closeAdd() }}
 			onclick={(e) => {
 				if (e.target === e.currentTarget) closeAdd();
-			}}
-			onkeydown={(e) => {
-				if (e.key === 'Escape') closeAdd();
 			}}
 		>
 			<form
@@ -721,7 +807,7 @@
 
 				<fieldset class="mt-4">
 					<legend class="mb-1.5 block text-xs font-bold text-slate-700">Jenis voucher</legend>
-					<div class="grid grid-cols-1 gap-2 sm:grid-cols-2">
+					<div class="grid grid-cols-1 gap-2 sm:grid-cols-3">
 						<label class={`cursor-pointer rounded-xl border-2 p-3 transition-colors focus-within:outline-2 focus-within:outline-orange-600 ${formKind === 'Personal' ? 'border-orange-500 bg-orange-50/60' : 'border-slate-200 hover:border-slate-300'}`}>
 							<span class="flex items-center gap-2">
 								<input
@@ -751,6 +837,21 @@
 							</span>
 							<span class="mt-1 block pl-6 text-[11px] leading-relaxed text-slate-500">
 								Satu kode untuk banyak peserta — Admin menentukan batas penukaran.
+							</span>
+						</label>
+						<label class={`cursor-pointer rounded-xl border-2 p-3 transition-colors focus-within:outline-2 focus-within:outline-orange-600 ${formKind === 'Diskon' ? 'border-orange-500 bg-orange-50/60' : 'border-slate-200 hover:border-slate-300'}`}>
+							<span class="flex items-center gap-2">
+								<input
+									type="radio"
+									name="voucher-kind"
+									value="Diskon"
+									bind:group={formKind}
+									class="h-4 w-4 accent-orange-600"
+								/>
+								<span class="text-sm font-bold text-slate-900">Diskon</span>
+							</span>
+							<span class="mt-1 block pl-6 text-[11px] leading-relaxed text-slate-500">
+								Potongan harga saat bayar — persen atau nominal rupiah.
 							</span>
 						</label>
 					</div>
@@ -785,6 +886,49 @@
 							/>
 						</div>
 					{:else}
+						{#if formKind === 'Diskon'}
+							<div>
+								<label for="voucher-discount-type" class="mb-1 block text-xs font-bold text-slate-700">
+									Jenis potongan <span class="text-red-500">*</span>
+								</label>
+								<select
+									id="voucher-discount-type"
+									bind:value={formDiscountType}
+									class="w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm focus:border-orange-500 focus:outline-none"
+								>
+									<option value="percent">Persen (%) — maks 100</option>
+									<option value="nominal">Nominal (Rp)</option>
+								</select>
+							</div>
+							<div>
+								<label for="voucher-discount-value" class="mb-1 block text-xs font-bold text-slate-700">
+									Besar potongan <span class="text-red-500">*</span>
+								</label>
+								<input
+									id="voucher-discount-value"
+									type="number"
+									min="1"
+									step="1"
+									inputmode="numeric"
+									bind:value={formDiscountValue}
+									placeholder={formDiscountType === 'percent' ? 'cth. 20 (= 20%)' : 'cth. 25000 (= Rp25.000)'}
+									class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm tabular-nums focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 focus:outline-none"
+								/>
+							</div>
+							<div>
+								<label for="voucher-assignee-diskon" class="mb-1 block text-xs font-bold text-slate-700">
+									Batasi ke email tertentu <span class="font-normal text-slate-400">(opsional)</span>
+								</label>
+								<input
+									id="voucher-assignee-diskon"
+									type="email"
+									bind:value={formAssignee}
+									autocomplete="email"
+									placeholder="kosongkan = siapa saja boleh pakai"
+									class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 focus:outline-none"
+								/>
+							</div>
+						{/if}
 						<div>
 							<label for="voucher-max" class="mb-1 block text-xs font-bold text-slate-700">
 								Batas penggunaan
@@ -903,7 +1047,7 @@
 						<dl class="mt-4 grid grid-cols-1 gap-2.5 rounded-2xl bg-slate-50 p-4 text-sm sm:grid-cols-2">
 							<div>
 								<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Jenis</dt>
-								<dd class="mt-0.5 font-bold text-slate-900">{kindLabel(detail)}</dd>
+								<dd class="mt-0.5 font-bold text-slate-900">{kindLabel(detail)}{detail.discountType === 'percent' ? ` · ${detail.discountValue ?? 0}%` : detail.discountType === 'nominal' ? ` · Rp${Number(detail.discountValue ?? 0).toLocaleString('id-ID')}` : ''}</dd>
 							</div>
 							<div>
 								<dt class="text-[10px] font-bold tracking-widest text-slate-400 uppercase">Kursus</dt>

@@ -27,6 +27,8 @@
 		'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80';
 
 	let modulCat = $state('Semua');
+	let search = $state('');
+	let debouncedSearch = $state('');
 	/** Daftar awal dari server load (SSR); fetch browser hanya bila kosong/ganti filter. */
 	let { data }: { data: { origin: string; modul: BackendCourse[] } } = $props();
 	// svelte-ignore state_referenced_locally -- seed SSR: snapshot awal, update via fetch browser
@@ -44,6 +46,7 @@
 		modulError = '';
 		try {
 			const list = await fetchPublicCourseList({
+				q: debouncedSearch.trim() || undefined,
 				category: modulCat === 'Semua' ? undefined : modulCat,
 				status: 'published',
 				limit: 8
@@ -84,8 +87,18 @@
 		return '—';
 	}
 
+	// Debounce pencarian 400 ms (pola sama dengan /modules agar tidak spam backend).
+	$effect(() => {
+		const q = search;
+		const t = setTimeout(() => {
+			if (debouncedSearch !== q) debouncedSearch = q;
+		}, 400);
+		return () => clearTimeout(t);
+	});
+
 	$effect(() => {
 		if (!browser) return;
+		void debouncedSearch;
 		void modulCat;
 		// Mount pertama: data SSR sudah tampil → cukup lengkapi nama pengampu.
 		if (modulFirstRun) {
@@ -155,17 +168,41 @@
 	<section aria-labelledby="pelatihan-heading" class="border-t border-mist bg-white pb-20">
 		<div class="mx-auto max-w-7xl px-4 pt-10 sm:px-6 lg:px-8">
 			<h2 id="pelatihan-heading" class="sr-only">Daftar pelatihan berdasarkan kategori</h2>
-			<div class="mb-10 flex flex-wrap gap-2" role="group" aria-label="Filter kategori">
-				{#each ['Semua', ...MODUL_CATEGORIES] as cat (cat)}
-					<button
-						type="button"
-						onclick={() => (modulCat = cat)}
-						aria-pressed={modulCat === cat}
-						class={`rounded-xl px-5 py-2.5 font-heading text-xs font-bold transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-royal ${modulCat === cat ? 'bg-abyss text-white' : 'border border-mist bg-white text-slate-600 hover:border-royal hover:text-royal'}`}
-					>{cat}</button
-					>
-				{/each}
+			<div class="mb-5 flex flex-col gap-3 lg:flex-row lg:items-center">
+				<div class="relative max-w-md flex-1">
+					<div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+						<i class="fa-solid fa-magnifying-glass text-sm" aria-hidden="true"></i>
+					</div>
+					<label for="pelatihan-search" class="sr-only">Cari pelatihan</label>
+					<input
+						id="pelatihan-search"
+						type="search"
+						bind:value={search}
+						placeholder="Cari judul atau deskripsi pelatihan..."
+						autocomplete="off"
+						class="w-full rounded-xl border border-mist bg-white py-2.5 pr-4 pl-10 text-sm text-slate-800 placeholder:text-slate-400 transition-colors duration-200 focus:border-royal focus:ring-2 focus:ring-royal/20 focus:outline-none"
+					/>
+				</div>
+				<div class="flex flex-wrap gap-2" role="group" aria-label="Filter kategori">
+					{#each ['Semua', ...MODUL_CATEGORIES] as cat (cat)}
+						<button
+							type="button"
+							onclick={() => (modulCat = cat)}
+							aria-pressed={modulCat === cat}
+							class={`rounded-xl px-5 py-2.5 font-heading text-xs font-bold transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-royal ${modulCat === cat ? 'bg-abyss text-white' : 'border border-mist bg-white text-slate-600 hover:border-royal hover:text-royal'}`}
+						>{cat}</button
+						>
+					{/each}
+				</div>
 			</div>
+
+			<p class="mb-4 text-xs font-medium text-slate-500" role="status">
+				{#if debouncedSearch.trim()}
+					Hasil untuk “{debouncedSearch.trim()}”: {modulCourses.length} pelatihan
+				{:else}
+					Menampilkan {modulCourses.length} pelatihan
+				{/if}
+			</p>
 
 			{#if modulLoading}
 				<div class="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-4" aria-label="Memuat pelatihan">
@@ -193,7 +230,28 @@
 				</div>
 			{:else if modulCourses.length === 0}
 				<div class="rounded-2xl border border-dashed border-mist bg-white p-12 text-center">
-					<p class="font-heading text-sm font-bold text-abyss">Belum ada pelatihan pada kategori ini.</p>
+					<i class="fa-solid fa-magnifying-glass mb-3 text-3xl text-slate-300" aria-hidden="true"></i>
+					<p class="font-heading text-sm font-bold text-abyss">Pelatihan tidak ditemukan.</p>
+					<p class="mt-1 text-xs text-slate-500">
+						{#if debouncedSearch.trim()}
+							Coba kata kunci atau kategori lain.
+						{:else}
+							Belum ada pelatihan pada kategori ini.
+						{/if}
+					</p>
+					{#if debouncedSearch.trim() || modulCat !== 'Semua'}
+						<button
+							type="button"
+							onclick={() => {
+								search = '';
+								debouncedSearch = '';
+								modulCat = 'Semua';
+							}}
+							class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-mist bg-white px-5 py-2.5 font-heading text-xs font-bold text-slate-600 transition-colors duration-200 hover:border-royal hover:text-royal focus-visible:outline-2 focus-visible:outline-royal"
+						>
+							<i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Atur ulang pencarian
+						</button>
+					{/if}
 				</div>
 			{:else}
 				<div class="grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-4">

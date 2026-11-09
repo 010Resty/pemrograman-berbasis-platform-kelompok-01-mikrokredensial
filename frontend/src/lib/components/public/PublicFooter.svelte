@@ -41,7 +41,7 @@
 		</nav>
 	</div>
 	<div class="border-t border-white/10">
-		<p class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-slate-400 sm:px-6 lg:px-8">
+		<p class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-slate-300 sm:px-6 lg:px-8">
 			&copy; 2026 Aristoteles Platform Mikrokredensial. Semua hak dilindungi.
 		</p>
 	</div>

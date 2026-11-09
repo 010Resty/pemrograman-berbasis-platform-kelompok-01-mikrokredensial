@@ -29,12 +29,9 @@ async function getList(query: string): Promise<BackendCourse[]> {
 	}
 }
 
-/** Beranda: sorotan terbit terbaru + kandidat kelas gratis (cermin loadSorotan). */
-export function getSpotServer(): Promise<[BackendCourse[], BackendCourse[]]> {
-	return Promise.all([
-		getList('status=published&limit=12&sort=newest'),
-		getList('status=published&limit=50&sort=newest')
-	]);
+/** Beranda: sorotan terbit terbaru (cermin loadSorotan). */
+export function getSpotServer(): Promise<BackendCourse[]> {
+	return getList('status=published&limit=12&sort=newest');
 }
 
 /** /pelatihan: filter default "Semua" (cermin loadModul). */

@@ -30,16 +30,14 @@
 	let promoWrap: HTMLDivElement | undefined = $state(undefined);
 
 	/**
-	 * Shortcut bawaan ke tiap bagian landing — dipakai saat halaman tidak
+	 * Shortcut ke tiap bagian halaman promo khusus — dipakai saat halaman tidak
 	 * mengoper `promoItems` sendiri, sehingga dropdown Promo bisa diakses
-	 * dari halaman publik mana pun (tautan absolut `/#bagian`).
+	 * dari halaman publik mana pun.
 	 */
 	const defaultPromoItems: PromoItem[] = [
-		{ id: 'promo', title: 'Promo Pelatihan', desc: 'Penawaran harga spesial periode terbatas', href: `${resolve('/')}#promo` },
-		{ id: 'unggulan', title: 'Pilihan Unggulan', desc: 'Sorotan pelatihan terbit terbaru', href: `${resolve('/')}#unggulan` },
-		{ id: 'patungan', title: 'Promo Patungan', desc: 'Checkout kelas bareng, bayar lebih hemat', href: `${resolve('/')}#patungan` },
-		{ id: 'cara-belajar', title: 'Cara Belajar', desc: 'Empat langkah menuju sertifikat', href: `${resolve('/')}#cara-belajar` },
-		{ id: 'gratis', title: 'Mulai Gratis', desc: 'Kelas tanpa biaya untuk mulai belajar', href: `${resolve('/')}#gratis` }
+		{ id: 'flash-sale', title: 'Flash Sale', desc: 'Diskon spesial dalam periode terbatas', href: `${resolve('/promo')}#flash-sale` },
+		{ id: 'unggulan', title: 'Pilihan Unggulan', desc: 'Kurasi pilihan dan pelatihan terbit terbaru', href: `${resolve('/promo')}#unggulan` },
+		{ id: 'patungan', title: 'Promo Patungan', desc: 'Checkout kelas bareng, bayar lebih hemat', href: `${resolve('/promo')}#patungan` }
 	];
 
 	const promoMenuItems = $derived(promoItems ?? defaultPromoItems);
@@ -97,8 +95,9 @@
 					<div class="relative" bind:this={promoWrap}>
 						<button
 							type="button"
-							aria-haspopup="true"
+							aria-haspopup="menu"
 							aria-expanded={promoOpen}
+							aria-controls="promo-menu"
 							onclick={() => (promoOpen = !promoOpen)}
 							onkeydown={(e) => {
 								if (e.key === 'Escape') promoOpen = false;
@@ -122,7 +121,7 @@
 											<p class="mt-2 text-xs leading-relaxed text-slate-200">Dapatkan promo terbaik untuk investasi belajarmu</p>
 										</div>
 									</div>
-									<ul class="flex w-[58%] flex-col gap-0.5 p-3">
+									<ul id="promo-menu" role="menu" aria-label="Menu promo" class="flex w-[58%] flex-col gap-0.5 p-3">
 										{#each promoMenuItems as item (item.id)}
 											<li>
 												<a
@@ -166,18 +165,14 @@
 
 		<div class="hidden shrink-0 items-center gap-3 sm:flex">
 			{#if showSearch}
-				<div
-					class="hidden items-center rounded-[10px] border border-mist bg-slate-50 py-2 pr-2 pl-3 xl:flex"
+				<a
+					href={resolve('/pelatihan')}
+					class="hidden items-center gap-2 rounded-[10px] border border-mist bg-slate-50 py-2 pr-3 pl-3 text-sm text-slate-500 transition-colors hover:border-royal hover:text-royal focus-visible:outline-2 focus-visible:outline-royal xl:flex"
+					aria-label="Cari program mikrokredensial di katalog pelatihan"
 				>
-					<label for="public-nav-search" class="sr-only">Cari program mikrokredensial</label>
 					<i class="fa-solid fa-magnifying-glass text-xs text-slate-400" aria-hidden="true"></i>
-					<input
-						id="public-nav-search"
-						type="search"
-						placeholder="Cari program..."
-						class="w-36 bg-transparent pl-2 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none"
-					/>
-				</div>
+					Cari program…
+				</a>
 			{/if}
 			<a
 				href={resolve('/login')}

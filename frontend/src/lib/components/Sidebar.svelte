@@ -21,9 +21,9 @@
 		profileName = 'Pengguna',
 		profileRole = 'Pengguna',
 		profileAlt = 'Foto profil pengguna',
-		/** URL foto profil opsional. Backend belum punya field avatar — bila
-		 * diisi kelak, hanya URL aman yang dirender (relatif `/...` atau
-		 * `https:`); selain itu fallback inisial. Tanpa ini = inisial. */
+		/** URL foto profil opsional (absolut backend /me avatarUrl).
+		 * Hanya URL aman yang dirender (relatif `/...`, `https:`, atau http
+		 * loopback dev); selain itu fallback inisial. Tanpa ini = inisial. */
 		profileAvatarUrl = null
 	}: {
 		navItems?: NavItem[];
@@ -51,14 +51,17 @@
 
 	/**
 	 * Hanya render <img> untuk URL avatar yang aman: relatif same-origin
-	 * (`/...`) atau `https:`. Tolak `javascript:`, `data:` non-gambar,
-	 * `http:`, dan string kosong — fallback ke inisial.
+	 * (`/...`), `https:`, atau http loopback dev (`localhost`/`127.0.0.1`,
+	 * karena backend dev berjalan di http://localhost:3000). Tolak
+	 * `javascript:`, `data:` non-gambar, http non-loopback, dan string
+	 * kosong — fallback ke inisial.
 	 */
 	const safeAvatarUrl = $derived.by((): string | null => {
 		const raw = (profileAvatarUrl ?? '').trim();
 		if (!raw || raw.length > 2048 || /[\s<>"]/.test(raw)) return null;
 		if (raw.startsWith('/')) return raw.startsWith('//') ? null : raw;
 		if (raw.startsWith('https://')) return raw;
+		if (raw.startsWith('http://localhost') || raw.startsWith('http://127.0.0.1')) return raw;
 		return null;
 	});
 
@@ -158,7 +161,8 @@
 
 		<!-- User profile -->
 		<div
-			class={`relative flex items-center gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3.5 ${isCollapsed ? 'lg:justify-center lg:px-1' : ''}`}
+			title={profileName}
+			class={`relative flex items-center gap-3 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-3.5 ${isCollapsed ? 'lg:justify-center lg:border-transparent lg:bg-transparent lg:p-1.5' : ''}`}
 		>
 			<div
 				class="pointer-events-none absolute -right-6 -bottom-6 h-16 w-16 rounded-full bg-blue-500/10 blur-xl"
@@ -169,13 +173,13 @@
 					<img
 						src={safeAvatarUrl}
 						alt={profileAlt}
-						class="h-12 w-12 rounded-xl border border-blue-200 object-cover shadow-md"
+						class="h-12 w-12 rounded-full object-cover shadow-md ring-2 ring-white"
 						loading="lazy"
 						referrerpolicy="no-referrer"
 					/>
 				{:else}
 					<span
-						class="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-bold text-white shadow-md"
+						class="flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-bold text-white shadow-md ring-2 ring-white"
 						aria-hidden="true"
 					>
 						{profileInitials}

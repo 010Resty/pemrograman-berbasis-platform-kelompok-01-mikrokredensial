@@ -61,3 +61,10 @@
 
 - Ada [Terverifikasi]: tabel lokal + `flash()` palsu.
 - Operasi [Usulan]: CRUD server + nonaktif + reset + audit log operasi admin.
+
+## Pembayaran QRIS manual [Keputusan pengguna 2026-11-04]
+
+- Alur: peserta ajukan (`POST /courses/:id/payments`, idempoten per antrean menunggu) → unggah bukti gambar (`payment_proof`, pemilik+admin saja) → admin verifikasi (`POST /admin/payments/:id/verify`, terima/tolak + alasan) → terima membuka akses via grant `source: "payment:manual"` + audit `payment.verify`.
+- Aturan nominal: lolos bila nominal diterima >= tagihan (lebih boleh, kurang ditolak); voucher diskon dihanguskan atomik saat verifikasi diterima.
+- Kwitansi: unduh berkas HTML sisi klien (tanpa PDF server).
+- Belum diputuskan: gateway otomatis (Midtrans/Xendit/Duitku) — modul `payments` backend disiapkan untuk webhook kelak.

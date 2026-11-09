@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { goto, preloadCode } from '$app/navigation';
+	import { page } from '$app/state';
 	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import { uniraLogo } from '$lib/assets/logo';
@@ -48,6 +49,17 @@
 
 	const account = $derived(PORTALS.find((a) => a.role === activeTab)!);
 	const style = $derived(TAB_STYLE[activeTab]);
+
+	/**
+	 * Tujuan kembali pasca-login (mis. dari halaman setup patungan).
+	 * Dibatasi ke path /patungan/* agar tidak bisa dipakai open-redirect.
+	 */
+	const returnTo = $derived.by(() => {
+		const raw = page.url.searchParams.get('returnTo');
+		if (!raw || !raw.startsWith('/patungan/')) return null;
+		if (raw.startsWith('//') || raw.includes('://') || raw.includes('\\')) return null;
+		return raw;
+	});
 
 	function togglePassword() {
 		showPassword = !showPassword;
@@ -118,7 +130,8 @@
 				isLoading = false;
 				return;
 			}
-			await goto(account.home);
+			// Bila datang dengan ?returnTo= yang valid, kembali ke sana.
+			await goto(returnTo ?? account.home);
 		} catch {
 			isLoading = false;
 		}
@@ -132,7 +145,7 @@
 		if (!loadSession() || !getAccessToken()) return;
 		(void (async () => {
 			const res = await verifySession();
-			if (!cancelled && res.ok) goto(homeFor(res.session.role));
+			if (!cancelled && res.ok) goto(returnTo ?? homeFor(res.session.role));
 		})());
 		return () => {
 			cancelled = true;
@@ -172,16 +185,17 @@
 			<Logo size="xl" showText={true} textSize="xl" dark={true} />
 
 			<div class="flex min-h-0 flex-col justify-center py-4">
+				<h1 class="sr-only">Masuk ARISTOTELES — Portal Akademik Terpadu</h1>
 				<div
 					class="mb-4 inline-flex w-fit items-center gap-2 rounded-full border border-white/10 bg-white/10 px-4 py-1.5 text-xs font-semibold text-cyan-300 backdrop-blur-sm"
 				>
 					<i class="fa-solid fa-shield-halved" aria-hidden="true"></i> Portal Akademik Terpadu
 				</div>
 
-				<h2 class="mb-3 text-3xl leading-tight font-bold text-white xl:text-4xl">
+				<p class="mb-3 text-3xl leading-tight font-bold text-white xl:text-4xl" aria-hidden="true">
 					Satu Gerbang,<br />
 					<span class="text-cyan-400">Tiga Portal Peran</span>
-				</h2>
+				</p>
 
 				<p class="mb-6 max-w-md text-sm leading-relaxed text-blue-100 xl:text-base">
 					Pilih portal sesuai peranmu — Student belajar & sertifikasi, Teacher mengajar &
@@ -217,19 +231,20 @@
 				</div>
 			</div>
 
-			<div class="grid grid-cols-3 gap-6 border-t border-white/10 pt-5">
+			<div class="grid grid-cols-3 gap-6 border-t border-white/10 pt-5" aria-label="Sorotan platform (angka ilustrasi)">
 				<div>
-					<div class="text-2xl font-bold text-white">45.000+</div>
+					<div class="text-2xl font-bold text-white" aria-hidden="true">45.000+</div>
 					<div class="text-xs text-blue-200">Mahasiswa</div>
 				</div>
 				<div>
-					<div class="text-2xl font-bold text-white">120+</div>
+					<div class="text-2xl font-bold text-white" aria-hidden="true">120+</div>
 					<div class="text-xs text-blue-200">Modul</div>
 				</div>
 				<div>
-					<div class="text-2xl font-bold text-white">80+</div>
+					<div class="text-2xl font-bold text-white" aria-hidden="true">80+</div>
 					<div class="text-xs text-blue-200">Mitra Industri</div>
 				</div>
+				<p class="col-span-3 text-[11px] text-blue-300/80">* Angka ilustrasi tampilan, bukan data resmi.</p>
 			</div>
 		</div>
 	</div>
@@ -337,7 +352,8 @@
 							/>
 							<button
 								type="button"
-								aria-label="Tampilkan atau sembunyikan kata sandi"
+								aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi'}
+								aria-pressed={showPassword}
 								onclick={togglePassword}
 								class="absolute inset-y-0 right-0 flex items-center pr-4 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-blue-600"
 							>

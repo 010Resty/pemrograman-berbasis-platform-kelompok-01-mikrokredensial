@@ -4,8 +4,10 @@ import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svel
 /**
  * Penukaran voucher akses kursus (K-03: 1 akun + 1 kursus, 1x pakai,
  * validasi 4 cocok di backend, anti-race).
- * POST /api/v1/vouchers/redeem { code, courseId } → 201 `{status, source, ...}`.
- * Gagal (kode salah/kursus salah/sudah dipakai/dinonaktifkan/2 request
+ * POST /api/v1/vouchers/redeem { code, courseId? } → 201 `{status, source, ...}`.
+ * Kursus tujuan diambil dari voucher itu sendiri; `courseId` opsional hanya
+ * untuk kompatibilitas (diisi beda → COURSE_MISMATCH).
+ * Gagal (kode salah/sudah dipakai/dinonaktifkan/2 request
  * bersamaan) dilempar sebagai error dengan pesan backend — UI wajib
  * menampilkannya jujur + tombol coba lagi, tanpa sukses palsu.
  */
@@ -16,11 +18,11 @@ export interface RedeemResult {
 	reactivated?: boolean;
 }
 
-export async function redeemVoucher(code: string, courseId: number): Promise<RedeemResult> {
+export async function redeemVoucher(code: string, courseId?: number): Promise<RedeemResult> {
 	try {
 		return await apiRequest<RedeemResult>('/vouchers/redeem', {
 			method: 'POST',
-			body: { code: code.trim().toUpperCase(), courseId },
+			body: courseId === undefined ? { code: code.trim().toUpperCase() } : { code: code.trim().toUpperCase(), courseId },
 			token: getAccessToken()
 		});
 	} catch (e) {
@@ -35,7 +37,7 @@ export async function redeemVoucher(code: string, courseId: number): Promise<Red
 export type BackendVoucherStatus = 'available' | 'assigned' | 'redeemed' | 'expired' | 'revoked';
 
 /** Jenis versi server (huruf kecil). */
-export type BackendVoucherKind = 'personal' | 'umum';
+export type BackendVoucherKind = 'personal' | 'umum' | 'diskon';
 
 export interface BackendVoucher {
 	code: string;
@@ -49,6 +51,9 @@ export interface BackendVoucher {
 	assignedEmail: string | null;
 	expiresAt: string | null;
 	status: BackendVoucherStatus;
+	/** Hanya terisi untuk jenis diskon (K-03 opsi A). */
+	discountType?: 'percent' | 'nominal' | null;
+	discountValue?: number | null;
 }
 
 export interface CreateVoucherResult {
@@ -76,7 +81,7 @@ export interface VoucherDetail extends BackendVoucher {
 
 export interface VoucherListParams {
 	courseId?: number;
-	status?: BackendVoucherStatus;
+	status?: BackendVoucherStatus | 'active';
 	kind?: BackendVoucherKind;
 	q?: string;
 	limit?: number;
@@ -105,7 +110,27 @@ export function fetchVouchers(params: VoucherListParams = {}): Promise<{ items: 
 	return req<{ items: BackendVoucher[]; total: number }>(`/admin/vouchers${qs ? `?${qs}` : ''}`);
 }
 
-/** Buat voucher (POST /api/v1/admin/vouchers). Personal wajib penerima. */
+/** Hitungan voucher per grup status dari server (untuk kartu statistik skala penuh). */
+export async function fetchVoucherCounts(base: Omit<VoucherListParams, 'status' | 'limit' | 'page'> = {}): Promise<{
+	total: number;
+	aktif: number;
+	habis: number;
+	kedaluarsa: number;
+	batal: number;
+}> {
+	const count = (status?: VoucherListParams['status']) =>
+		fetchVouchers({ ...base, status, limit: 1 }).then((r) => r.total);
+	const [total, aktif, habis, kedaluarsa, batal] = await Promise.all([
+		count(undefined),
+		count('active'),
+		count('redeemed'),
+		count('expired'),
+		count('revoked')
+	]);
+	return { total, aktif, habis, kedaluarsa, batal };
+}
+
+/** Buat voucher (POST /api/v1/admin/vouchers). Personal wajib penerima; diskon wajib jenis+nilai. */
 export function createBackendVoucher(input: {
 	code?: string;
 	courseId: number;
@@ -114,6 +139,8 @@ export function createBackendVoucher(input: {
 	assignedUserId?: number;
 	assignedEmail?: string;
 	expiresAt?: string;
+	discountType?: 'percent' | 'nominal';
+	discountValue?: number;
 }): Promise<CreateVoucherResult> {
 	return req<CreateVoucherResult>('/admin/vouchers', { method: 'POST', body: input });
 }

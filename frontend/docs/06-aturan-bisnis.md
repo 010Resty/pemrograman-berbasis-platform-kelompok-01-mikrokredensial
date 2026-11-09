@@ -23,6 +23,7 @@
 ## K-03 Voucher [Keputusan pengguna]
 
 - Resmi, hanya admin buat/kelola, 1 voucher = 1 akun + 1 kursus, tukar kode oleh peserta, validasi 4 cocok (akun, kursus, kode, status) di backend, 1x pakai, status `Aktif/Digunakan/Dinonaktifkan`, tetap tersedia sampai dipakai/dinonaktifkan, catat penerima+kursus+waktu+status, anti-race tanpa akses ganda. Masa berlaku opsional.
+- Jenis `diskon` (opsi A, disepakati pemilik produk): potongan harga persen (1–100) atau nominal rupiah, dipakai saat bayar, hangus saat pembayaran disetujui. Jenis `personal`/`umum` tetap akses penuh dan TIDAK dapat ditukar di halaman pembayaran.
 - Gap [Terverifikasi]: `VALID_CODES` + `ownedCourses` lokal belum validasi apa pun.
 
 ## K-04 Materi [Keputusan pengguna + perilaku saat ini sesuai]

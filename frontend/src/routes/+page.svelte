@@ -1,11 +1,9 @@
 <script lang="ts">
 	import '../app.css';
 	import { browser } from '$app/environment';
-	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import PublicHeader from '$lib/components/public/PublicHeader.svelte';
 	import PublicFooter from '$lib/components/public/PublicFooter.svelte';
-	import PatunganSection from '$lib/components/public/PatunganSection.svelte';
 	import SeoHead from '$lib/components/SeoHead.svelte';
 	import dropdownBg from '$lib/assets/dropdown-background.jpg';
 	import { canonicalPath, getSiteUrl } from '$lib/seo/site';
@@ -15,35 +13,22 @@
 		fetchPublicCourseList,
 		type BackendCourse
 	} from '$lib/api/courses';
-	import {
-		PROMO_SPOTLIGHT_MOCK,
-		isValidMockPromo,
-		type PromoSpotlightMock
-	} from '$lib/data/promo-spotlight.mock';
 
 	const COVER_FALLBACK =
 		'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80';
 
-	/* ---------- Sorotan beranda-promo: promo (mock DEV), unggulan, kelas gratis ---------- */
+	/* ---------- Sorotan beranda (hero + keunggulan + promosi instruktur) ---------- */
 	/** Data awal dari server load (SSR) agar crawler menerima konten, bukan skeleton. */
-	let { data }: { data: { origin: string; spot: BackendCourse[]; gratis: BackendCourse[] } } =
-		$props();
+	let { data }: { data: { origin: string; spot: BackendCourse[] } } = $props();
 	// svelte-ignore state_referenced_locally -- seed SSR: snapshot awal, update via fetch browser
 	let spotCourses = $state<BackendCourse[]>(data.spot);
-	// svelte-ignore state_referenced_locally -- seed SSR: snapshot awal, update via fetch browser
-	let gratisCourses = $state<BackendCourse[]>(data.gratis);
 	let instructorNames = $state(new Map<number, string>());
 	// svelte-ignore state_referenced_locally -- seed SSR: snapshot awal, update via fetch browser
-	let spotLoading = $state(data.spot.length === 0 && data.gratis.length === 0);
+	let spotLoading = $state(data.spot.length === 0);
 	let spotError = $state('');
 	let spotSeq = 0;
 
-	/** Mock promo hanya aktif di DEV dengan ?mock=promo. Produksi selalu empty state. */
-	const usePromoMock = $derived(
-		browser && import.meta.env.DEV && page.url.searchParams.get('mock') === 'promo'
-	);
-
-	async function ensureInstructorNames(list: BackendCourse[]): Promise<void> {
+	async function ensureInstructorNames(list: Array<{ id: number }>): Promise<void> {
 		const missing = list.filter((c) => !instructorNames.has(c.id));
 		if (missing.length === 0) return;
 		const entries = await Promise.all(
@@ -66,14 +51,9 @@
 		spotLoading = true;
 		spotError = '';
 		try {
-			const [spot, gratis] = await Promise.all([
-				fetchPublicCourseList({ status: 'published', limit: 12 }),
-				fetchPublicCourseList({ status: 'published', limit: 50 })
-			]);
+			spotCourses = await fetchPublicCourseList({ status: 'published', limit: 12 });
 			if (my !== spotSeq) return;
-			spotCourses = spot;
-			gratisCourses = gratis.filter((c) => (c.priceNominal ?? -1) === 0).slice(0, 3);
-			void ensureInstructorNames([...spot.slice(0, 9), ...gratisCourses]);
+			void ensureInstructorNames(spotCourses.slice(0, 9));
 		} catch (e) {
 			if (my !== spotSeq) return;
 			spotError = e instanceof Error ? e.message : 'Gagal memuat sorotan pelatihan.';
@@ -86,57 +66,12 @@
 		if (!browser) return;
 		// Data server tersedia → cukup lengkapi nama pengampu progresif.
 		// Kosong (backend mati saat SSR) → fetch penuh dari browser seperti semula.
-		if (spotCourses.length > 0 || gratisCourses.length > 0) {
-			void ensureInstructorNames([...spotCourses.slice(0, 9), ...gratisCourses]);
-			return;
+		if (spotCourses.length > 0) {
+			void ensureInstructorNames([...spotCourses.slice(0, 9)]);
+		} else {
+			void loadSorotan();
 		}
-		void loadSorotan();
 	});
-
-	interface PromoCard {
-		course: BackendCourse;
-		mock: PromoSpotlightMock;
-	}
-
-	/**
-	 * Kartu promo: gabungkan entri mock dengan kursus nyata berdasarkan courseId.
-	 * Bila tidak ada yang cocok, pakai kursus terbit pertama sebagai pasangan
-	 * (tetap dalam mode pratinjau — JANGAN tampilkan di produksi).
-	 */
-	const promoCards = $derived.by((): PromoCard[] => {
-		if (!usePromoMock) return [];
-		const valid = PROMO_SPOTLIGHT_MOCK.filter(isValidMockPromo);
-		const used = new Set<number>();
-		const out: PromoCard[] = [];
-		for (const m of valid) {
-			const c = spotCourses.find((x) => x.id === m.courseId);
-			if (c && !used.has(c.id)) {
-				used.add(c.id);
-				out.push({ course: c, mock: m });
-			}
-		}
-		for (const m of valid) {
-			if (out.length >= 3) break;
-			const c = spotCourses.find((x) => !used.has(x.id));
-			if (!c) break;
-			used.add(c.id);
-			out.push({ course: c, mock: m });
-		}
-		return out.slice(0, 3);
-	});
-
-	/**
-	 * Kandidat patungan: kursus berbayar dari sorotan (nominal > 0).
-	 * Kelas gratis dikecualikan — tidak ada yang perlu dibagi.
-	 */
-	const patunganCourses = $derived(spotCourses.filter((c) => (c.priceNominal ?? 0) > 0));
-
-	/**
-	 * Pilihan unggulan: 3 kursus terbit terbaru (API default sort newest).
-	 * Heuristik sementara — ganti dengan flag kurasi backend (mis. isFeatured)
-	 * bila tersedia, tanpa mengubah markup di bawah.
-	 */
-	const unggulanCourses = $derived(spotCourses.slice(0, 3));
 
 	/** Sorotan utama hero: kursus terbit pertama dari katalog nyata. */
 	const featuredCourse = $derived(spotCourses[0] ?? null);
@@ -161,29 +96,6 @@
 			icon: 'fa-award',
 			title: 'Sertifikat bersyarat',
 			desc: 'Sertifikat per modul diterbitkan setelah seluruh persyaratan wajib terpenuhi dan terverifikasi.'
-		}
-	];
-
-	const langkahBelajar = [
-		{
-			n: '01',
-			title: 'Pilih kursus',
-			desc: 'Telusuri katalog dan pilih program yang sesuai dengan tujuan kariermu.'
-		},
-		{
-			n: '02',
-			title: 'Pelajari materi bertahap',
-			desc: 'Selesaikan materi modul demi modul mengikuti alur yang sudah disusun.'
-		},
-		{
-			n: '03',
-			title: 'Kerjakan evaluasi',
-			desc: 'Ikuti kuis dan kumpulkan tugas yang tersedia untuk mengukur pemahamanmu.'
-		},
-		{
-			n: '04',
-			title: 'Dapatkan sertifikat',
-			desc: 'Sertifikat diterbitkan jika seluruh persyaratan telah dipenuhi.'
 		}
 	];
 
@@ -381,11 +293,23 @@
 					</div>
 				{:else}
 					<div class="rounded-[1.75rem] border border-dashed border-white/25 bg-white/5 p-12 text-center backdrop-blur">
-						<p class="font-heading text-sm font-bold text-white">Pratinjau katalog belum tersedia.</p>
-						<p class="mx-auto mt-1 max-w-sm text-sm text-slate-300">Katalog akan tampil di sini setelah data pelatihan berhasil dimuat.</p>
-						<a href={resolve('/pelatihan')} class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-full bg-white px-5 font-heading text-sm font-bold text-abyss transition-all duration-200 hover:-translate-y-0.5">
-							Buka Katalog <i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
-						</a>
+						{#if spotError}
+							<p class="font-heading text-sm font-bold text-white">Pratinjau katalog gagal dimuat.</p>
+							<p class="mx-auto mt-1 max-w-sm text-sm text-slate-300">{spotError}</p>
+							<button
+								type="button"
+								onclick={() => void loadSorotan()}
+								class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-full bg-white px-5 font-heading text-sm font-bold text-abyss transition-all duration-200 hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
+							>
+								<i class="fa-solid fa-rotate-right text-xs" aria-hidden="true"></i> Coba lagi
+							</button>
+						{:else}
+							<p class="font-heading text-sm font-bold text-white">Pratinjau katalog belum tersedia.</p>
+							<p class="mx-auto mt-1 max-w-sm text-sm text-slate-300">Katalog akan tampil di sini setelah data pelatihan berhasil dimuat.</p>
+							<a href={resolve('/pelatihan')} class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-full bg-white px-5 font-heading text-sm font-bold text-abyss transition-all duration-200 hover:-translate-y-0.5">
+								Buka Katalog <i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
+							</a>
+						{/if}
 					</div>
 				{/if}
 			</div>
@@ -417,249 +341,6 @@
 			</ul>
 		</div>
 	</section>
-
-	<!-- Promo -->
-	<section id="promo" aria-labelledby="promo-heading" class="scroll-mt-20 bg-white">
-		<div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
-			<div use:reveal class="flex flex-wrap items-end justify-between gap-6">
-				<div class="max-w-2xl">
-					<p class="flex items-center gap-3 font-heading text-xs font-bold tracking-[0.18em] text-red-600 uppercase">
-						<span class="h-px w-8 bg-red-600" aria-hidden="true"></span>
-						<i class="fa-solid fa-tags" aria-hidden="true"></i>
-						Promo Pelatihan
-					</p>
-					<h2 id="promo-heading" class="mt-3 font-heading text-3xl font-extrabold tracking-tight text-abyss sm:text-4xl">
-						Penawaran <span class="text-red-600">harga spesial</span>
-					</h2>
-					<p class="mt-2 max-w-xl text-sm leading-relaxed text-slate-600 sm:text-base">
-						Kelas pilihan dengan harga khusus dalam periode terbatas. Kuota peserta berlaku
-						selama ketersediaan.
-					</p>
-				</div>
-				<a href={resolve('/pelatihan')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-royal transition-colors duration-200 hover:text-royal-hover">
-					Lihat semua pelatihan <i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
-				</a>
-			</div>
-			{#if usePromoMock}
-				<p role="note" class="mt-6 max-w-2xl rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-800">Mode Pratinjau — contoh promo untuk pengembangan, bukan penawaran nyata.</p>
-			{/if}
-			{#if spotLoading}
-				<div class="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3" aria-label="Memuat promo pelatihan">
-					{#each [1, 2, 3] as i (i)}
-						<div class="overflow-hidden rounded-2xl border border-mist bg-white">
-							<div class="h-48 animate-pulse bg-ice"></div>
-							<div class="space-y-2 p-6">
-								<div class="h-4 w-3/4 animate-pulse rounded bg-ice"></div>
-								<div class="h-3 w-1/2 animate-pulse rounded bg-ice"></div>
-							</div>
-						</div>
-					{/each}
-				</div>
-			{:else if spotError}
-				<div role="alert" class="mt-8 rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
-					<p class="font-heading text-sm font-bold text-red-700">Promo belum dapat dimuat</p>
-					<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{spotError}</p>
-					<button type="button" onclick={() => void loadSorotan()} class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-5 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-royal">
-						<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
-					</button>
-				</div>
-			{:else if promoCards.length === 0}
-				<div class="mt-8 rounded-2xl border border-dashed border-mist bg-white p-12 text-center">
-					<p class="font-heading text-sm font-bold text-abyss">Belum ada promo saat ini.</p>
-					<p class="mx-auto mt-1 max-w-md text-sm text-slate-500">Jelajahi katalog untuk melihat seluruh pelatihan yang tersedia.</p>
-					<div class="mt-5">
-						<a href={resolve('/pelatihan')} class="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-6 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-royal">
-							Lihat Katalog <i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
-						</a>
-					</div>
-				</div>
-			{:else}
-				<div class="mt-8 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
-					{#each promoCards as { course, mock }, i (course.id)}
-						<article id="promo-{course.id}" use:reveal={{ delay: i * 80 }} class="group relative flex scroll-mt-28 flex-col overflow-hidden rounded-2xl border border-mist bg-white transition-all duration-200 hover:-translate-y-1 hover:border-royal/40 hover:shadow-xl hover:shadow-slate-900/10">
-							<div class="relative overflow-hidden" aria-hidden="true">
-								<img src={course.image || COVER_FALLBACK} alt={`Pelatihan ${course.title} — promo harga spesial`} loading="lazy" class="h-48 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
-								<span class="absolute top-3 left-3 rounded-lg bg-abyss px-3 py-1 font-heading text-xs font-bold text-white">-{mock.discountPercent}%</span>
-							</div>
-							<div class="flex flex-1 flex-col justify-between space-y-4 p-6">
-								<div>
-									<div class="flex items-center justify-between gap-3">
-										<p class="font-heading text-[11px] font-bold tracking-[0.14em] text-royal uppercase">{course.category ?? 'Umum'}</p>
-										<span class="rounded-md bg-ice px-2 py-0.5 text-[11px] font-semibold text-abyss">{mock.badgeLabel}</span>
-									</div>
-									<h3 class="mt-2 font-heading text-base leading-snug font-bold text-abyss">
-										<a href={resolve(`/modules/${course.id}`)} aria-label={`Lihat info singkat: ${course.title}`} class="rounded transition-colors duration-200 group-hover:text-royal focus-visible:outline-2 focus-visible:outline-royal after:absolute after:inset-0">{course.title}</a>
-									</h3>
-									<p class="mt-1 text-xs text-slate-500">Pengampu: {instructorNames.get(course.id) ?? '…'}</p>
-								</div>
-								<div class="border-t border-mist pt-4">
-									<div class="flex items-baseline gap-2">
-										<span class="text-sm text-slate-400 line-through">{mock.normalPriceLabel}</span>
-										<span class="font-heading text-lg font-extrabold text-abyss">{course.priceLabel}</span>
-									</div>
-									<a href={resolve(`/modules/${course.id}`)} class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-abyss px-4 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal focus-visible:outline-2 focus-visible:outline-royal">
-										Lihat Pelatihan <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
-									</a>
-								</div>
-							</div>
-						</article>
-					{/each}
-				</div>
-			{/if}
-		</div>
-	</section>
-
-	<!-- Katalog unggulan -->
-	<section id="unggulan" aria-labelledby="unggulan-heading" class="scroll-mt-20 border-y border-mist bg-ice/60">
-		<div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
-			<div use:reveal class="flex flex-wrap items-end justify-between gap-6">
-				<div class="max-w-2xl">
-					<p class="flex items-center gap-3 font-heading text-xs font-bold tracking-[0.18em] text-royal uppercase">
-						<span class="h-px w-8 bg-royal" aria-hidden="true"></span>
-						Pilihan Unggulan
-					</p>
-					<h2 id="unggulan-heading" class="mt-3 font-heading text-3xl font-extrabold tracking-tight text-abyss sm:text-4xl">
-						Mulai dari pelatihan terbit terbaru
-					</h2>
-					<p class="mt-2 max-w-xl text-sm leading-relaxed text-slate-600 sm:text-base">
-						Sorotan pelatihan terbit terbaru untuk memulai perjalanan belajarmu.
-					</p>
-				</div>
-				<a href={resolve('/modules')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-royal transition-colors duration-200 hover:text-royal-hover">
-					Buka katalog lengkap <i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
-				</a>
-			</div>
-			{#if spotLoading}
-				<div class="mt-8 grid grid-cols-1 gap-5 md:grid-cols-3" aria-label="Memuat pelatihan unggulan">
-					{#each [1, 2, 3] as i (i)}
-						<div class="overflow-hidden rounded-2xl border border-mist bg-white">
-							<div class="h-44 animate-pulse bg-ice"></div>
-							<div class="space-y-2 p-6">
-								<div class="h-4 w-3/4 animate-pulse rounded bg-ice"></div>
-								<div class="h-3 w-1/2 animate-pulse rounded bg-ice"></div>
-							</div>
-						</div>
-					{/each}
-				</div>
-			{:else if spotError}
-				<div role="alert" class="mt-8 rounded-2xl border border-red-200 bg-red-50 p-8 text-center">
-					<p class="font-heading text-sm font-bold text-red-700">Pelatihan unggulan belum dapat dimuat</p>
-					<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{spotError}</p>
-					<button type="button" onclick={() => void loadSorotan()} class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-5 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-royal">
-						<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
-					</button>
-				</div>
-			{:else if unggulanCourses.length === 0}
-				<div class="mt-8 rounded-2xl border border-dashed border-mist bg-white p-12 text-center">
-					<p class="font-heading text-sm font-bold text-abyss">Belum ada sorotan pelatihan.</p>
-				</div>
-			{:else}
-				<div class="mt-8 grid grid-cols-1 gap-5 md:grid-cols-3">
-					{#each unggulanCourses as course, i (course.id)}
-						<article use:reveal={{ delay: i * 80 }} class="group relative flex flex-col overflow-hidden rounded-2xl border border-mist bg-white transition-all duration-200 hover:-translate-y-1 hover:border-royal/40 hover:shadow-xl hover:shadow-slate-900/10">
-							<div class="relative overflow-hidden" aria-hidden="true">
-								<img src={course.image || COVER_FALLBACK} alt={`Pelatihan unggulan ${course.title}`} loading="lazy" class="h-44 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
-							</div>
-							<div class="flex flex-1 flex-col justify-between space-y-4 p-6">
-								<div>
-									<p class="font-heading text-[11px] font-bold tracking-[0.14em] text-royal uppercase">{course.category ?? 'Umum'} · {course.level}</p>
-									<h3 class="mt-2 font-heading text-base leading-snug font-bold text-abyss">
-										<a href={resolve(`/modules/${course.id}`)} aria-label={`Lihat detail: ${course.title}`} class="rounded transition-colors duration-200 group-hover:text-royal focus-visible:outline-2 focus-visible:outline-royal after:absolute after:inset-0">{course.title}</a>
-									</h3>
-									{#if course.description}
-										<p class="mt-1.5 line-clamp-2 text-sm leading-relaxed text-slate-600">{course.description}</p>
-									{/if}
-									<p class="mt-2 text-xs text-slate-500">Pengampu: {instructorNames.get(course.id) ?? '…'}</p>
-								</div>
-								<div class="flex items-center justify-between gap-3 border-t border-mist pt-4">
-									<span class="font-heading font-extrabold text-abyss">{course.priceLabel}</span>
-									<a href={resolve(`/modules/${course.id}`)} aria-label={`Lihat detail: ${course.title}`} class="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-mist px-4 py-2 font-heading text-xs font-bold text-abyss transition-colors duration-200 hover:border-royal hover:text-royal focus-visible:outline-2 focus-visible:outline-royal">
-										Detail <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
-									</a>
-								</div>
-							</div>
-						</article>
-					{/each}
-				</div>
-			{/if}
-		</div>
-	</section>
-
-	<!-- Promo Patungan: satu pelatihan, bayar dibagi (simulasi lokal) -->
-	<PatunganSection courses={patunganCourses} loading={spotLoading} />
-
-	<!-- Cara belajar -->
-	<section id="cara-belajar" aria-labelledby="cara-belajar-heading" class="scroll-mt-20 bg-white">
-		<div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
-			<div use:reveal class="max-w-2xl">
-				<p class="flex items-center gap-3 font-heading text-xs font-bold tracking-[0.18em] text-royal uppercase">
-					<span class="h-px w-8 bg-royal" aria-hidden="true"></span>
-					Cara Belajar
-				</p>
-				<h2 id="cara-belajar-heading" class="mt-3 font-heading text-3xl font-extrabold tracking-tight text-abyss sm:text-4xl">
-					Empat langkah menuju sertifikat
-				</h2>
-			</div>
-			<ol class="mt-10 grid grid-cols-1 gap-x-8 gap-y-8 sm:grid-cols-2 lg:grid-cols-4">
-				{#each langkahBelajar as s, i (s.n)}
-					<li use:reveal={{ delay: i * 70 }} class="border-t-2 border-mist pt-6 transition-colors duration-200 hover:border-royal">
-						<p class="font-heading text-sm font-bold tracking-[0.18em] text-royal">{s.n}</p>
-						<h3 class="mt-2 font-heading text-base font-bold text-abyss">{s.title}</h3>
-						<p class="mt-1.5 text-sm leading-relaxed text-slate-600">{s.desc}</p>
-					</li>
-				{/each}
-			</ol>
-			<p class="mt-8 max-w-2xl text-xs leading-relaxed text-slate-500">
-				Sertifikat hanya diterbitkan setelah seluruh syarat terpenuhi dan terverifikasi —
-				pendaftaran atau pembayaran saja tidak otomatis menerbitkan sertifikat.
-			</p>
-		</div>
-	</section>
-
-	{#if !spotLoading && !spotError && gratisCourses.length > 0}
-		<section id="gratis" aria-labelledby="gratis-heading" class="scroll-mt-20 border-t border-mist bg-ice/60">
-			<div class="mx-auto max-w-7xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
-				<div use:reveal class="max-w-2xl">
-					<p class="flex items-center gap-3 font-heading text-xs font-bold tracking-[0.18em] text-teal uppercase">
-						<span class="h-px w-8 bg-teal" aria-hidden="true"></span>
-						Mulai Gratis
-					</p>
-					<h2 id="gratis-heading" class="mt-3 font-heading text-3xl font-extrabold tracking-tight text-abyss sm:text-4xl">
-						Mulai belajar tanpa biaya
-					</h2>
-					<p class="mt-2 max-w-xl text-sm leading-relaxed text-slate-600 sm:text-base">
-						Kelas tanpa biaya untuk mulai belajar hari ini. Pendaftaran akun mungkin diperlukan
-						untuk melacak progres dan menerbitkan sertifikat.
-					</p>
-				</div>
-				<div class="mt-8 grid grid-cols-1 gap-5 md:grid-cols-3">
-					{#each gratisCourses as course, i (course.id)}
-						<article use:reveal={{ delay: i * 80 }} class="group relative flex flex-col overflow-hidden rounded-2xl border border-mist bg-white transition-all duration-200 hover:-translate-y-1 hover:border-teal/50 hover:shadow-xl hover:shadow-slate-900/10">
-							<div class="relative overflow-hidden" aria-hidden="true">
-								<img src={course.image || COVER_FALLBACK} alt={`Kelas gratis ${course.title} — mulai belajar tanpa biaya`} loading="lazy" class="h-40 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
-								<span class="absolute top-3 left-3 rounded-lg bg-teal px-3 py-1 font-heading text-[11px] font-bold text-white uppercase">Gratis</span>
-							</div>
-							<div class="flex flex-1 flex-col justify-between space-y-4 p-6">
-								<div>
-									<p class="font-heading text-[11px] font-bold tracking-[0.14em] text-royal uppercase">{course.category ?? 'Umum'}</p>
-									<h3 class="mt-2 font-heading text-base leading-snug font-bold text-abyss">
-										<a href={resolve(`/modules/${course.id}`)} aria-label={`Lihat info singkat: ${course.title}`} class="rounded transition-colors duration-200 group-hover:text-royal focus-visible:outline-2 focus-visible:outline-royal after:absolute after:inset-0">{course.title}</a>
-									</h3>
-									<p class="mt-1 text-xs text-slate-500">Pengampu: {instructorNames.get(course.id) ?? '…'}</p>
-								</div>
-								<div class="flex items-center justify-between gap-3 border-t border-mist pt-4">
-									<span class="font-heading font-extrabold text-teal">{course.priceLabel}</span>
-									<a href={resolve(`/modules/${course.id}`)} aria-label={`Mulai belajar: ${course.title}`} class="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-abyss px-4 py-2 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal focus-visible:outline-2 focus-visible:outline-royal">
-										Mulai <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
-									</a>
-								</div>
-							</div>
-						</article>
-					{/each}
-				</div>
-			</div>
-		</section>
-	{/if}
 
 	<!-- Promosi instruktur -->
 	<section aria-labelledby="instruktur-heading" class="relative overflow-hidden border-t border-mist bg-white">

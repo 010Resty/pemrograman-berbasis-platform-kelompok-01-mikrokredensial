@@ -3,13 +3,17 @@
 	import CourseRoadmap from '$lib/components/training/organisms/CourseRoadmap.svelte';
 	import TrainingActionCard from '$lib/components/training/organisms/TrainingActionCard.svelte';
 	import {
+		enrollCourse,
+		fetchCourseAccess,
 		fetchCourseDetail,
 		fetchCourseTree,
 		toCourseView,
-		type BackendCourse
+		type BackendCourse,
+		type CourseAccessState
 	} from '$lib/api/courses';
 	import type { CourseModule } from '$lib/data/courses';
-	import { setServerCourseFlags } from '$lib/stores/enrollment.svelte';
+	import { setServerCourseFlags, syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 	import type { CourseMeta } from '$lib/data/course-meta';
 
 	/**
@@ -17,8 +21,9 @@
 	 * - Info + harga + periode + pengampu: GET /courses/:id (draft → 404 = tidak ditemukan).
 	 * - Struktur kurikulum: endpoint modul/sub/materi (isi materi gated, judul dipakai untuk peta).
 	 * - Rating/ulasan/jumlah peserta tidak ada endpointnya → tidak ditampilkan.
-	 * - Tombol daftar/bayar mempertahankan perilaku lokal (localStorage + halaman pembayaran);
-	 *   bendera server (berbayar/upcoming) didaftarkan agar deteksinya memakai data asli,
+	 * - Tombol daftar kursus gratis memanggil POST /courses/:id/enroll (server);
+	 *   kursus berbayar lewat halaman pembayaran; bendera server
+	 *   (berbayar/upcoming) didaftarkan agar deteksinya memakai data asli,
 	 *   bukan meta contoh (tanpa ini course backend selalu dianggap gratis + berjalan).
 	 */
 
@@ -44,16 +49,25 @@
 	let notFound = $state(false);
 	let started = false;
 	let loadSeq = 0;
+	let access = $state<CourseAccessState | null>(null);
+	let enrolling = $state(false);
+	let enrollError = $state('');
 
 	async function load(id: number): Promise<void> {
 		const my = ++loadSeq;
 		loading = true;
 		loadError = '';
 		notFound = false;
+		access = null;
+		enrollError = '';
 		try {
-			const d = await fetchCourseDetail(id);
+			const [d, a] = await Promise.all([
+				fetchCourseDetail(id),
+				mode === 'user' ? fetchCourseAccess(id).catch(() => null) : Promise.resolve(null)
+			]);
 			if (my !== loadSeq) return;
 			detail = d;
+			access = a;
 			setServerCourseFlags(d.id, {
 				paid: (d.priceNominal ?? 0) > 0,
 				upcoming: d.period === 'upcoming'
@@ -89,6 +103,25 @@
 		}
 		void load(courseId);
 	});
+
+	/** Terdaftar bila server menyatakan punya akses (gratis ikut; berbayar via bayar/voucher/hibah). */
+	const enrolled = $derived(access !== null && (access.hasAccess || access.isManager));
+
+	async function handleEnroll(): Promise<void> {
+		if (enrolling) return;
+		enrolling = true;
+		enrollError = '';
+		try {
+			await enrollCourse(courseId);
+			await syncEnrollmentsFromServer();
+			access = await fetchCourseAccess(courseId).catch(() => access);
+			toast.success('Pendaftaran berhasil. Selamat belajar!');
+		} catch (e) {
+			enrollError = e instanceof Error ? e.message : 'Gagal mendaftar kursus.';
+		} finally {
+			enrolling = false;
+		}
+	}
 
 	const instructorNames = $derived(
 		(detail?.instructors ?? []).map((i) => i.name).join(', ') || '—'
@@ -259,6 +292,14 @@
 			<CourseRoadmap modules={tree} courseId={c.id} preview />
 		</div>
 
-		<TrainingActionCard course={previewCourse} meta={previewMeta} {mode} />
+		<TrainingActionCard
+			course={previewCourse}
+			meta={previewMeta}
+			{mode}
+			{enrolled}
+			{enrolling}
+			{enrollError}
+			onEnroll={() => void handleEnroll()}
+		 />
 	</div>
 {/if}

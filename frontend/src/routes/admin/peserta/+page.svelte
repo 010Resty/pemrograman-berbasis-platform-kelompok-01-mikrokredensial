@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { page as routePage } from '$app/state';
+	import { resolve } from '$app/paths';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { fetchAdminUsers, type AdminUser } from '$lib/api/admin';
 
@@ -14,7 +17,8 @@
 
 	type Status = 'all' | 'Aktif' | 'Nonaktif';
 
-	let query = $state('');
+	// Kata kunci awal boleh datang dari search header portal (?q=…).
+	let query = $state(routePage.url.searchParams.get('q') ?? '');
 	let debouncedQuery = $state('');
 	let filter = $state<Status>('all');
 	let page = $state(1);
@@ -108,20 +112,21 @@
 	<meta name="description" content="Kelola peserta platform Aristoteles." />
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-		<div>
-			<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">Admin · Peserta</p>
-			<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Peserta</h1>
-			<p class="mt-1 text-sm text-slate-500" role="status">
-				{total} peserta terdaftar
-			</p>
-			<p class="mt-1 text-xs text-slate-400">
-				Peserta mendaftar mandiri. Kelola instruktur di menu
-				<a href="/admin/instrukturs" class="font-semibold text-blue-600 hover:text-blue-700">Instruktur</a>.
-			</p>
-		</div>
-	</div>
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Admin · Peserta"
+		title="Peserta"
+		description={`${total} peserta terdaftar. Peserta mendaftar mandiri — kelola instruktur di menu Instruktur.`}
+	>
+		{#snippet actions()}
+			<a
+				href={resolve('/admin/instrukturs')}
+				class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+			>
+				<i class="fa-solid fa-chalkboard-user" aria-hidden="true"></i> Kelola Instruktur
+			</a>
+		{/snippet}
+	</PageHeader>
 
 	<div class="mb-5 flex flex-col gap-3 lg:flex-row">
 		<div class="relative max-w-md flex-1">
@@ -168,8 +173,28 @@
 		</div>
 	{:else}
 		<div class="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm">
-			<div class="h-1 bg-gradient-to-r from-blue-600 via-sky-500 to-blue-600" aria-hidden="true"></div>
-			<div class="overflow-x-auto">
+			<div class="h-1 bg-blue-600" aria-hidden="true"></div>
+			<ol class="divide-y divide-slate-100 md:hidden" aria-label="Daftar peserta">
+				{#each users as u (u.id)}
+					<li>
+						<a
+							href={resolve(`/admin/peserta/${u.id}`)}
+							class="flex items-center gap-3 px-4 py-3.5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600"
+							aria-label={`Lihat detail ${u.name}`}
+						>
+							<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white" aria-hidden="true">
+								{initials(u.name)}
+							</span>
+							<span class="min-w-0 flex-1">
+								<span class="block truncate font-semibold text-slate-900">{u.name}</span>
+								<span class="block truncate text-xs text-slate-500">{u.email} · {formatDate(u.createdAt)}</span>
+							</span>
+							<span class={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${statusClass(u.isActive)}`}><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{u.isActive ? 'Aktif' : 'Nonaktif'}</span>
+						</a>
+					</li>
+				{/each}
+			</ol>
+			<div class="hidden overflow-x-auto md:block">
 				<table class="w-full min-w-[640px] text-sm">
 					<caption class="sr-only">Daftar peserta platform Aristoteles</caption>
 					<thead class="bg-blue-700 text-white">
@@ -185,7 +210,7 @@
 							<tr class={`transition-colors hover:bg-blue-50/50 ${i % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'}`}>
 								<td class="px-6 py-3.5">
 									<div class="flex items-center gap-3">
-										<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-600 to-sky-500 text-xs font-bold text-white shadow-sm" aria-hidden="true">
+										<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow-sm" aria-hidden="true">
 											{initials(u.name)}
 										</span>
 										<span>

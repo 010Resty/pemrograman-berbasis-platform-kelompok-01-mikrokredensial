@@ -12,7 +12,7 @@
 		type CourseAccessState
 	} from '$lib/api/courses';
 	import type { CourseModule } from '$lib/data/courses';
-	import { getModuleMaterials, isMaterialLocked, isSubModuleLocked } from '$lib/data/courses';
+	import { getModuleMaterials, isMaterialLocked } from '$lib/data/courses';
 	import { fetchMyProgressIds } from '$lib/api/progress';
 	import { apiRequest } from '$lib/api/backend';
 	import { getAccessToken } from '$lib/stores/auth.svelte';
@@ -56,9 +56,9 @@
 	const mobileLinks = [
 		{ href: '/', label: 'Beranda' },
 		{ href: '/modules', label: 'Pelatihan' },
-		{ href: '/#peringkat', label: 'Peringkat' },
-		{ href: '/#tentang', label: 'Tentang' },
-		{ href: '/#verifikasi', label: 'Verifikasi' }
+		{ href: '/peringkat', label: 'Peringkat' },
+		{ href: '/tentang', label: 'Tentang' },
+		{ href: '/verifikasi', label: 'Verifikasi' }
 	];
 
 	async function load(id: number, opts: { soft?: boolean } = {}): Promise<void> {
@@ -223,11 +223,11 @@
 			<Logo size="md" showText={true} textSize="xl" />
 		</a>
 		<nav aria-label="Navigasi utama" class="hidden min-w-0 flex-1 items-center justify-center gap-5 font-semibold text-[13px] text-slate-700 lg:flex xl:gap-7">
-			<a href="/#beranda" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">BERANDA</a>
+			<a href="/" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">BERANDA</a>
 			<a href="/modules" aria-current="page" class="whitespace-nowrap text-blue-600 transition-colors duration-200 ease-smooth hover:text-blue-700">PELATIHAN</a>
-			<a href="/#peringkat" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">PERINGKAT</a>
-			<a href="/#tentang" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">TENTANG</a>
-			<a href="/#verifikasi" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">VERIFIKASI</a>
+			<a href="/peringkat" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">PERINGKAT</a>
+			<a href="/tentang" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">TENTANG</a>
+			<a href="/verifikasi" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">VERIFIKASI</a>
 		</nav>
 		<div class="hidden shrink-0 items-center gap-2.5 sm:flex">
 			<a
@@ -431,7 +431,7 @@
 									{#if modOpen}
 										<ol id={`pv-mod-${mod.id}`} class="space-y-3 border-t border-slate-100 bg-slate-50/50 px-4 py-3">
 											{#each mod.subModules ?? [] as sub, si (sub.id)}
-												{@const sLocked = !canSeeMaterials || isSubModuleLocked(tree, mi, si, (id) => doneIds.has(id))}
+												{@const subMats = sub.materials}
 												<li>
 													{#if !String(sub.id).endsWith('-direct')}
 														<p class="mb-1 flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-slate-500 uppercase">
@@ -441,10 +441,9 @@
 														</p>
 													{/if}
 													<ol class="space-y-1">
-														{#each sub.materials as mat (mat.id)}
-															{@const flatIdx = modFlat.findIndex((f) => f.id === mat.id)}
+														{#each sub.materials as mat, matIdx (mat.id)}
+															{@const locked = !canSeeMaterials || isMaterialLocked(subMats, matIdx, (id) => doneIds.has(id))}
 															{@const matDone = doneIds.has(mat.id)}
-															{@const locked = !canSeeMaterials || sLocked || isMaterialLocked(modFlat, flatIdx, (id) => doneIds.has(id))}
 															<li class={`flex items-center gap-2.5 rounded-xl border bg-white px-3 py-2 ${locked ? 'border-slate-100' : 'border-slate-200'}`}>
 																<span class={`flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold ${matDone ? 'bg-emerald-100 text-emerald-700' : locked ? 'bg-slate-100 text-slate-400' : 'bg-blue-100 text-blue-700'}`} aria-hidden="true">
 																	{#if matDone}
@@ -452,7 +451,7 @@
 																	{:else if locked}
 																		<i class="fa-solid fa-lock"></i>
 																	{:else}
-																		{flatIdx + 1}
+																		{matIdx + 1}
 																	{/if}
 																</span>
 																<span class="min-w-0 flex-1">

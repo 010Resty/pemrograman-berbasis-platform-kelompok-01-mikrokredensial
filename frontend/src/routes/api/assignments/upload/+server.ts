@@ -38,6 +38,7 @@ interface BackendSubmission {
 	note: string | null;
 	score: number | null;
 	feedback: string | null;
+	rubricScores: { kelengkapan: number; ketepatan: number; kerapian: number } | null;
 	status: string;
 	gradedBy: number | null;
 	gradedAt: string | null;
@@ -70,6 +71,7 @@ interface UiSubmission {
 	status: 'Menunggu' | 'Dinilai';
 	score: number | null;
 	feedback?: string;
+	rubricScores?: { kelengkapan: number; ketepatan: number; kerapian: number } | null;
 	createdAt: string;
 	gradedAt?: string | null;
 }
@@ -100,6 +102,7 @@ function toUi(
 		status: graded ? 'Dinilai' : 'Menunggu',
 		score: row.score,
 		feedback: row.feedback ?? undefined,
+		rubricScores: row.rubricScores ?? null,
 		createdAt: row.submittedAt,
 		gradedAt: row.gradedAt ?? null
 	};

@@ -119,13 +119,10 @@
 		<!-- Satu kartu informasi -->
 		<article
 			aria-labelledby="sk-title"
-			class="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-xl shadow-slate-900/5"
+			class="overflow-hidden rounded-2xl border border-slate-200 bg-white"
 		>
 			<!-- Aksen atas -->
-			<div
-				class="h-1.5 bg-gradient-to-r from-blue-700 via-cyan-500 to-blue-700"
-				aria-hidden="true"
-			></div>
+			<div class="h-1.5 bg-blue-600" aria-hidden="true"></div>
 
 			<div class="p-6 sm:p-10">
 				<!-- Kepala kartu -->
@@ -189,7 +186,7 @@
 									class="flex items-center gap-3.5 text-base font-bold text-slate-900 sm:text-lg"
 								>
 									<span
-										class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-blue-600 to-indigo-700 text-sm font-bold text-white shadow-md shadow-blue-600/25"
+										class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-600 text-sm font-bold text-white"
 										aria-hidden="true"
 									>
 										{i + 1}
@@ -211,7 +208,7 @@
 				<!-- Pernyataan persetujuan -->
 				<section
 					aria-labelledby="persetujuan-title"
-					class="mt-2 rounded-2xl border border-blue-200 bg-gradient-to-br from-blue-600 to-indigo-700 p-6 text-white shadow-lg shadow-blue-600/25 sm:p-7"
+					class="mt-2 rounded-2xl bg-navy p-6 text-white sm:p-7"
 				>
 					<h2 id="persetujuan-title" class="flex items-center gap-2.5 text-base font-bold sm:text-lg">
 						<i class="fa-solid fa-pen-nib" aria-hidden="true"></i>

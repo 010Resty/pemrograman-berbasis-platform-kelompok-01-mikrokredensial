@@ -341,3 +341,9 @@ Before implementing:
 - Use this skill only when the task clearly matches the scope described above.
 - Do not treat the output as a substitute for environment-specific validation, testing, or expert review.
 - Stop and ask for clarification if required inputs, permissions, safety boundaries, or success criteria are missing.
+
+## ARISTOTELES — Project Guardrails (2026-11-04, append-only, precedence: frontend/AGENTS.md)
+
+- OUT-OF-SCOPE untuk repo frontend SvelteKit. Jangan ajukan Hono/Fastify/NestJS/Bun/Deno, Next.js API Routes, atau runtime baru dari frontend.
+- Jika tugas backend sungguhan, kerjakan di `backend/` mengikuti `backend/AGENTS.md` (Express 4 + Drizzle + Zod-only + ESM).
+- Jangan `npm install`, `npx`, migrasi, atau ubah config tanpa persetujuan eksplisit.

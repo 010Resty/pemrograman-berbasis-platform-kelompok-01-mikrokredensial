@@ -23,6 +23,8 @@ export interface AssignmentSubmission {
 	status: SubmissionStatus;
 	score: number | null;
 	feedback?: string;
+	/** Rincian rubrik dari server (null = dinilai langsung). */
+	rubricScores?: { kelengkapan: number; ketepatan: number; kerapian: number } | null;
 	createdAt: string;
 	gradedAt?: string | null;
 }

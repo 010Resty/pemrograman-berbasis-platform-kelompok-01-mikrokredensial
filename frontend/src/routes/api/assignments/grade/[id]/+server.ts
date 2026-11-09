@@ -9,11 +9,12 @@ function backendBase(): string {
 const DECISIONS = ['passed', 'failed', 'revision_requested'] as const;
 
 /**
- * PATCH /api/assignments/grade/:id { score, materialId, decision?, feedback? }
+ * PATCH /api/assignments/grade/:id { score, materialId, decision?, feedback?, rubric? }
  * → POST /api/v1/materials/:materialId/submissions/:id/grade (backend Express).
  * Meneruskan header Authorization agar backend dapat mengotorisasi peran
  * teacher/admin. Tanpa token = 401 di sini (fail-closed, tanpa fallback
  * sukses palsu); backend offline = 502 jujur (nilai TIDAK disimpan lokal).
+ * Rubrik diteruskan apa adanya (backend yang memvalidasi + menghitung).
  */
 export const PATCH: RequestHandler = async ({ params, request, fetch }) => {
 	let body: unknown;
@@ -44,6 +45,17 @@ export const PATCH: RequestHandler = async ({ params, request, fetch }) => {
 			: 'passed';
 	const feedback =
 		typeof b.feedback === 'string' && b.feedback.trim() !== '' ? b.feedback.slice(0, 2000) : undefined;
+	const rubric =
+		b.rubric !== null &&
+		typeof b.rubric === 'object' &&
+		['kelengkapan', 'ketepatan', 'kerapian'].every(
+			(k) =>
+				Number.isInteger((b.rubric as Record<string, unknown>)[k]) &&
+				((b.rubric as Record<string, unknown>)[k] as number) >= 0 &&
+				((b.rubric as Record<string, unknown>)[k] as number) <= 100
+		)
+			? b.rubric
+			: undefined;
 	const authorization = request.headers.get('authorization');
 	if (!authorization) {
 		return json(
@@ -60,7 +72,7 @@ export const PATCH: RequestHandler = async ({ params, request, fetch }) => {
 		headers.authorization = authorization;
 		const upstream = await fetch(
 			`${backendBase()}/api/v1/materials/${materialId}/submissions/${encodeURIComponent(params.id)}/grade`,
-			{ method: 'POST', headers, body: JSON.stringify({ score, decision, feedback }) }
+			{ method: 'POST', headers, body: JSON.stringify({ score, decision, feedback, rubric }) }
 		);
 		const data = await upstream.json();
 		return json(data, { status: upstream.status });

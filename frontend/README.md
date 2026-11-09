@@ -1,102 +1,117 @@
 # Aristoteles — Platform Mikrokredensial (Frontend)
 
-Aplikasi web pembelajaran mikrokredensial Universitas (UNIRA × Aristoteles) berbasis
-**SvelteKit 2 + Svelte 5 + TypeScript + Tailwind CSS 4**. Mencakup landing page publik,
-portal user (mahasiswa), panel admin, dan sistem pembelajaran berurutan
-(modul → materi → kuis/penugasan → sertifikat).
+Aplikasi web pembelajaran mikrokredensial berbasis **SvelteKit 2 + Svelte 5 +
+TypeScript strict + Tailwind CSS 4 + editor Tiptap**. Portal: publik, peserta (`/user`),
+instruktur (`/instruktur`), admin (`/admin`).
+
+> Backend wajib jalan untuk login dan data nyata. Tanpa backend, halaman yang butuh
+> data menampilkan error jujur + tombol coba lagi (tidak ada sukses palsu).
 
 ## Cara Menjalankan
 
 ```sh
 npm install
-npm run dev        # server pengembangan
-npm run check      # type-check + validasi Svelte
+npm run dev        # server pengembangan (vite dev)
+npm run check      # type-check + validasi Svelte (wajib lolos sebelum selesai kerja)
 npm run build      # build produksi
 npm run preview    # pratinjau hasil build
+npm run lint       # prettier --check + eslint
+npm run format     # prettier --write .
 ```
 
-## Akun Demo & Kode Demo
+Variabel env (semua opsional, ada default dev):
 
-| Kebutuhan      | Nilai                                                                 |
-| -------------- | --------------------------------------------------------------------- |
-| Login UNIRA    | `farisi@gmail.com` / `1234567` (ada tombol isi otomatis di halaman login) |
-| Kode voucher   | `ARISTOTELES-2026` · `BELAJAR-GRATIS` · `UNIRA-MKM01` (di halaman Kursusku)  |
+| Variabel | Default bila kosong | Keterangan |
+|---|---|---|
+| `PUBLIC_API_BASE_URL` | `http://localhost:3000/api/v1` | Base URL backend |
+| `PUBLIC_LOGIN_TIMEOUT_MS` | `15000` | Batas waktu request login (ms) |
+| `PUBLIC_QRIS_IMAGE_URL` | *(tidak tampil)* | URL gambar QRIS statis platform untuk halaman pembayaran; kosongkan bila belum ada |
 
-Login dummy tersimpan di `localStorage`/`sessionStorage` (`aristoteles-session`) lalu
-redirect ke `/user`. Sesi dan progres belajar bersifat simulasi sisi klien.
+Uji unit ringan (tanpa browser/bundler):
 
-## Fitur
+```sh
+node --test tests/   # request-policy, login-timeout
+```
 
-### Landing Page Publik (`/`)
-- Navbar responsif anti-tumpuk: logo, 5 link section, search (xl), tombol **Masuk** + **Mulai Belajar**, menu hamburger + panel mobile.
-- Hero (foto + badge alumni/modul), fitur bar, modul populer, tabel peringkat, tentang, panel verifikasi sertifikat, footer.
-- Tombol **Lihat Semua Modul** → halaman `/modules`.
-- Font Awesome + font Inter dimuat global dari layout root.
+## Autentikasi (nyata via backend, tanpa akun demo)
 
-### Katalog Publik (`/modules`)
-- Daftar semua modul: search, filter kategori, filter periode (Berjalan / Akan Datang / Lewat), badge periode + durasi + rating + harga + peserta.
-- CTA per kartu → `/login` (detail penuh ada di balik login).
+- **Register** (`/register`): selalu peran student (K-01) → kode OTP 6 digit ke email →
+  **verifikasi** (`/verify-email`) → akun aktif + sesi diterbitkan.
+- **Login** (`/login`): tab Student/Teacher/Administrator; salah portal = ditolak dengan
+  pesan peran yang benar. Opsi ingat saya (localStorage) vs sesi tab (sessionStorage).
+- **Lupa password** (`/lupa-password`) → **reset** (`/reset-password?email=...`) 2 langkah:
+  verifikasi kode dulu (`POST /auth/verify-reset-code`), lalu buat password baru.
+  Email dari tautan dikunci (tidak bisa diubah); kode kedaluwarsa 10 menit (hitung mundur
+  tampil), maks 5x salah, kirim ulang tersedia.
+- **Aktivasi undangan instruktur** (`/invite/[token]`): token 1x pakai, atur password sendiri.
+- Guard portal memverifikasi sesi ke server (`GET /auth/me`) — peran diambil dari server,
+  bukan dari storage. Storage lokal (`aristoteles-session`, `aristoteles-access-token`)
+  tidak pernah dianggap bukti akses.
 
-### Autentikasi
-- **Login** (`/login`): validasi akun dummy, pesan error `role="alert"`, loading, show/hide password, ingat saya, kotak akun demo sekali klik, tombol SSO "Masuk dengan UNIRA".
-- **Register** (`/register`), **Verify** (`/verify`), **with_UNIRA** (`/with_UNIRA`).
+## Portal & Rute
 
-### Portal User (`/user`) — sidebar: Dashboard, Kursusku, Semua Kursus, Sertifikat
-- **Dashboard** (`/user`): sapaan, 4 kartu statistik, daftar kursus berjalan, aksi cepat, sertifikat terbaru, ringkasan progres.
-- **Kursusku** (`/user/kursusku`): filter status, kartu progres + tautan ke detail, **form redeem kode voucher** (validasi format, cegah tukar ganda, pesan sukses/gagal).
-- **Semua Kursus** (`/user/semua-kursus`): katalog dari data yang sama (search + kategori + periode), kartu → halaman pratinjau.
-- **Pratinjau kursus** (`/user/semua-kursus/[courseId]`): hero + statistik, tentang, learning outcomes, **kurikulum akordeon** (semua modul + materi + durasi), syarat, kartu sticky (harga, CTA ikut/lanjut, benefit).
-- **Sertifikat** (`/user/sertifikat`): kartu sertifikat terverifikasi (ID kredensial, skor), unduh/bagikan, CTA verifikasi.
-- **Periode pelatihan**: 3 status — *Akan Datang* (badge + bulan mulai, cth. Desember 2026), *Sedang Berjalan*, *Sudah Lewat* (CTA nonaktif di pratinjau).
+Publik: `/` (promo, unggulan, patungan, cara belajar, kelas gratis), `/pelatihan`,
+`/modules` (+ detail), `/peringkat`, `/tentang`, `/verifikasi`, `/menjadi-instruktur`
+(+ `/daftar`), `/kebijakan-privasi`, `/syarat-ketentuan`, `/segera-hadir`.
 
-### Sistem Pembelajaran Berurutan
-- **Detail kursus** (`/user/kursusku/[courseId]`): hero + progres, akordeon modul, checklist materi, **modul terkunci** (modul 2+ menunggu modul sebelumnya 100%), **materi terkunci** (gembok + badge "Terkunci") sampai materi atas selesai.
-- **Halaman materi** (`.../[moduleId]/[materialId]`, full-frame tanpa sidebar utama):
-  - 6 tipe konten via komponen reusable `src/lib/components/materials/` — `TextMaterial`, `PhotoMaterial`, `AudioMaterial` (+transkrip), `VideoMaterial` (+bab), `QuizMaterial` (interaktif + skor + pembahasan + ulangi), `AssignmentMaterial` (brief + form kumpul) — dipilih otomatis oleh `MaterialRenderer`.
-  - Aturan buka: video/teks/audio/foto → tombol **Berikutnya** menandai selesai + auto-buka materi lanjut; kuis lulus (≥70) dan tugas terkirim menandai selesai otomatis.
-  - Sidebar modul collapsible (animasi 300ms, rel panah `»` saat tertutup), breadcrumb berpanah, navigasi Sebelumnya/Berikutnya/Lanjut-Modul, panel "Materi Terkunci" untuk akses URL langsung.
-- **Store progres global** (`src/lib/stores/progress.svelte.ts`, `SvelteSet` reaktif): status selesai sinkron di semua halaman, tidak hilang saat pindah kursus dalam sesi.
+- **Peserta** (`/user`, guard student): Dashboard, Kursusku, Semua Kursus (+ pratinjau
+  `[courseId]`), Sertifikat, Pembayaran (`pembayaran/[courseId]`, **simulasi lokal** —
+  tanpa gateway, bukan akses resmi), materi (`kursusku/[courseId]/[moduleId]/[materialId]`,
+  6 tipe via `MaterialRenderer`: teks/foto/audio/video/kuis/tugas).
+- **Instruktur** (`/instruktur`, guard teacher): Dashboard, Kursusku (+ tambah/kelola
+  kurikulum drill-down), Penilaian (rubrik 3 kriteria + riwayat), Pendapatan, Sertifikat
+  (ringkasan, per kursus/modul, kelayakan, riwayat).
+- **Admin** (`/admin`, guard admin): Dasbor, Peserta, Pengajuan instruktur, Undangan,
+  Instruktur (+ubah), Kursus, Voucher (buat Personal/Umum, nonaktif/aktifkan, riwayat).
 
-### Panel Admin (`/admin`) — sidebar: Dashboard, Users, Instrukturs, Courses
-- **Dashboard**: 4 statistik, aksi cepat (tambah user/instruktur/course), users terbaru, courses populer.
-- **Users**: tabel + search + filter status (Aktif/Pending/Nonaktif).
-- **Instrukturs**: kartu + search (course, siswa, rating).
-- **Courses**: tabel + search + filter status (Published/Draft/Archived).
+## Sumber Data
 
-## Struktur Proyek
+- `src/lib/api/` — klien per domain (`backend.ts`, `courses.ts`, `progress.ts`, `quiz.ts`,
+  `submissions.ts`, `certificates.ts`, `vouchers.ts`, `invitations.ts`, `admin.ts`,
+  `dashboard.ts`, `enrollments.ts`, `uploads.ts`, `applications.ts`, `grading-queue.ts`)
+  dengan kebijakan request terpusat (`request-policy.ts`: dedup GET, timeout,
+  klasifikasi 401/403/network/server, logout terpusat saat 401).
+- `src/lib/stores/` — sesi (`auth.svelte.ts`), enrollment (`enrollment.svelte.ts`,
+  server sebagai kebenaran + cache offline), progres memori (`progress.svelte.ts`,
+  hilang saat refresh), draf kurikulum/kuis/tugas, toast.
+- `src/lib/data/` — data statis/fallback (kursus, meta, materi, pembayaran).
+- Mock selalu berlabel: `*.mock.ts`, query `?mock=...` (khusus DEV, banner penanda).
+- Proksi tugas (`src/routes/api/assignments/`): upload validasi PDF (tipe + magic bytes +
+  maks 10 MB) dan wajib token; nilai wajib token; backend offline = 502 jujur
+  (tidak ada sukses palsu).
+
+## Struktur Proyek (ringkas)
 
 ```
 src/
   routes/
-    +page.svelte                 # landing page
-    +layout.svelte               # layout root (favicon, font, Font Awesome)
-    login/ register/ verify/ with_UNIRA/
-    modules/                     # katalog publik
-    user/
-      +layout.svelte             # shell user (full-frame khusus halaman materi)
-      +page.svelte               # dashboard
-      kursusku/                  # daftar + [courseId] + [moduleId]/[materialId]
-      semua-kursus/              # katalog + [courseId] pratinjau
-      sertifikat/
-    admin/
-      +layout.svelte             # shell admin
-      +page.svelte               # dashboard admin
-      users/ instrukturs/ courses/
+    +page.svelte +layout.svelte
+    login/ register/ verify-email/ lupa-password/ reset-password/ invite/[token]/
+    modules/ pelatihan/ peringkat/ tentang/ verifikasi/
+    menjadi-instruktur/ kebijakan-privasi/ syarat-ketentuan/ segera-hadir/
+    user/          # +layout (guard student) +page kursusku/ semua-kursus/
+                   # sertifikat/ pembayaran/[courseId]/
+    instruktur/    # +layout (guard teacher) +page kursusku/ penilaian/
+                   # pendapatan/ sertifikat/
+    admin/         # +layout (guard admin) +page peserta/ pengajuan-instruktur/
+                   # invitations/ instrukturs/ courses/ vouchers/
+    api/assignments/   # proksi upload + grade (fail-closed)
   lib/
-    components/
-      Logo.svelte  Sidebar.svelte  # sidebar generik (user & admin)
-      materials/                 # 6 komponen format materi + renderer
-    data/
-      courses.ts                 # 6 kursus + modul + materi + helper gembok
-      course-meta.ts             # rating/peserta/harga/periode/outcome/syarat
-      material-details.ts        # konten per materi + default per tipe
-    stores/
-      progress.svelte.ts         # status selesai global (SvelteSet)
+    api/ stores/ data/ components/ (public/, training/, materials/)
+    actions/ seo/ server/ tiptap/ types/ assets/
+  app.css  app.html
+tests/   # node --test (request-policy, login-timeout)
+docs/    # 01 ringkasan, 02 rute, 03 arsitektur, 04 status fitur,
+         # 05 kebutuhan backend, 06 aturan bisnis K-01–K-08,
+         # 07 risiko & validasi, 08 (jika ada), 09 keputusan
 ```
 
-## Kualitas
+## Kualitas & Batasan Diketahui
 
-- `npm run check` (svelte-check): **0 errors**.
-- `npm run build`: sukses, semua rute termasuk rute dinamis 3 segmen ter-generate.
-- Aksesibilitas (WCAG 2.2): skip link, `aria-current`/`aria-expanded`/`aria-pressed`, `role="alert/status/progressbar/radiogroup"`, label form, `focus-visible`, target sentuh ≥36–44px, `prefers-reduced-motion`, kontras teks.
-- Dikembangkan dengan panduan autoskills: `frontend-design`, `svelte5-best-practices`, `svelte-code-writer`, `accessibility`.
+- `npm run check`: 0 errors, 0 warnings (wajib dipertahankan).
+- Aksesibilitas: skip link, `aria-*`/`role` status, label form, `focus-visible`, target
+  sentuh ≥44px, `prefers-reduced-motion`.
+- Batasan jujur (bukan bug yang disembunyikan): pembayaran simulasi; search global dan
+  bell notifikasi belum berfungsi; sebagian tombol sertifikat/laporan belum ada handler;
+  progres belajar hilang saat refresh. Acuan status: `docs/04-inventaris-fitur.md`;
+  skenario uji: `docs/07-risiko-dan-validasi.md`; aturan target: `docs/06-aturan-bisnis.md`.

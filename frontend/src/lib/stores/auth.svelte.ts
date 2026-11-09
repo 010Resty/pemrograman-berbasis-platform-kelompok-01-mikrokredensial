@@ -10,6 +10,7 @@ import {
 	resendEmailOtp,
 	resetPasswordRequest,
 	verifyEmailRequest,
+	verifyResetCodeRequest,
 	type BackendUser
 } from '$lib/api/backend';
 import {
@@ -34,8 +35,11 @@ export interface Session {
 	id: string;
 	email: string;
 	name: string;
+	username: string;
 	role: Role;
 	loginAt: string;
+	/** Relatif server (/api/v1/files/...) atau null — absolutkan saat render. */
+	avatarUrl: string | null;
 }
 
 export const ROLE_LABEL: Record<Role, string> = {
@@ -139,7 +143,9 @@ function toSession(user: BackendUser): Session {
 		id: String(user.id),
 		email: user.email,
 		name: user.name,
+		username: user.username,
 		role: user.role,
+		avatarUrl: typeof user.avatarUrl === 'string' ? user.avatarUrl : null,
 		loginAt: new Date().toISOString()
 	};
 }
@@ -278,11 +284,12 @@ export interface RegisterPending {
 
 export async function registerWithBackend(
 	name: string,
+	username: string,
 	email: string,
 	password: string
 ): Promise<RegisterPending | { ok: false; error: string; fieldErrors?: Array<{ field: string; message: string }> }> {
 	try {
-		const result = await registerRequest(name.trim(), email.trim(), password);
+		const result = await registerRequest(name.trim(), username.trim(), email.trim(), password);
 		return {
 			ok: true,
 			email: result.email || email.trim(),
@@ -341,12 +348,35 @@ export async function resendVerificationCode(
  */
 export async function requestPasswordReset(
 	email: string
-): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+): Promise<
+	{ ok: true; message: string; expiresInSeconds: number; resendCooldownSeconds: number } | { ok: false; error: string }
+> {
 	try {
 		const result = await forgotPasswordRequest(email.trim());
-		return { ok: true, message: result.message };
+		return {
+			ok: true,
+			message: result.message,
+			expiresInSeconds: result.expiresInSeconds,
+			resendCooldownSeconds: result.resendCooldownSeconds
+		};
 	} catch (err) {
 		return toUserMessage(err, 'Permintaan gagal. Coba lagi nanti.');
+	}
+}
+
+/**
+ * Gerbang layar password-baru: verifikasi kode OTP ke server TANPA
+ * mengubah password. Lolos = kode benar dan belum kedaluwarsa/diblokir.
+ */
+export async function verifyResetCodeWithBackend(
+	email: string,
+	code: string
+): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+	try {
+		const result = await verifyResetCodeRequest(email.trim(), code.trim());
+		return { ok: true, message: result.message };
+	} catch (err) {
+		return toUserMessage(err, 'Verifikasi kode gagal. Coba lagi nanti.');
 	}
 }
 
