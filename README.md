@@ -22,7 +22,7 @@ instruktur, kursus, voucher, undangan, sertifikat). Aturan bisnis K-01–K-08 di
 | Direktori | Isi |
 |---|---|
 | `frontend/web/` | SvelteKit 2 + Svelte 5 + TypeScript + Tailwind CSS 4 (aplikasi web). Lihat `frontend/web/README.md`. |
-| `frontend/shared/` | (berikutnya, Tahap 2 multi-platform) Kontrak API + skenario uji dipakai bersama web + Android. |
+| `frontend/shared/` | Kontrak API + skenario uji K-01–K-08 dipakai bersama web + Android. Lihat `frontend/shared/README.md`. |
 | `frontend/android/` | (berikutnya, Tahap 3+ multi-platform) Aplikasi Flutter, login-first tanpa landing page. |
 | `backend/` | Express + TypeScript + Drizzle ORM + MySQL, prefix API `/api/v1`. Lihat `backend/README.md`. |
 | `frontend/web/docs/` | Dokumentasi proyek: ringkasan (`01`), rute (`02`), arsitektur (`03`), status fitur (`04`), kebutuhan backend (`05`), aturan bisnis K-01–K-08 (`06`), risiko (`07`), keputusan (`09`). |
