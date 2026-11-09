@@ -51,9 +51,11 @@ envelope 404/500 global tanpa `code`, dan `GET /invitations/validate` tanpa `cod
 
 ## 2. Autentikasi — `POST /api/v1/auth/*`, `GET /api/v1/auth/me`
 
-Alur saat ini OTP dua langkah (bukan langsung token): `register` → `verify-email`
-(`resend-verification` bila perlu); reset via `forgot-password` →
-`verify-reset-code` → `reset-password`. Semua endpoint auth dilindungi
+Alur saat ini: `register` → `verify-email` (keduanya menerbitkan pasangan
+`accessToken` + `refreshToken` sekali pakai); reset via `forgot-password` →
+`verify-reset-code` → `reset-password`. Klien mobile memakai `POST /refresh`
+(rotasi; token lama hangus, pakai ulang = seluruh sesi dicabut) dan
+`POST /logout` (cabut satu/banyak sesi). Semua endpoint auth dilindungi
 `authOtpLimiter` (default 30x/15 mnt/IP).
 
 | Endpoint | Auth | Body | Sukses | Error |
@@ -64,7 +66,9 @@ Alur saat ini OTP dua langkah (bukan langsung token): `register` → `verify-ema
 | `POST /forgot-password` | — + rate-limit | `{email}` (respons generik anti-enumerasi) | 200 generik | 429 |
 | `POST /verify-reset-code` | — + rate-limit | `{email, code}` | 200 generik valid | 400/410; 429 |
 | `POST /reset-password` | — + rate-limit | `{email, code, newPassword(8–72)}` | 200 | 400/410; 429 |
-| `POST /login` | — + rate-limit | `{email, password(1–72)}` | 200 `{accessToken, user}` | 400 generik; 403 bila `isActive=false`; 429 |
+| `POST /login` | — + rate-limit | `{email, password(1–72)}` | 200 `{accessToken, refreshToken(64-hex, simpan aman), user}` | 400 generik; 403 bila `isActive=false`; 429 |
+| `POST /refresh` | — + rate-limit | `{refreshToken!}` (opaque, sekali pakai) | 200 `{accessToken, refreshToken(baru), refreshExpiresAt, user}` (token lama dicabut; pakai ulang token basi → 401 + seluruh sesi dicabut) | 400 validasi; 401 token tak dikenal/kedaluwarsa/dicabut/nonaktif; 429 |
+| `POST /logout` | JWT | `{refreshToken?}` (tanpa = cabut semua sesi sendiri) | 200 `{revoked}` | 401 tanpa token akses |
 | `GET /me` | JWT | — | 200 `{user{id,name,username,email,role,avatarUrl(/api/v1/files/:id/content|null)}}` (query ulang DB; `Cache-Control: no-store`) | 401 token hilang/tak valid/user terhapus |
 
 Efek samping: tidak ada (stateless; logout = hapus token di klien).

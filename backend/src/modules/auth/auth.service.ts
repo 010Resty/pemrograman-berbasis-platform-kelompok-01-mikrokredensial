@@ -23,6 +23,7 @@ import {
   isValidUsername,
   normalizeUsername,
 } from "../../utils/username";
+import { issueRefreshToken } from "./refresh.service";
 import {
   sendPasswordResetEmail,
   sendVerificationEmail,
@@ -432,10 +433,12 @@ export const verifyEmail = async (_input: unknown) => {
     email: created.email,
     role: "student",
   });
+  const { token: refreshToken } = await issueRefreshToken(created.userId);
 
   return {
     message: "Email terverifikasi. Akun berhasil diaktifkan.",
     accessToken,
+    refreshToken,
     user: {
       id: created.userId,
       name: created.name,
@@ -800,10 +803,12 @@ export const loginUser = async (_input: unknown) => {
     email: user.email,
     role: user.role,
   });
+  const { token: refreshToken } = await issueRefreshToken(user.id);
 
   return {
     message: "Login berhasil",
     accessToken,
+    refreshToken,
     user: {
       id: user.id,
       name: user.name,

@@ -56,7 +56,8 @@ cp .env.example .env   # lalu isi nilai berikut
 |---|---|---|
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | ya (salah satu) | atau satu `DATABASE_URL=mysql://…` (diprioritaskan) |
 | `JWT_SECRET` | ya | ≥32 karakter acak; server menolak start tanpa ini |
-| `JWT_EXPIRES_IN` | tidak | default `15m`; tidak ada refresh token |
+| `JWT_EXPIRES_IN` | tidak | default `15m` (access token pendek, untuk web + mobile) |
+| `REFRESH_EXPIRES_DAYS` | tidak | default `30`; umur refresh token opaque sekali pakai (khusus klien mobile) |
 | `CORS_ORIGIN` | tidak | default `http://localhost:5173` |
 | `FRONTEND_URL` | ya (production) | basis tautan undangan di email; server production menolak start bila kosong |
 | `SEED_DEMO_PASSWORD` | tidak | hanya untuk `db:seed` (dev) |

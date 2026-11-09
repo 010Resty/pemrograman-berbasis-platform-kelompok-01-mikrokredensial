@@ -12,6 +12,12 @@ import {
   verifyEmail,
   verifyResetCode,
 } from "./auth.service";
+import {
+  logoutSchema,
+  refreshSchema,
+  revokeRefreshTokens,
+  rotateRefreshToken,
+} from "./refresh.service";
 
 export const register = async (
   req: Request,
@@ -133,6 +139,62 @@ export const login = async (
       status: "success",
       message: "Login berhasil",
       data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const refreshHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const parsed = refreshSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        status: "error",
+        message: "Token refresh wajib diisi",
+        data: null,
+      });
+      return;
+    }
+    const result = await rotateRefreshToken(parsed.data.refreshToken);
+    res.status(200).json({
+      status: "success",
+      message: "Sesi diperpanjang",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
+export const logoutHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = Number(req.user?.id);
+    if (!Number.isInteger(userId) || userId <= 0) {
+      res.status(401).json({
+        status: "error",
+        message: "Token autentikasi diperlukan",
+        data: null,
+      });
+      return;
+    }
+    const parsed = logoutSchema.safeParse(req.body ?? {});
+    const revoked = await revokeRefreshTokens(
+      userId,
+      parsed.success ? parsed.data.refreshToken : undefined
+    );
+    res.status(200).json({
+      status: "success",
+      message: "Berhasil keluar",
+      data: { revoked },
     });
   } catch (error) {
     next(error);

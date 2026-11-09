@@ -63,6 +63,30 @@ export const users = mysqlTable("users", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
 
+// Sesi refresh untuk klien mobile (Flutter): token opaque sekali pakai
+// (rotasi), hanya hash SHA-256 yang disimpan — mirip undangan instruktur.
+// Akses tetap JWT 15 menit; refresh berlaku REFRESH_EXPIRES_DAYS (default 30).
+// Tanpa migrasi tambahan setelah ini: pencabutan = tandai revokedAt.
+export const refreshTokens = mysqlTable(
+  "refresh_tokens",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
+    expiresAt: timestamp("expires_at").notNull(),
+    revokedAt: timestamp("revoked_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    refreshUserIdx: index("refresh_tokens_user_idx").on(table.userId),
+  })
+);
+
 export const instructorInvitations = mysqlTable(
   "instructor_invitations",
   {
