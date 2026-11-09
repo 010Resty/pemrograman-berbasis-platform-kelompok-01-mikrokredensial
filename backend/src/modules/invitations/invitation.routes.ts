@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { authenticate, requireRole } from "../../middlewares/auth.middleware";
+import { authOtpLimiter } from "../../middlewares/rate-limit.middleware";
 import {
   acceptHandler,
   createHandler,
@@ -18,8 +19,8 @@ router.get("/admin/invitations", ...admin, listHandler);
 router.post("/admin/invitations/:id/revoke", ...admin, revokeHandler);
 router.post("/admin/invitations/:id/reissue", ...admin, reissueHandler);
 
-// Alur aktivasi (publik).
-router.get("/invitations/validate", validateHandler);
-router.post("/invitations/accept", acceptHandler);
+// Alur aktivasi (publik, dibatasi per IP agar token tidak bisa di-spam).
+router.get("/invitations/validate", authOtpLimiter(), validateHandler);
+router.post("/invitations/accept", authOtpLimiter(), acceptHandler);
 
 export default router;

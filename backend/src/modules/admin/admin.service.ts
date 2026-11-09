@@ -1,4 +1,5 @@
 import bcrypt from "bcryptjs";
+import { allocateUsername } from "../../utils/username";
 import { z } from "zod";
 import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import { db } from "../../db";
@@ -61,6 +62,9 @@ export const assignInstructorSchema = z
 
 // ---------- Helper ----------
 
+/** Escape wildcard LIKE (% _ \) agar pencarian admin tidak melebar. */
+const escapeLike = (s: string): string => s.replace(/[\\%_]/g, (m) => `\\${m}`);
+
 const writeAuditLog = async (
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   entry: {
@@ -83,6 +87,7 @@ const writeAuditLog = async (
 export interface PublicUser {
   id: number;
   name: string;
+  username: string;
   email: string;
   expertise: string | null;
   role: string;
@@ -107,7 +112,10 @@ export const listUsers = async (
   if (filter.role !== undefined) conditions.push(eq(users.role, filter.role));
   if (filter.isActive !== undefined) conditions.push(eq(users.isActive, filter.isActive));
   if (filter.q) {
-    conditions.push(or(like(users.name, `%${filter.q}%`), like(users.email, `%${filter.q}%`)));
+    const q = escapeLike(filter.q);
+    conditions.push(
+      or(like(users.name, `%${q}%`), like(users.email, `%${q}%`), like(users.username, `%${q}%`))
+    );
   }
   const limit = Math.min(Math.max(filter.limit ?? 20, 1), 100);
   const page = Math.max(filter.page ?? 1, 1);
@@ -118,6 +126,7 @@ export const listUsers = async (
       .select({
         id: users.id,
         name: users.name,
+        username: users.username,
         email: users.email,
         expertise: users.expertise,
         role: users.role,
@@ -177,6 +186,7 @@ export const getUserById = async (id: number): Promise<AdminUserDetail> => {
     .select({
       id: users.id,
       name: users.name,
+      username: users.username,
       email: users.email,
       expertise: users.expertise,
       role: users.role,
@@ -223,9 +233,13 @@ export const createTeacher = async (
     throw new AdminError(409, "EMAIL_TAKEN", "Email sudah terdaftar");
   }
   const passwordHash = await bcrypt.hash(input.password, 12);
+  // Username dialokasikan otomatis (pembuat tidak memilih).
+  // Format: dasar dari nama/email + suffix anti-tabrakan bila perlu.
+  const username = await allocateUsername(db, input.name);
   const created = await db.transaction(async (tx) => {
     const [h] = await tx.insert(users).values({
       name: input.name,
+      username,
       email,
       passwordHash,
       role: "teacher",
@@ -238,12 +252,13 @@ export const createTeacher = async (
       action: "user.create",
       targetType: "user",
       targetIdInt: id,
-      metadata: { userId: id, email, role: "teacher" },
+      metadata: { userId: id, email, username, role: "teacher" },
     });
     const fresh = await tx
       .select({
         id: users.id,
         name: users.name,
+        username: users.username,
         email: users.email,
         expertise: users.expertise,
         role: users.role,
@@ -296,7 +311,12 @@ export const updateUser = async (
       throw new AdminError(409, "EMAIL_TAKEN", "Email sudah terdaftar");
     }
     patch.email = email;
+    // NOTE 2026-11-04: ganti email TIDAK me-reset emailVerifiedAt agar tidak
+    // mengunci akun (belum ada alur OTP ulang untuk email gantian admin).
+    // Risiko: status verified lama terbawa ke email baru — admin wajib pastikan
+    // kepemilikan email baru di luar sistem; lihat API_CONTRACT §14.
   }
+  // Username tidak bisa diubah (identitas stabil untuk patungan/audit).
   // String kosong = hapus keahlian (kembali NULL).
   if (input.expertise !== undefined) {
     patch.expertise = input.expertise === "" ? null : input.expertise;
@@ -315,6 +335,7 @@ export const updateUser = async (
       .select({
         id: users.id,
         name: users.name,
+        username: users.username,
         email: users.email,
         expertise: users.expertise,
         role: users.role,

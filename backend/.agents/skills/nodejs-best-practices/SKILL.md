@@ -341,3 +341,10 @@ Before implementing:
 - Use this skill only when the task clearly matches the scope described above.
 - Do not treat the output as a substitute for environment-specific validation, testing, or expert review.
 - Stop and ask for clarification if required inputs, permissions, safety boundaries, or success criteria are missing.
+
+## ARISTOTELES — Project Guardrails (2026-11-04, append-only, precedence: backend/AGENTS.md)
+
+- Stack terkunci ARISTOTELES: Express 4 + Drizzle ORM (MySQL) + Zod + ESM `import`. Abaikan decision-tree yang menganjurkan Hono/Fastify/NestJS/Bun/Deno atau CJS `require` kecuali diminta eksplisit.
+- Validasi Zod-only. Jangan pakai Valibot/ArkType/Yup tanpa diminta.
+- Library-First mengikuti `package.json` yang ada (`express`, `drizzle-orm`, `mysql2`, `zod`, `jsonwebtoken`, `bcryptjs`, `helmet`, `cors`). Jangan tarik Prisma/BullMQ/Resend/S3 tanpa diminta.
+- Jangan `npm install`, migrasi Drizzle, atau ubah runtime/config tanpa persetujuan eksplisit.

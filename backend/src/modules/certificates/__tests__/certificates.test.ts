@@ -147,7 +147,7 @@ before(async () => {
 
   const hash = await bcrypt.hash(TEST_PASSWORD, 4);
   const mkUser = async (name: string, email: string, role: "admin" | "teacher" | "student") => {
-    const [h] = await db.insert(schema.users).values({ name, email, passwordHash: hash, role, emailVerifiedAt: new Date() });
+    const [h] = await db.insert(schema.users).values({ name, username: email.split("@")[0] + "-t", email, passwordHash: hash, role, emailVerifiedAt: new Date() });
     return Number((h as unknown as { insertId: number }).insertId);
   };
   ids.admin = await mkUser("Admin Uji", "admin@uji.io", "admin");
@@ -204,6 +204,25 @@ before(async () => {
   ids.matKuis = await mkMat("Kuis Wajib Lulus Cukup Panjang", "kuis");
   ids.matTugas = await mkMat("Tugas Wajib Lulus Cukup Panjang", "tugas");
 
+  // Modul B: satu materi biasa (untuk uji jalur manual/displayName
+  // lewat data lama: progres disisip langsung via DB agar auto-issue
+  // tidak terpicu, mensimulasikan baris era sebelum fitur otomatis).
+  const [mBH] = await db.insert(schema.modules).values({
+    courseId: ids.course,
+    title: "Modul Tunggal Uji Manual Panjang",
+    type: "materi",
+    position: 1,
+  });
+  ids.modB = Number((mBH as unknown as { insertId: number }).insertId);
+  const [mBH1] = await db.insert(schema.materials).values({
+    moduleId: ids.modB,
+    title: "Materi Tunggal Uji Manual Panjang",
+    type: "materi",
+    content: VALID_TIPTAP,
+    position: 0,
+  });
+  ids.matB1 = Number((mBH1 as unknown as { insertId: number }).insertId);
+
   const srv = app.listen(0);
   await once(srv, "listening");
   server = srv;
@@ -259,26 +278,28 @@ after(async () => {
 });
 
 describe("kelayakan & penerbitan", () => {
-  it("status s1 eligible; terbit 201 + idempoten 200 baris tunggal", async () => {
+  it("status s1 eligible; sertifikat sudah terbit otomatis + manual 200 idempoten", async () => {
     const st = await api<{
       eligible: boolean;
       requirements: Array<{ state: string }>;
-      certificate: null;
+      certificate: { id: number; code: string } | null;
     }>("GET", `/api/v1/me/modules/${ids.mod}/certificate-status`, tokens.s1);
     assert.equal(st.http, 200);
     assert.equal(st.json.data.eligible, true);
     assert.ok(st.json.data.requirements.every((r) => ["selesai", "lulus"].includes(r.state)));
+    // Auto-issue saat gradePassed di fixture: sertifikat sudah ada.
+    assert.ok(st.json.data.certificate, "sertifikat s1 harus sudah terbit otomatis");
+    certCodeS1 = st.json.data.certificate.code;
 
+    // Jalur manual setelah auto-issue: 200 baris tunggal yang sama.
     const issue = await api<{ id: number; code: string; recipientName: string }>(
       "POST",
       `/api/v1/modules/${ids.mod}/certificate`,
       tokens.s1,
       { displayName: "Siswa Satu Tercetak" }
     );
-    assert.equal(issue.http, 201);
-    assert.match(issue.json.data.code, /^ATS-\d{4}-[0-9A-F]{8}$/);
-    assert.equal(issue.json.data.recipientName, "Siswa Satu Tercetak");
-    certCodeS1 = issue.json.data.code;
+    assert.equal(issue.http, 200);
+    assert.equal(issue.json.data.code, certCodeS1);
 
     const again = await api<{ id: number; code: string }>(
       "POST",
@@ -290,15 +311,32 @@ describe("kelayakan & penerbitan", () => {
     assert.equal(again.json.data.code, certCodeS1);
     const rows = await db.select().from(schema.certificates);
     assert.equal(rows.filter((r) => r.userId === ids.s1).length, 1);
+  });
+
+  it("jalur manual + displayName untuk data lama (tanpa auto-issue)", async () => {
+    // Sisip progres langsung via DB: mensimulasikan baris era pra-otomatis
+    // sehingga auto-issue tidak terpicu dan jalur manual teruji.
+    await db.insert(schema.progress).values({ userId: ids.s2, materialId: ids.matB1 });
+    const issue = await api<{ id: number; code: string; recipientName: string }>(
+      "POST",
+      `/api/v1/modules/${ids.modB}/certificate`,
+      tokens.s2,
+      { displayName: "Siswa Dua Tercetak" }
+    );
+    assert.equal(issue.http, 201);
+    assert.match(issue.json.data.code, /^ATS-\d{4}-[0-9A-F]{8}$/);
+    assert.equal(issue.json.data.recipientName, "Siswa Dua Tercetak");
 
     // Snapshot nama: ubah profil tidak mengubah sertifikat terbit.
-    await db.update(schema.users).set({ name: "Nama Baru Diubah" }).where(eq(schema.users.id, ids.s1));
-    const mine = await api<Array<{ recipientName: string }>>(
+    await db.update(schema.users).set({ name: "Nama Baru Diubah" }).where(eq(schema.users.id, ids.s2));
+    const mine = await api<Array<{ recipientName: string; moduleId: number }>>(
       "GET",
       "/api/v1/me/certificates",
-      tokens.s1
+      tokens.s2
     );
-    assert.equal(mine.json.data[0].recipientName, "Siswa Satu Tercetak");
+    const row = mine.json.data.find((c) => c.moduleId === ids.modB);
+    assert.ok(row);
+    assert.equal(row.recipientName, "Siswa Dua Tercetak");
   });
 
   it("s2 belum layak: 403 NOT_ELIGIBLE + alasan; s3 tanpa progres pun 403", async () => {
@@ -340,6 +378,57 @@ describe("kelayakan & penerbitan", () => {
   });
 });
 
+describe("unduh PDF", () => {
+  async function dl(token: string | undefined, id: number | string) {
+    const headers: Record<string, string> = {};
+    if (token) headers.authorization = `Bearer ${token}`;
+    const res = await fetch(`${base}/api/v1/me/certificates/${id}/download`, { headers });
+    const buf = Buffer.from(await res.arrayBuffer());
+    return {
+      http: res.status,
+      type: res.headers.get("content-type"),
+      disp: res.headers.get("content-disposition"),
+      buf,
+    };
+  }
+
+  async function s1CertId(): Promise<number> {
+    const mine = await api<Array<{ id: number; moduleId: number }>>(
+      "GET",
+      "/api/v1/me/certificates",
+      tokens.s1
+    );
+    const row = mine.json.data.find((c) => c.moduleId === ids.mod);
+    assert.ok(row, "sertifikat s1 harus ada");
+    return row.id;
+  }
+
+  it("pemilik + pengampu unduh PDF asli; cache konsisten", async () => {
+    const id = await s1CertId();
+    const first = await dl(tokens.s1, id);
+    assert.equal(first.http, 200);
+    assert.ok(first.type?.includes("application/pdf"));
+    assert.ok(first.disp?.includes("attachment"));
+    assert.ok(first.disp?.includes('filename="Sertifikat-'));
+    assert.equal(first.buf.subarray(0, 5).toString("utf8"), "%PDF-");
+    // Pengampu kursus boleh mengunduh milik peserta.
+    const byTeacher = await dl(tokens.teacher, id);
+    assert.equal(byTeacher.http, 200);
+    // Unduh kedua lewat cache disk: sama persis.
+    const second = await dl(tokens.s1, id);
+    assert.equal(second.http, 200);
+    assert.equal(second.buf.length, first.buf.length);
+  });
+
+  it("milik orang lain 404; tanpa token 401; id rusak 404", async () => {
+    const id = await s1CertId();
+    assert.equal((await dl(tokens.s2, id)).http, 404);
+    assert.equal((await dl(undefined, id)).http, 401);
+    assert.equal((await dl(tokens.s1, 999999)).http, 404);
+    assert.equal((await dl(tokens.s1, "abc")).http, 404);
+  });
+});
+
 describe("verifikasi publik", () => {
   it("kode benar: minimal aman; kode salah 404 tanpa bocor", async () => {
     const v = await api<Record<string, unknown>>(
@@ -350,9 +439,11 @@ describe("verifikasi publik", () => {
     assert.deepEqual(Object.keys(v.json.data).sort(), [
       "code",
       "courseTitle",
+      "instructorName",
       "issuedAt",
       "moduleTitle",
       "recipientName",
+      "revokeReason",
       "revokedAt",
       "status",
     ]);
@@ -364,17 +455,28 @@ describe("verifikasi publik", () => {
     assert.equal(miss.http, 404);
     assert.equal(miss.json.code, "CODE_NOT_FOUND");
   });
+
+  it("qr: PNG asli untuk kode benar; 404 untuk kode salah", async () => {
+    const qr = await fetch(`${base}/api/v1/certificates/verify/${certCodeS1}/qr`);
+    assert.equal(qr.status, 200);
+    assert.ok(qr.headers.get("content-type")?.includes("image/png"));
+    const buf = Buffer.from(await qr.arrayBuffer());
+    assert.deepEqual([buf[0], buf[1], buf[2], buf[3]], [0x89, 0x50, 0x4e, 0x47]);
+    const missQr = await fetch(`${base}/api/v1/certificates/verify/ATS-2026-00000000/qr`);
+    assert.equal(missQr.status, 404);
+  });
 });
 
 describe("kelola instruktur & pencabutan", () => {
   it("list + filter + detail; guru asing ditolak", async () => {
-    const all = await api<{ items: Array<{ id: number }>; total: number }>(
+    const all = await api<{ items: Array<{ id: number; code: string }>; total: number }>(
       "GET",
       "/api/v1/instructor/certificates",
       tokens.teacher
     );
     assert.equal(all.http, 200);
-    assert.equal(all.json.data.total, 1);
+    // s1 + s4 terbit otomatis di fixture; s2 terbit manual di uji snapshot.
+    assert.equal(all.json.data.total, 3);
 
     const outsider = await api<{ items: unknown[]; total: number }>(
       "GET",
@@ -389,7 +491,7 @@ describe("kelola instruktur & pencabutan", () => {
       `/api/v1/instructor/certificates?courseId=${ids.course}&status=issued`,
       tokens.teacher
     );
-    assert.equal(filtered.json.data.total, 1);
+    assert.equal(filtered.json.data.total, 3);
 
     const wrongScope = await api(
       "GET",
@@ -398,10 +500,11 @@ describe("kelola instruktur & pencabutan", () => {
     );
     assert.equal(wrongScope.http, 403);
 
-    const certId = all.json.data.items[0].id;
+    const s1Item = all.json.data.items.find((i) => i.code === certCodeS1);
+    assert.ok(s1Item, "sertifikat s1 harus ada di daftar");
     const detail = await api<Record<string, unknown>>(
       "GET",
-      `/api/v1/instructor/certificates/${certId}`,
+      `/api/v1/instructor/certificates/${s1Item.id}`,
       tokens.teacher
     );
     assert.equal(detail.http, 200);
@@ -417,17 +520,19 @@ describe("kelola instruktur & pencabutan", () => {
     assert.equal(byId.get(ids.s1), "sudah_terbit");
     assert.equal(byId.get(ids.s2), "belum_memenuhi");
     assert.equal(byId.get(ids.s3), "belum_memenuhi");
-    // s4 memenuhi (lengkap, belum terbit).
-    assert.equal(byId.get(ids.s4), "memenuhi");
+    // s4 lengkap dan langsung terbit otomatis di fixture.
+    assert.equal(byId.get(ids.s4), "sudah_terbit");
   });
 
   it("revoke: alasan wajib + audit; verify tunjukkan dicabut; ganda 409", async () => {
-    const all = await api<{ items: Array<{ id: number }> }>(
+    const all = await api<{ items: Array<{ id: number; code: string }> }>(
       "GET",
       "/api/v1/instructor/certificates",
       tokens.teacher
     );
-    const certId = all.json.data.items[0].id;
+    const s1Item = all.json.data.items.find((i) => i.code === certCodeS1);
+    assert.ok(s1Item, "sertifikat s1 harus ada di daftar");
+    const certId = s1Item.id;
 
     const noReason = await api(
       "POST",
@@ -491,17 +596,24 @@ describe("kelola instruktur & pencabutan", () => {
     );
     assert.equal(reissue.http, 409);
     assert.equal(reissue.json.code, "CERT_REVOKED");
+
+    // Unduh setelah dicabut ditolak (PDF lama di disk tak bisa diakses).
+    const afterRevoke = await fetch(
+      `${base}/api/v1/me/certificates/${certId}/download`,
+      { headers: { authorization: `Bearer ${tokens.s1}` } }
+    );
+    assert.equal(afterRevoke.status, 403);
   });
 });
 
 describe("concurrency penerbitan", () => {
-  it("2 request paralel s4: keduanya sukses, hanya 1 baris", async () => {
+  it("2 request paralel s4 (sudah terbit otomatis): keduanya 200, tetap 1 baris", async () => {
     const [a, b] = await Promise.all([
       api<{ code: string }>("POST", `/api/v1/modules/${ids.mod}/certificate`, tokens.s4, {}),
       api<{ code: string }>("POST", `/api/v1/modules/${ids.mod}/certificate`, tokens.s4, {}),
     ]);
-    assert.ok([200, 201].includes(a.http));
-    assert.ok([200, 201].includes(b.http));
+    assert.equal(a.http, 200);
+    assert.equal(b.http, 200);
     assert.equal(a.json.data.code, b.json.data.code);
     const rows = await db.select().from(schema.certificates);
     assert.equal(rows.filter((r) => r.userId === ids.s4).length, 1);

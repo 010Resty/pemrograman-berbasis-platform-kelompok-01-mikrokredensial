@@ -90,7 +90,7 @@ before(async () => {
 
   const hash = await bcrypt.hash(TEST_PASSWORD, 4);
   const mkUser = async (name: string, email: string, role: "admin" | "teacher" | "student") => {
-    const [h] = await db.insert(schema.users).values({ name, email, passwordHash: hash, role, emailVerifiedAt: new Date() });
+    const [h] = await db.insert(schema.users).values({ name, username: email.split("@")[0] + "-t", email, passwordHash: hash, role, emailVerifiedAt: new Date() });
     return Number((h as unknown as { insertId: number }).insertId);
   };
   ids.admin = await mkUser("Admin Uji", "admin@uji.io", "admin");
@@ -362,6 +362,59 @@ describe("gating akses belajar", () => {
       tokens.teacher
     );
     assert.equal(p.http, 200);
+  });
+});
+
+describe("periode upcoming mengunci belajar", () => {
+  let matUpcoming = 0;
+
+  it("terdaftar di upcoming: akses tercatat, progres/isi/kuis 403", async () => {
+    const [mh] = await db.insert(schema.modules).values({
+      courseId: ids.upcoming,
+      title: "Modul Upcoming Uji Cukup Panjang",
+      type: "materi",
+      position: 0,
+    });
+    const modId = Number((mh as unknown as { insertId: number }).insertId);
+    const [th] = await db.insert(schema.materials).values({
+      moduleId: modId,
+      title: "Materi Upcoming Uji Cukup Panjang",
+      type: "materi",
+      content: VALID_TIPTAP,
+      position: 0,
+    });
+    matUpcoming = Number((th as unknown as { insertId: number }).insertId);
+
+    // Mendaftar batch mendatang tetap boleh (201 baru / 200 aktif lagi /
+    // 409 sudah terdaftar — semuanya berarti kini terdaftar).
+    const e = await api("POST", `/api/v1/courses/${ids.upcoming}/enroll`, tokens.s2);
+    assert.ok(e.http === 200 || e.http === 201 || e.http === 409);
+
+    // ...dan akses tercatat sebagai terdaftar.
+    const a = await api<{ hasAccess: boolean }>(
+      "GET",
+      `/api/v1/courses/${ids.upcoming}/access`,
+      tokens.s2
+    );
+    assert.equal(a.http, 200);
+    assert.equal(a.json.data.hasAccess, true);
+
+    // ...tetapi belajar (progres/isi materi) ditolak sampai batch berjalan.
+    const p = await api("POST", `/api/v1/materials/${matUpcoming}/progress`, tokens.s2);
+    assert.equal(p.http, 403);
+
+    const d = await api("GET", `/api/v1/materials/${matUpcoming}`, tokens.s2);
+    assert.equal(d.http, 403);
+  });
+
+  it("pengelola boleh pratinjau materi upcoming", async () => {
+    const d = await api<{ content: unknown }>(
+      "GET",
+      `/api/v1/materials/${matUpcoming}`,
+      tokens.teacher
+    );
+    assert.equal(d.http, 200);
+    assert.ok(typeof d.json.data.content === "string");
   });
 });
 

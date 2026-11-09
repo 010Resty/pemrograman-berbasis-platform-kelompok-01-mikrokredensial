@@ -2,6 +2,7 @@ import { z } from "zod";
 import { and, asc, desc, eq, inArray } from "drizzle-orm";
 import { db } from "../../db";
 import {
+  auditLogs,
   materials,
   quizAttempts,
   quizOptions,
@@ -11,11 +12,13 @@ import {
 } from "../../db/schema";
 import { getMaterial } from "../courses/curricula.service";
 
-/** Galat validasi bisnis kuis — controller memetakan menjadi 400. */
+/** Galat validasi bisnis kuis — controller memetakan menjadi 400 + code. */
 export class QuizInputError extends Error {
-  constructor(message: string) {
+  readonly code: string;
+  constructor(code: string, message: string) {
     super(message);
     this.name = "QuizInputError";
+    this.code = code;
   }
 }
 
@@ -201,10 +204,10 @@ const listQuestionsInternal = async (materialId: number): Promise<QuestionRow[]>
 const requireQuizMaterial = async (materialId: number) => {
   const mat = await getMaterial(materialId);
   if (!mat) {
-    throw new QuizInputError("__NOT_FOUND__");
+    throw new QuizInputError("__NOT_FOUND__", "Materi tidak ditemukan");
   }
   if (mat.type !== "kuis") {
-    throw new QuizInputError("Materi bukan kuis");
+    throw new QuizInputError("NOT_QUIZ", "Materi bukan kuis");
   }
   return mat;
 };
@@ -234,7 +237,11 @@ export const getQuizForTaking = async (
 };
 
 /** Ganti seluruh set soal+opsi secara atomik (wegenumerasi ulang posisi). */
-export const replaceQuiz = async (materialId: number, input: QuizSetInput) => {
+export const replaceQuiz = async (
+  materialId: number,
+  input: QuizSetInput,
+  actorId: number | null = null
+) => {
   await requireQuizMaterial(materialId);
   return db.transaction(async (tx) => {
     const existing = await tx
@@ -291,6 +298,13 @@ export const replaceQuiz = async (materialId: number, input: QuizSetInput) => {
         options: opts,
       });
     }
+    await tx.insert(auditLogs).values({
+      actorUserId: actorId,
+      action: "quiz.replace",
+      targetType: "material",
+      targetIdInt: materialId,
+      metadata: { materialId, questionCount: created.length },
+    });
     return created;
   });
 };
@@ -311,16 +325,16 @@ export const gradeAttempt = async (
   const mat = await requireQuizMaterial(materialId);
   const questions = await listQuestionsInternal(materialId);
   if (questions.length === 0) {
-    throw new QuizInputError("Kuis belum memiliki soal");
+    throw new QuizInputError("QUIZ_EMPTY", "Kuis belum memiliki soal");
   }
   const byId = new Map(questions.map((q) => [q.id, q]));
   for (const a of input.answers) {
     const q = byId.get(a.questionId);
     if (!q) {
-      throw new QuizInputError("Soal tidak dikenal dalam kuis ini");
+      throw new QuizInputError("UNKNOWN_QUESTION", "Soal tidak dikenal dalam kuis ini");
     }
     if (a.optionId !== null && !q.options.some((o) => o.id === a.optionId)) {
-      throw new QuizInputError("Opsi tidak valid untuk soal tersebut");
+      throw new QuizInputError("INVALID_OPTION", "Opsi tidak valid untuk soal tersebut");
     }
   }
   const chosen = new Map(input.answers.map((a) => [a.questionId, a.optionId]));
@@ -367,26 +381,40 @@ export const gradeAttempt = async (
       snapshot,
     });
     const id = Number((h as unknown as { insertId: number }).insertId);
+    await tx.insert(auditLogs).values({
+      actorUserId: userId,
+      action: "quiz.attempt",
+      targetType: "quiz_attempt",
+      targetIdInt: id,
+      metadata: { attemptId: id, userId, materialId, score, total, correct },
+    });
     const rows = await tx
       .select()
       .from(quizAttempts)
       .where(eq(quizAttempts.id, id))
       .limit(1);
-    return rows[0];
+    // Best/attempts dihitung DI DALAM transaksi yang sama agar dua POST
+    // paralel mengembalikan hitungan konsisten (sebelumnya SELECT di luar tx).
+    const mine = await tx
+      .select({ score: quizAttempts.score, passScore: quizAttempts.passScore })
+      .from(quizAttempts)
+      .where(
+        and(eq(quizAttempts.userId, userId), eq(quizAttempts.materialId, materialId))
+      );
+    return {
+      row: rows[0],
+      bestScore: Math.max(...mine.map((a) => a.score)),
+      attempts: mine.length,
+      overallPassed: mine.some((a) => a.score >= a.passScore),
+    };
   });
-  if (!inserted) throw new Error("Gagal menyimpan percobaan kuis");
-  const all = await db
-    .select({ score: quizAttempts.score, passScore: quizAttempts.passScore })
-    .from(quizAttempts)
-    .where(
-      and(eq(quizAttempts.userId, userId), eq(quizAttempts.materialId, materialId))
-    );
+  if (!inserted?.row) throw new Error("Gagal menyimpan percobaan kuis");
   // Lulus menempel: OR atas (skor >= ambang snapshot tiap percobaan).
   return {
-    attempt: toPublicAttempt(inserted),
-    bestScore: Math.max(...all.map((a) => a.score)),
-    attempts: all.length,
-    overallPassed: all.some((a) => a.score >= a.passScore),
+    attempt: toPublicAttempt(inserted.row),
+    bestScore: inserted.bestScore,
+    attempts: inserted.attempts,
+    overallPassed: inserted.overallPassed,
   };
 };
 

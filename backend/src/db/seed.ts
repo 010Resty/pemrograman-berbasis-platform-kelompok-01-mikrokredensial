@@ -70,6 +70,7 @@ async function seedUsers(passwordHash: string) {
     {
       id: 10,
       name: "Rayyan",
+      username: "rayyan",
       email: "rayyan@gmail.com",
       passwordHash,
       role: "student",

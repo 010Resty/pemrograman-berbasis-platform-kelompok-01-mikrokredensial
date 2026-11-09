@@ -4,6 +4,7 @@ import { desc, eq } from "drizzle-orm";
 import { db } from "../../db";
 import { auditLogs, instructorInvitations, users } from "../../db/schema";
 import { createAccessToken, hashPassword } from "../auth/auth.service";
+import { allocateUsername } from "../../utils/username";
 import { sendInvitationEmail } from "../../utils/mailer";
 
 export class InvitationError extends Error {
@@ -38,6 +39,82 @@ export const acceptInvitationSchema = z
 const hashToken = (token: string): string =>
   createHash("sha256").update(token).digest("hex");
 
+/** Tipe transaksi Drizzle (dipakai lintas modul agar invite atomik). */
+export type InvitationTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+/**
+ * Inti pembuatan undangan yang berjalan di DALAM transaksi pemanggil.
+ * Dipakai `createInvitation` (bungkus tx sendiri) dan `inviteApplication`
+ * (satu tx dengan update status pengajuan) agar tidak ada undangan yatim.
+ */
+export const insertInvitationRow = async (
+  tx: InvitationTx,
+  actorId: number,
+  input: z.infer<typeof createInvitationSchema>
+): Promise<{ row: PublicInvitation; token: string; expiresAt: Date }> => {
+  const email = input.email.toLowerCase();
+  const taken = await tx
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.email, email))
+    .limit(1);
+  if (taken[0]) {
+    throw new InvitationError(
+      409,
+      "EMAIL_TAKEN",
+      "Email sudah terdaftar; tugaskan langsung sebagai pengampu bila perlu"
+    );
+  }
+  const token = randomBytes(32).toString("hex");
+  const expiresAt = new Date(
+    Date.now() + (input.expiresInDays ?? 7) * 24 * 3600 * 1000
+  );
+  const [h] = await tx.insert(instructorInvitations).values({
+    email,
+    name: input.name ?? null,
+    note: input.note ?? null,
+    tokenHash: hashToken(token),
+    status: "pending",
+    invitedBy: actorId,
+    expiresAt,
+  });
+  const id = Number((h as unknown as { insertId: number }).insertId);
+  await writeAuditLog(tx, {
+    actorUserId: actorId,
+    action: "invitation.create",
+    targetType: "invitation",
+    targetIdInt: id,
+    metadata: { invitationId: id, email },
+  });
+  const rows = await tx
+    .select()
+    .from(instructorInvitations)
+    .where(eq(instructorInvitations.id, id))
+    .limit(1);
+  const created = rows[0];
+  if (!created) throw new Error("Gagal membuat undangan");
+  return {
+    row: {
+      id: created.id,
+      email: created.email,
+      name: created.name,
+      note: created.note,
+      status: created.status,
+      invitedBy: created.invitedBy,
+      expiresAt: created.expiresAt,
+      createdAt: created.createdAt,
+    },
+    token,
+    expiresAt,
+  };
+};
+
+const isDupEntry = (e: unknown): boolean =>
+  e !== null &&
+  typeof e === "object" &&
+  "code" in e &&
+  (e as { code?: unknown }).code === "ER_DUP_ENTRY";
+
 const writeAuditLog = async (
   tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
   entry: {
@@ -71,7 +148,7 @@ export interface PublicInvitation {
 // ---------- Pembuatan (admin) ----------
 
 /** Tautan aktivasi. FRONTEND_URL menunjuk aplikasi SvelteKit. */
-const buildInviteUrl = (token: string): string =>
+export const buildInviteUrl = (token: string): string =>
   `${(process.env.FRONTEND_URL?.trim() || process.env.APP_URL?.trim() || "http://localhost:5173").replace(/\/+$/, "")}` +
   `/invite/${encodeURIComponent(token)}`;
 
@@ -80,7 +157,7 @@ const buildInviteUrl = (token: string): string =>
  * untuk disalin manual). Gagal kirim dicatat + dilaporkan via return,
  * tanpa membocorkan detail internal ke klien.
  */
-const trySendInvitation = async (
+export const trySendInvitation = async (
   email: string,
   opts: { name: string | null; inviteUrl: string; expiresAt: Date }
 ): Promise<boolean> => {
@@ -97,55 +174,16 @@ export const createInvitation = async (
   actorId: number,
   input: z.infer<typeof createInvitationSchema>
 ): Promise<PublicInvitation & { token: string; inviteUrl: string; emailSent: boolean }> => {
-  const email = input.email.toLowerCase();
-  const taken = await db
-    .select({ id: users.id })
-    .from(users)
-    .where(eq(users.email, email))
-    .limit(1);
-  if (taken[0]) {
-    throw new InvitationError(
-      409,
-      "EMAIL_TAKEN",
-      "Email sudah terdaftar; tugaskan langsung sebagai pengampu bila perlu"
-    );
-  }
-  const token = randomBytes(32).toString("hex");
-  const expiresAt = new Date(
-    Date.now() + (input.expiresInDays ?? 7) * 24 * 3600 * 1000
-  );
   const created = await db.transaction(async (tx) => {
-    const [h] = await tx.insert(instructorInvitations).values({
-      email,
-      name: input.name ?? null,
-      note: input.note ?? null,
-      tokenHash: hashToken(token),
-      status: "pending",
-      invitedBy: actorId,
-      expiresAt,
-    });
-    const id = Number((h as unknown as { insertId: number }).insertId);
-    await writeAuditLog(tx, {
-      actorUserId: actorId,
-      action: "invitation.create",
-      targetType: "invitation",
-      targetIdInt: id,
-      metadata: { invitationId: id, email },
-    });
-    const rows = await tx
-      .select()
-      .from(instructorInvitations)
-      .where(eq(instructorInvitations.id, id))
-      .limit(1);
-    return rows[0] ?? null;
+    const { row, token, expiresAt } = await insertInvitationRow(tx, actorId, input);
+    return { ...row, token, expiresAt };
   });
-  if (!created) throw new Error("Gagal membuat undangan");
   // Token plaintext hanya muncul sekali: di respons ini + di email ini.
-  const inviteUrl = buildInviteUrl(token);
-  const emailSent = await trySendInvitation(email, {
+  const inviteUrl = buildInviteUrl(created.token);
+  const emailSent = await trySendInvitation(created.email, {
     name: created.name,
     inviteUrl,
-    expiresAt,
+    expiresAt: created.expiresAt,
   });
   return {
     id: created.id,
@@ -156,7 +194,7 @@ export const createInvitation = async (
     invitedBy: created.invitedBy,
     expiresAt: created.expiresAt,
     createdAt: created.createdAt,
-    token,
+    token: created.token,
     inviteUrl,
     emailSent,
   };
@@ -327,7 +365,8 @@ export const validateInvitation = async (
 export const acceptInvitation = async (
   input: z.infer<typeof acceptInvitationSchema>
 ) => {
-  const accepted = await db.transaction(async (tx) => {
+  try {
+    const accepted = await db.transaction(async (tx) => {
     const rows = await tx
       .select()
       .from(instructorInvitations)
@@ -360,8 +399,11 @@ export const acceptInvitation = async (
       );
     }
     const name = input.name ?? inv.name ?? "Pengajar Baru";
+    // Undangan tidak meminta username; alokasikan dari nama/email.
+    const username = await allocateUsername(tx, name !== "Pengajar Baru" ? name : inv.email);
     const [h] = await tx.insert(users).values({
       name,
+      username,
       email: inv.email,
       passwordHash: await hashPassword(input.password),
       role: "teacher",
@@ -380,16 +422,28 @@ export const acceptInvitation = async (
       targetIdInt: inv.id,
       metadata: { invitationId: inv.id, userId, email: inv.email },
     });
-    return { userId, name, email: inv.email };
-  });
-  const accessToken = createAccessToken({
-    id: accepted.userId,
-    email: accepted.email,
-    role: "teacher",
-  });
-  return {
-    message: "Undangan diterima. Akun instruktur aktif.",
-    accessToken,
-    user: { id: accepted.userId, name: accepted.name, email: accepted.email, role: "teacher" as const },
-  };
+    return { userId, username, name, email: inv.email };
+    });
+    const accessToken = createAccessToken({
+      id: accepted.userId,
+      email: accepted.email,
+      role: "teacher",
+    });
+    return {
+      message: "Undangan diterima. Akun instruktur aktif.",
+      accessToken,
+      user: { id: accepted.userId, username: accepted.username, name: accepted.name, email: accepted.email, role: "teacher" as const },
+    };
+  } catch (e) {
+    // Balapan dua accept paralel: pre-check lolos bersamaan, UNIQUE(email)
+    // menggagalkan salah satu → petakan ke 409, bukan 500 mentah.
+    if (isDupEntry(e)) {
+      throw new InvitationError(
+        409,
+        "EMAIL_TAKEN",
+        "Email sudah terdaftar; masuk dengan akun tersebut"
+      );
+    }
+    throw e;
+  }
 }

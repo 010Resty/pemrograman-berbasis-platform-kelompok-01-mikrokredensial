@@ -15,9 +15,11 @@ import {
   verifyOtpCode,
 } from "../otp.service";
 import {
+  registerSchema,
   resetPasswordSchema,
   resendVerificationSchema,
   verifyEmailSchema,
+  verifyResetCodeSchema,
 } from "../auth.service";
 
 /**
@@ -103,6 +105,23 @@ describe("auth OTP schemas (zod)", () => {
       }).success
     );
   });
+
+  it("verifyResetCodeSchema menerima email+kode 6 digit, menolak selainnya", () => {
+    assert.ok(
+      verifyResetCodeSchema.safeParse({ email: "a@b.co", code: "123456" })
+        .success
+    );
+    for (const code of ["12345", "1234567", "abcdef", ""]) {
+      assert.ok(
+        !verifyResetCodeSchema.safeParse({ email: "a@b.co", code }).success,
+        `kode ${code} harus ditolak`
+      );
+    }
+    assert.ok(
+      !verifyResetCodeSchema.safeParse({ email: "bukan-email", code: "123456" })
+        .success
+    );
+  });
 });
 
 describe("auth OTP tables (skema Drizzle)", () => {
@@ -119,6 +138,7 @@ describe("auth OTP tables (skema Drizzle)", () => {
     for (const n of [
       "email",
       "name",
+      "username",
       "password_hash",
       "code_hash",
       "expires_at",
@@ -129,6 +149,13 @@ describe("auth OTP tables (skema Drizzle)", () => {
     }
     const pk = config.columns.find((c) => c.name === "email");
     assert.ok(pk?.primary, "email harus primary key");
+  });
+
+  it("users.username wajib unik (identitas patungan)", () => {
+    const config = getTableConfig(users);
+    const col = config.columns.find((c) => c.name === "username");
+    assert.ok(col, "kolom username harus ada di tabel users");
+    assert.equal(col.notNull, true);
   });
 
   it("password_reset_otps ber-PK email + kolom OTP", () => {
@@ -143,5 +170,27 @@ describe("auth OTP tables (skema Drizzle)", () => {
     ]) {
       assert.ok(names.includes(n), `kolom ${n} harus ada`);
     }
+  });
+});
+
+describe("registerSchema username", () => {
+  const base = { name: "Siswa Uji", email: "siswa@uji.io", password: "Katasandi123" };
+  it("menerima username valid + normalisasi lowercase/trim", () => {
+    const r = registerSchema.safeParse({ ...base, username: "  Budi.Santoso_9 " });
+    assert.ok(r.success);
+    if (r.success) assert.equal(r.data.username, "budi.santoso_9");
+  });
+
+  it("menolak username terlalu pendek/panjang/karakter liar", () => {
+    for (const username of ["ab", "a".repeat(31), "budi santoso", "Budi!", "user@x"]) {
+      assert.ok(
+        !registerSchema.safeParse({ ...base, username }).success,
+        `username ${username} harus ditolak`
+      );
+    }
+  });
+
+  it("menolak tanpa username", () => {
+    assert.ok(!registerSchema.safeParse(base).success);
   });
 });

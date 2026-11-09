@@ -3,7 +3,9 @@ import { z } from "zod";
 import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import {
   CertificateError,
+  downloadCertificatePdf,
   getCertificateDetail,
+  getCertificateQr,
   getGlobalEligibilityDetail,
   getModuleCertificateStatus,
   getCertificateSummary,
@@ -80,6 +82,20 @@ const validModuleId = (req: AuthenticatedRequest, res: Response): number | null 
   return moduleId;
 };
 
+const validCertId = (req: AuthenticatedRequest, res: Response): number | null => {
+  const certId = Number(req.params.id);
+  if (!Number.isInteger(certId) || certId <= 0) {
+    res.status(404).json({
+      status: "error",
+      message: "Sertifikat tidak ditemukan",
+      code: "CERT_NOT_FOUND",
+      data: null,
+    });
+    return null;
+  }
+  return certId;
+};
+
 // POST /api/v1/modules/:id/certificate — terbitkan (idempoten).
 export const issueHandler = async (
   req: AuthenticatedRequest,
@@ -142,6 +158,43 @@ export const myCertificatesHandler = async (
   }
 };
 
+// GET /api/v1/me/certificates/:id/download — unduh PDF (pemilik/pengelola).
+export const downloadHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    const certId = validCertId(req, res);
+    if (certId === null) return;
+    try {
+      const { buffer, filename } = await downloadCertificatePdf(
+        userId,
+        req.user?.role ?? "",
+        certId
+      );
+      const ascii = filename.replace(/[^\x20-\x7e]/g, "");
+      res.status(200);
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader("Content-Length", String(buffer.length));
+      // Sama seperti QR: izinkan embed lintas origin (pratinjau langsung
+      // di tab baru tak diblokir browser).
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="${ascii || "sertifikat.pdf"}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+      );
+      res.send(buffer);
+    } catch (e) {
+      if (!certError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
 // GET /api/v1/me/modules/:id/certificate-status — kelayakan milik sendiri.
 export const myStatusHandler = async (
   req: AuthenticatedRequest,
@@ -198,11 +251,47 @@ export const verifyHandler = async (
   }
 };
 
+// GET /api/v1/certificates/verify/:code/qr — QR tautan verifikasi (publik, tanpa PII).
+export const verifyQrHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const code = typeof req.params.code === "string" ? req.params.code.trim() : "";
+    if (!code) {
+      res.status(404).json({
+        status: "error",
+        message: "Kode sertifikat tidak ditemukan",
+        code: "CODE_NOT_FOUND",
+        data: null,
+      });
+      return;
+    }
+    try {
+      const png = await getCertificateQr(code);
+      res.status(200);
+      res.setHeader("Content-Type", "image/png");
+      res.setHeader("Content-Length", String(png.length));
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      // Aset publik di-embed lintas origin (<img> sampul dari frontend yang
+      // beda origin). Tanpa ini default Helmet (same-origin) membuat browser
+      // menolak walau status 200 (ERR_BLOCKED_BY_RESPONSE).
+      res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
+      res.send(png);
+    } catch (e) {
+      if (!certError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
 const certificateListQuerySchema = z
   .object({
     courseId: z.coerce.number().int().positive().optional(),
     moduleId: z.coerce.number().int().positive().optional(),
-    status: z.enum(["issued", "revoked", "aktif", "dicabut"]).optional(),
+    status: z.enum(["issued", "revoked", "aktif", "dicabut", "digantikan"]).optional(),
     q: z.string().trim().max(100).optional(),
     from: z
       .string()
@@ -233,7 +322,9 @@ const eligibilityQuerySchema = z
 const parseListQuery = (req: AuthenticatedRequest) => {
   const parsed = certificateListQuerySchema.safeParse(req.query ?? {});
   if (!parsed.success) {
-    // Fallback aman: abaikan query tak valid kecuali status yang dikenali.
+    // Fallback SENGAJA (kompatibilitas): abaikan query tak valid kecuali status
+    // yang dikenali, bukan 400 — perilaku didokumentasikan di API_CONTRACT.
+    // Berbeda dari eligibility (400 ketat) karena riwayat bersifat baca-dan-saring.
     const q = req.query as Record<string, unknown>;
     const num = (v: unknown): number | undefined => {
       if (typeof v !== "string" || v.trim() === "") return undefined;
@@ -241,11 +332,18 @@ const parseListQuery = (req: AuthenticatedRequest) => {
       return Number.isInteger(n) && n > 0 ? n : undefined;
     };
     const statusRaw: unknown = q.status;
-    const status: "issued" | "revoked" | "aktif" | "dicabut" | undefined =
+    const status:
+      | "issued"
+      | "revoked"
+      | "aktif"
+      | "dicabut"
+      | "digantikan"
+      | undefined =
       statusRaw === "issued" ||
       statusRaw === "revoked" ||
       statusRaw === "aktif" ||
-      statusRaw === "dicabut"
+      statusRaw === "dicabut" ||
+      statusRaw === "digantikan"
         ? statusRaw
         : undefined;
     const dateRe = /^\d{4}-\d{2}-\d{2}$/;

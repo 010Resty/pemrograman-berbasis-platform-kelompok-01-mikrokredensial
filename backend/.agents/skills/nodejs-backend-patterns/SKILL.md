@@ -43,3 +43,11 @@ Detailed pattern documentation lives in `references/details.md`. Read that file 
 ## Testing Patterns
 
 See `javascript-testing-patterns` skill for comprehensive testing guidance.
+
+## ARISTOTELES — Project Guardrails (2026-11-04, append-only, precedence: backend/AGENTS.md)
+
+- Stack terkunci: Express 4 + Drizzle ORM + Zod. Abaikan saran Fastify/Hono/NestJS/Bun/Deno dan Joi di skill ini kecuali diminta eksplisit.
+- Validasi: Zod-only (`z.object`, `safeParse`, `z.infer`). Jangan pakai Joi tanpa diminta.
+- Jangan `npm install`, `npx`, migrasi, atau jalankan script tanpa persetujuan eksplisit.
+- Skill ini hanya referensi prinsip. Untuk implementasi Express ikuti `nodejs-express-server` (kecuali bagian Sequelize) + `drizzle` + `zod`.
+- Duplikat diketahui: salinan di `frontend/.agents/skills/nodejs-backend-patterns/` berisindeks beda. Lihat `ARISTOTELES.md` di masing-masing folder. Jangan sinkronkan ulang tanpa persetujuan.

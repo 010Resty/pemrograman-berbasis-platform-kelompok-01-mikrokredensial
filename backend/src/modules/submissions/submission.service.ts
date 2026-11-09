@@ -26,13 +26,36 @@ export const submitInputSchema = z
   })
   .strict();
 
-export const gradeInputSchema = z
+/** Satu kriteria rubrik: bilangan bulat 0–100. */
+const rubricScore = z.number().int().min(0).max(100);
+
+/** Rincian rubrik K-06 (3 kriteria tetap, bobot sama). */
+export const rubricInputSchema = z
   .object({
-    score: z.number().int().min(0).max(100),
-    decision: z.enum(["passed", "failed", "revision_requested"]),
-    feedback: z.string().trim().max(2000).nullable().optional(),
+    kelengkapan: rubricScore,
+    ketepatan: rubricScore,
+    kerapian: rubricScore,
   })
   .strict();
+
+export type RubricScores = z.infer<typeof rubricInputSchema>;
+
+/** Rata-rata bulat — satu-satunya cara skor dari rubrik (server berhitung). */
+export const rubricAverage = (r: RubricScores): number =>
+  Math.round((r.kelengkapan + r.ketepatan + r.kerapian) / 3);
+
+export const gradeInputSchema = z
+  .object({
+    score: z.number().int().min(0).max(100).optional(),
+    decision: z.enum(["passed", "failed", "revision_requested"]),
+    feedback: z.string().trim().max(2000).nullable().optional(),
+    rubric: rubricInputSchema.optional(),
+  })
+  .strict()
+  .refine((v) => v.score !== undefined || v.rubric !== undefined, {
+    message: "Nilai atau rubrik wajib diisi",
+    path: ["score"],
+  });
 
 export class SubmissionError extends Error {
   readonly http: number;
@@ -60,6 +83,7 @@ export interface PublicSubmission {
   note: string | null;
   score: number | null;
   feedback: string | null;
+  rubricScores: RubricScores | null;
   status: string;
   gradedBy: number | null;
   gradedAt: Date | null;
@@ -79,6 +103,7 @@ const toPublicSubmission = (row: typeof submissions.$inferSelect): PublicSubmiss
   note: row.note,
   score: row.score,
   feedback: row.feedback,
+  rubricScores: row.rubricScores,
   status: row.status,
   gradedBy: row.gradedBy,
   gradedAt: row.gradedAt,
@@ -233,20 +258,30 @@ export const createSubmission = async (
     .where(eq(users.id, userId))
     .limit(1);
   const fileUrl = `/api/v1/files/${file.id}/content`;
-  const [h] = await db.insert(submissions).values({
-    userId,
-    materialId,
-    fileId: file.id,
-    filePath: fileUrl,
-    studentName: owners[0]?.name ?? null,
-    studentNim: input.studentNim ?? null,
-    note: input.note ?? null,
+  const createdId = await db.transaction(async (tx) => {
+    const [h] = await tx.insert(submissions).values({
+      userId,
+      materialId,
+      fileId: file.id,
+      filePath: fileUrl,
+      studentName: owners[0]?.name ?? null,
+      studentNim: input.studentNim ?? null,
+      note: input.note ?? null,
+    });
+    const id = Number((h as unknown as { insertId: number }).insertId);
+    await tx.insert(auditLogs).values({
+      actorUserId: userId,
+      action: "submission.create",
+      targetType: "submission",
+      targetIdInt: id,
+      metadata: { submissionId: id, userId, materialId, fileId: file.id },
+    });
+    return id;
   });
-  const id = Number((h as unknown as { insertId: number }).insertId);
   const created = await db
     .select()
     .from(submissions)
-    .where(eq(submissions.id, id))
+    .where(eq(submissions.id, createdId))
     .limit(1);
   if (!created[0]) throw new Error("Gagal menyimpan submission");
   return withFileMetaOne(created[0]);
@@ -618,6 +653,7 @@ export const gradeSubmission = async (
     );
   }
   const updated = await db.transaction(async (tx) => {
+    // Kunci baris agar dua penilai konkuren antre tertib (last-wins deterministik).
     const rows = await tx
       .select()
       .from(submissions)
@@ -627,13 +663,23 @@ export const gradeSubmission = async (
           eq(submissions.materialId, materialId)
         )
       )
+      .for("update")
       .limit(1);
     if (!rows[0]) return null;
+    // Skor efektif: rubrik (bila dikirim) dihitung server — angka klien
+    // tak dipercaya. Tanpa rubrik, pakai score langsung (kompatibel lama);
+    // rincian lama ikut dibersihkan agar tak menempel pada nilai baru.
+    const effectiveScore =
+      input.rubric !== undefined ? rubricAverage(input.rubric) : input.score;
+    if (effectiveScore === undefined) {
+      throw new SubmissionError(400, "SCORE_REQUIRED", "Nilai atau rubrik wajib diisi");
+    }
     const now = new Date();
     await tx
       .update(submissions)
       .set({
-        score: input.score,
+        score: effectiveScore,
+        rubricScores: input.rubric ?? null,
         feedback: input.feedback ?? null,
         status: input.decision,
         gradedBy: actorId,
@@ -649,7 +695,8 @@ export const gradeSubmission = async (
         submissionId,
         materialId,
         studentId: rows[0].userId,
-        score: input.score,
+        score: effectiveScore,
+        rubric: input.rubric ?? null,
         decision: input.decision,
       },
     });

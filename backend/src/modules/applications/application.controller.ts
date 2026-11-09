@@ -137,6 +137,7 @@ export const deleteHandler = async (
   next: NextFunction
 ) => {
   try {
+    const actorId = uid(req);
     const id = parseId(req.params.id);
     if (id === null) {
       res.status(404).json({
@@ -146,7 +147,7 @@ export const deleteHandler = async (
       });
       return;
     }
-    const result = await deleteApplication(id);
+    const result = await deleteApplication(id, actorId);
     res.status(200).json({
       status: "success",
       message: "Pengajuan dihapus",

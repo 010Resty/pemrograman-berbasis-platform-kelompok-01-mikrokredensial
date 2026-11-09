@@ -102,6 +102,7 @@ before(async () => {
   const hash = await bcrypt.hash(TEST_PASSWORD, 4);
   await db.insert(schema.users).values({
     name: "Admin Uji",
+    username: "admin.uji",
     email: "admin@uji.io",
     passwordHash: hash,
     role: "admin",
@@ -109,6 +110,7 @@ before(async () => {
   });
   await db.insert(schema.users).values({
     name: "Siswa Uji",
+    username: "siswa.uji",
     email: "siswa@uji.io",
     passwordHash: hash,
     role: "student",

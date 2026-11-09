@@ -16,6 +16,7 @@ import {
   quizSetInputSchema,
   replaceQuiz,
 } from "./quiz.service";
+import { tryAutoIssueForMaterial } from "../certificates/certificate.service";
 
 const uid = (req: AuthenticatedRequest): number | null => {
   const id = Number(req.user?.id);
@@ -97,6 +98,7 @@ async function guardManage(
     res.status(exists ? 403 : 404).json({
       status: "error",
       message: exists ? "Akses ditolak untuk peran ini" : "Data tidak ditemukan",
+      code: exists ? "NOT_MANAGER" : undefined,
       data: null,
     });
     return null;
@@ -106,11 +108,11 @@ async function guardManage(
 
 const quizError = (res: Response, e: unknown): boolean => {
   if (e instanceof QuizInputError) {
-    if (e.message === "__NOT_FOUND__") {
+    if (e.code === "__NOT_FOUND__") {
       notFound(res);
       return true;
     }
-    res.status(400).json({ status: "error", message: e.message, data: null });
+    res.status(400).json({ status: "error", message: e.message, code: e.code, data: null });
     return true;
   }
   return false;
@@ -170,7 +172,7 @@ export const putQuizHandler = async (
       return;
     }
     try {
-      const questions = await replaceQuiz(materialId, parsed.data);
+      const questions = await replaceQuiz(materialId, parsed.data, userId);
       res.status(200).json({
         status: "success",
         message: "Soal kuis disimpan.",
@@ -210,6 +212,8 @@ export const attemptHandler = async (
     }
     try {
       const result = await gradeAttempt(userId, materialId, parsed.data);
+      // Sertifikat terbit otomatis bila modul ini baru saja lengkap.
+      const auto = await tryAutoIssueForMaterial(userId, materialId);
       res.status(201).json({
         status: "success",
         message: result.attempt.passed
@@ -226,6 +230,7 @@ export const attemptHandler = async (
           bestScore: result.bestScore,
           attempts: result.attempts,
           overallPassed: result.overallPassed,
+          certificateIssued: auto.issued,
         },
       });
     } catch (e) {

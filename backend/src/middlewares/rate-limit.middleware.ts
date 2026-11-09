@@ -79,6 +79,53 @@ export const publicSubmitLimiter = () =>
       "Terlalu banyak pengajuan dari jaringan ini. Coba lagi beberapa menit.",
   });
 
+/**
+ * Batas OTP auth: default 30x per 15 menit per IP per endpoint.
+ * Menahan flooding/brute-force lintas banyak email (batas per-email saja
+ * tidak cukup bila penyerang memutar daftar email). Longgar untuk manusia
+ * (kirim ulang normal hanya beberapa kali), bisa diubah via env.
+ */
+export const authOtpLimiter = () =>
+  rateLimit({
+    windowMs: intEnv("AUTH_OTP_RATE_LIMIT_WINDOW_MS", 15 * 60 * 1000),
+    max: intEnv("AUTH_OTP_RATE_LIMIT_MAX", 30),
+    message:
+      "Terlalu banyak permintaan kode dari jaringan ini. Coba lagi beberapa menit.",
+  });
+
+/**
+ * Batas baca publik: default 600x per 15 menit per IP per endpoint.
+ * Menahan scraping/enumerasi katalog tanpa mengganggu penggunaan normal
+ * (satu halaman katalog + polling wajar jauh di bawah ambang ini).
+ */
+export const publicReadLimiter = () =>
+  rateLimit({
+    windowMs: intEnv("READ_LIMIT_WINDOW_MS", 15 * 60 * 1000),
+    max: intEnv("READ_LIMIT_MAX", 600),
+    message:
+      "Terlalu banyak permintaan dari jaringan ini. Coba lagi beberapa menit.",
+  });
+
+/**
+ * Batas cek username patungan (authenticated): longgar untuk pengetikan
+ * live (tiap field debounce), tapi tetap menahan enumerasi akun.
+ * Default 120x per 15 menit per IP.
+ */
+export const patunganValidateLimiter = () =>
+  rateLimit({
+    windowMs: intEnv("PATUNGAN_VALIDATE_WINDOW_MS", 15 * 60 * 1000),
+    max: intEnv("PATUNGAN_VALIDATE_MAX", 120),
+    message: "Terlalu banyak pengecekan username. Coba lagi beberapa menit.",
+  });
+
+/** Batas aksi tulis patungan (buat/cancel grup): default 10x per 15 menit per IP. */
+export const patunganSubmitLimiter = () =>
+  rateLimit({
+    windowMs: intEnv("PATUNGAN_SUBMIT_WINDOW_MS", 15 * 60 * 1000),
+    max: intEnv("PATUNGAN_SUBMIT_MAX", 10),
+    message: "Terlalu banyak aksi patungan dari jaringan ini. Coba lagi beberapa menit.",
+  });
+
 /** Reset state (dipakai test saja). */
 export const resetRateLimitForTest = (): void => {
   buckets.clear();

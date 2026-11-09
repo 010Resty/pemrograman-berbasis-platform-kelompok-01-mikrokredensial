@@ -1,12 +1,13 @@
 import { Router } from "express";
 import { authenticate, optionalAuthenticate, requireRole } from "../../middlewares/auth.middleware";
+import { publicReadLimiter } from "../../middlewares/rate-limit.middleware";
 import { create, listPublic, listMine, detail, update, remove } from "./course.controller";
 
 const router = Router();
 const instructorRouter = Router();
 
 // Katalog publik (hanya published).
-router.get("/", listPublic);
+router.get("/", publicReadLimiter(), listPublic);
 
 // Daftar kursus instruktur/admin.
 instructorRouter.get(
@@ -17,7 +18,7 @@ instructorRouter.get(
 );
 
 router.post("/", authenticate, requireRole("teacher", "admin"), create);
-router.get("/:id", optionalAuthenticate, detail);
+router.get("/:id", optionalAuthenticate, publicReadLimiter(), detail);
 router.patch("/:id", authenticate, requireRole("teacher", "admin"), update);
 router.delete("/:id", authenticate, requireRole("teacher", "admin"), remove);
 

@@ -11,6 +11,7 @@ import {
   listSubmissions,
   submitInputSchema,
 } from "./submission.service";
+import { tryAutoIssueForMaterial } from "../certificates/certificate.service";
 
 const uid = (req: AuthenticatedRequest): number | null => {
   const id = Number(req.user?.id);
@@ -247,6 +248,9 @@ export const gradeHandler = async (
         submissionId,
         parsed.data
       );
+      // Sertifikat terbit otomatis untuk pemilik submission bila modulnya
+      // baru saja lengkap. Best-effort: tidak mengubah hasil penilaian.
+      await tryAutoIssueForMaterial(row.userId, materialId);
       res.status(200).json({
         status: "success",
         message: "Penilaian tersimpan.",

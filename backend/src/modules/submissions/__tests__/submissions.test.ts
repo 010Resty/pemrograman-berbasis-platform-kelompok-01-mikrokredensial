@@ -111,7 +111,7 @@ before(async () => {
 
   const hash = await bcrypt.hash(TEST_PASSWORD, 4);
   const mkUser = async (name: string, email: string, role: "admin" | "teacher" | "student") => {
-    const [h] = await db.insert(schema.users).values({ name, email, passwordHash: hash, role, emailVerifiedAt: new Date() });
+    const [h] = await db.insert(schema.users).values({ name, username: email.split("@")[0] + "-t", email, passwordHash: hash, role, emailVerifiedAt: new Date() });
     return Number((h as unknown as { insertId: number }).insertId);
   };
   ids.admin = await mkUser("Admin Uji", "admin@uji.io", "admin");
@@ -424,6 +424,63 @@ describe("penilaian pengelola", () => {
     );
     assert.equal(st2.json.data.passed, true);
     assert.equal(st2.json.data.attempts, 3);
+  });
+
+  it("rubrik: server menghitung rata-rata; skor klien diabaikan; tanpa rubrik dibersihkan", async () => {
+    const f = await uploadPdf(tokens.s1, "tugas-rubrik.pdf");
+    const sub = await api<{ id: number }>(
+      "POST",
+      `/api/v1/materials/${ids.matTugas}/submissions`,
+      tokens.s1,
+      { fileId: f.id }
+    );
+    assert.equal(sub.http, 201);
+    const id = sub.json.data.id;
+
+    // Skor klien 10 diabaikan: (90+80+70)/3 = 80 dari server.
+    const g = await api<{ score: number; rubricScores: unknown }>(
+      "POST",
+      `/api/v1/materials/${ids.matTugas}/submissions/${id}/grade`,
+      tokens.teacher,
+      {
+        score: 10,
+        decision: "passed",
+        rubric: { kelengkapan: 90, ketepatan: 80, kerapian: 70 },
+      }
+    );
+    assert.equal(g.http, 200, JSON.stringify(g.json));
+    assert.equal(g.json.data.score, 80);
+    assert.deepEqual(g.json.data.rubricScores, {
+      kelengkapan: 90,
+      ketepatan: 80,
+      kerapian: 70,
+    });
+
+    // Nilai ulang tanpa rubrik: skor langsung + rincian dibersihkan.
+    const g2 = await api<{ score: number; rubricScores: unknown }>(
+      "POST",
+      `/api/v1/materials/${ids.matTugas}/submissions/${id}/grade`,
+      tokens.teacher,
+      { score: 95, decision: "passed" }
+    );
+    assert.equal(g2.http, 200);
+    assert.equal(g2.json.data.score, 95);
+    assert.equal(g2.json.data.rubricScores, null);
+
+    // Rubrik tak valid → 400 (batas, kunci hilang, bukan objek).
+    for (const rubric of [
+      { kelengkapan: 101, ketepatan: 80, kerapian: 70 },
+      { kelengkapan: 80, ketepatan: 80 },
+      "bagus",
+    ]) {
+      const bad = await api(
+        "POST",
+        `/api/v1/materials/${ids.matTugas}/submissions/${id}/grade`,
+        tokens.teacher,
+        { score: 80, decision: "passed", rubric }
+      );
+      assert.equal(bad.http, 400, JSON.stringify(rubric));
+    }
   });
 
   it("revision_requested lalu lulus; penolakan peran dan validasi", async () => {

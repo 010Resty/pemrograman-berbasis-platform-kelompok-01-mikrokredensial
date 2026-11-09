@@ -160,31 +160,41 @@ export const enrollFree = async (
       "Kursus berbayar memerlukan pemberian akses oleh admin"
     );
   }
-  const existing = await db
-    .select({ status: enrollments.status })
-    .from(enrollments)
-    .where(
-      and(
-        eq(enrollments.userId, userId),
-        eq(enrollments.courseId, courseId)
+  return db.transaction(async (tx) => {
+    const locked = await tx
+      .select({ status: enrollments.status })
+      .from(enrollments)
+      .where(
+        and(
+          eq(enrollments.userId, userId),
+          eq(enrollments.courseId, courseId)
+        )
       )
-    )
-    .limit(1);
-  if (existing[0] && ACCESS_STATUSES.includes(existing[0].status)) {
-    throw new EnrollmentError(
-      409,
-      "ALREADY_ENROLLED",
-      "Anda sudah terdaftar di kursus ini"
-    );
-  }
-  const reactivated = existing.length > 0;
-  await db
-    .insert(enrollments)
-    .values({ userId, courseId, source: "free", status: "active" })
-    .onDuplicateKeyUpdate({
-      set: { source: "free", status: "active" },
+      .for("update")
+      .limit(1);
+    if (locked[0] && ACCESS_STATUSES.includes(locked[0].status)) {
+      throw new EnrollmentError(
+        409,
+        "ALREADY_ENROLLED",
+        "Anda sudah terdaftar di kursus ini"
+      );
+    }
+    const reactivated = locked.length > 0;
+    await tx
+      .insert(enrollments)
+      .values({ userId, courseId, source: "free", status: "active" })
+      .onDuplicateKeyUpdate({
+        set: { source: "free", status: "active" },
+      });
+    await tx.insert(auditLogs).values({
+      actorUserId: userId,
+      action: "enrollment.self",
+      targetType: "enrollment",
+      targetIdInt: courseId,
+      metadata: { userId, courseId, source: "free", reactivated },
     });
-  return { courseId, status: "active", source: "free", reactivated };
+    return { courseId, status: "active", source: "free", reactivated };
+  });
 };
 
 // ---------- Daftar kursus saya ----------
@@ -224,7 +234,8 @@ export type LearningGuard =
 /**
  * Guard terpadu untuk aksi belajar:
  * materi ada + pohon kursus boleh dibaca (published/archived publik, draft manajer)
- * + peminta mempunyai hak akses belajar (admin/pengelola/enrollment aktif).
+ * + peminta mempunyai hak akses belajar (admin/pengelola/enrollment aktif)
+ * + batch sudah berjalan (upcoming hanya untuk pratinjau pengelola).
  */
 export const resolveLearningGuard = async (
   userId: number,
@@ -240,7 +251,32 @@ export const resolveLearningGuard = async (
   if (!(await hasCourseAccess(userId, role, courseId))) {
     return { status: "no-access" };
   }
+  // Batch belum berjalan: peserta terdaftar pun belum boleh belajar
+  // (materi/kuis/tugas/progres). Pengelola (admin/teacher pengampu) tetap
+  // boleh pratinjau. Pendaftaran (enroll) untuk upcoming tetap diizinkan.
+  if (await isPeriodLockedForLearning(userId, role, courseId)) {
+    return { status: "no-access" };
+  }
   return { status: "ok", courseId };
+};
+
+/**
+ * True bila batch kursus belum berjalan untuk peminta non-pengelola.
+ * Dipakai guard terpadu + daftar/detail materi (satu aturan di satu tempat).
+ */
+export const isPeriodLockedForLearning = async (
+  userId: number,
+  role: string,
+  courseId: number
+): Promise<boolean> => {
+  if (role === "admin") return false;
+  if (await canManageCourse(userId, role, courseId)) return false;
+  const courseRows = await db
+    .select({ period: courses.period })
+    .from(courses)
+    .where(eq(courses.id, courseId))
+    .limit(1);
+  return courseRows[0]?.period === "upcoming";
 };
 
 // ---------- Pemberian / pencabutan manual oleh admin ----------

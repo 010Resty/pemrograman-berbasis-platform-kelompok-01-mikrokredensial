@@ -108,6 +108,7 @@ before(async () => {
   const hash = await bcrypt.hash(TEST_PASSWORD, 4);
   const [tH] = await db.insert(schema.users).values({
     name: "Guru Kuis",
+    username: "gurukuis.uji",
     email: "gurukuis@uji.io",
     passwordHash: hash,
     emailVerifiedAt: new Date(),
@@ -117,6 +118,7 @@ before(async () => {
   for (const [i, email] of ["murid1@uji.io", "murid2@uji.io"].entries()) {
     const [h] = await db.insert(schema.users).values({
       name: `Murid ${i + 1}`,
+      username: email.split("@")[0] + "-t",
       email,
       passwordHash: hash,
       emailVerifiedAt: new Date(),

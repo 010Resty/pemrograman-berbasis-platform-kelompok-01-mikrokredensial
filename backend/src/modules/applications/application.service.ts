@@ -2,13 +2,13 @@ import { randomBytes } from "node:crypto";
 import { z } from "zod";
 import { and, desc, eq, like, or, sql } from "drizzle-orm";
 import { db } from "../../db";
-import { files, instructorApplications, users } from "../../db/schema";
+import { auditLogs, files, instructorApplications, users } from "../../db/schema";
 import {
   UploadValidationError,
   deleteFileById,
   saveUpload,
 } from "../uploads/upload.service";
-import { createInvitation } from "../invitations/invitation.service";
+import { buildInviteUrl, insertInvitationRow, trySendInvitation } from "../invitations/invitation.service";
 
 export class ApplicationError extends Error {
   readonly http: number;
@@ -225,6 +225,28 @@ const isDupEntry = (error: unknown): boolean =>
   "code" in error &&
   (error as { code: unknown }).code === "ER_DUP_ENTRY";
 
+/** Escape wildcard LIKE (% _ \) agar pencarian tidak melebar. */
+const escapeLike = (s: string): string => s.replace(/[\\%_]/g, (m) => `\\${m}`);
+
+const writeAuditLog = async (
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+  entry: {
+    actorUserId: number | null;
+    action: string;
+    targetType: string;
+    targetIdInt?: number | null;
+    metadata?: Record<string, unknown>;
+  }
+) => {
+  await tx.insert(auditLogs).values({
+    actorUserId: entry.actorUserId,
+    action: entry.action,
+    targetType: entry.targetType,
+    targetIdInt: entry.targetIdInt ?? null,
+    metadata: entry.metadata ?? null,
+  });
+};
+
 // ---------- Pengajuan publik ----------
 
 export const submitApplication = async (
@@ -319,6 +341,13 @@ export const submitApplication = async (
             .set({ cvSize: frows[0]?.sizeBytes ?? 0 })
             .where(eq(instructorApplications.id, id));
         }
+        await db.insert(auditLogs).values({
+          actorUserId: null,
+          action: "application.submit",
+          targetType: "instructor_application",
+          targetIdInt: id,
+          metadata: { applicationId: id, email: data.email },
+        });
         return toPublicApplication(await findById(id));
       } catch (error) {
         if (!isDupEntry(error)) throw error;
@@ -372,11 +401,12 @@ export const listApplications = async (
   const conditions = [];
   if (status) conditions.push(eq(instructorApplications.status, status));
   if (term) {
+    const t = escapeLike(term);
     conditions.push(
       or(
-        like(instructorApplications.email, `%${term}%`),
-        like(instructorApplications.name, `%${term}%`),
-        like(instructorApplications.code, `%${term.toUpperCase()}%`)
+        like(instructorApplications.email, `%${t}%`),
+        like(instructorApplications.name, `%${t}%`),
+        like(instructorApplications.code, `%${t.toUpperCase()}%`)
       )
     );
   }
@@ -429,28 +459,46 @@ export const reviewApplication = async (
   if (row.status === parsed.data.status) {
     return toPublicApplication(row);
   }
-  await db
-    .update(instructorApplications)
-    .set({
-      status: parsed.data.status,
-      reviewNote: parsed.data.reviewNote ?? null,
-      reviewedBy: reviewerId,
-      reviewedAt: new Date(),
-    })
-    .where(eq(instructorApplications.id, id));
+  await db.transaction(async (tx) => {
+    await tx
+      .update(instructorApplications)
+      .set({
+        status: parsed.data.status,
+        reviewNote: parsed.data.reviewNote ?? null,
+        reviewedBy: reviewerId,
+        reviewedAt: new Date(),
+      })
+      .where(eq(instructorApplications.id, id));
+    await writeAuditLog(tx, {
+      actorUserId: reviewerId,
+      action: "application.review",
+      targetType: "instructor_application",
+      targetIdInt: id,
+      metadata: { applicationId: id, from: row.status, to: parsed.data.status },
+    });
+  });
   return toPublicApplication(await findById(id));
 };
 
 // ---------- Admin: hapus ----------
 
-export const deleteApplication = async (id: number): Promise<{ id: number }> => {
+export const deleteApplication = async (id: number, actorId?: number | null): Promise<{ id: number }> => {
   const row = await findById(id);
-  await db
-    .delete(instructorApplications)
-    .where(eq(instructorApplications.id, id));
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(instructorApplications)
+      .where(eq(instructorApplications.id, id));
+    await writeAuditLog(tx, {
+      actorUserId: actorId ?? null,
+      action: "application.delete",
+      targetType: "instructor_application",
+      targetIdInt: id,
+      metadata: { applicationId: id, email: row.email },
+    });
+  });
   // FK set null + hapus byte best-effort agar storage tidak bocor.
-  if (row.photoFileId) await deleteFileById(row.photoFileId);
-  if (row.cvFileId) await deleteFileById(row.cvFileId);
+  if (row.photoFileId) await deleteFileById(row.photoFileId, actorId ?? null);
+  if (row.cvFileId) await deleteFileById(row.cvFileId, actorId ?? null);
   return { id };
 };
 
@@ -490,11 +538,37 @@ export const inviteApplication = async (
     );
   }
 
-  const invitation = await createInvitation(actorId, {
-    email: row.email,
-    name: row.name,
-    ...(parsed.data.expiresInDays ? { expiresInDays: parsed.data.expiresInDays } : {}),
-  }).catch((e: unknown) => {
+  // Atomik: undangan + status approved + kedua audit dalam SATU transaksi.
+  // Kegagalan di tengah me-rollback semuanya (tidak ada undangan yatim).
+  let invitation: { id: number; email: string; token: string; inviteUrl: string; expiresAt: Date };
+  try {
+    const built = await db.transaction(async (tx) => {
+      const made = await insertInvitationRow(tx, actorId, {
+        email: row.email,
+        name: row.name,
+        ...(parsed.data.expiresInDays ? { expiresInDays: parsed.data.expiresInDays } : {}),
+      });
+      await tx
+        .update(instructorApplications)
+        .set({ status: "approved", reviewedBy: actorId, reviewedAt: new Date() })
+        .where(eq(instructorApplications.id, id));
+      await writeAuditLog(tx, {
+        actorUserId: actorId,
+        action: "application.invite",
+        targetType: "instructor_application",
+        targetIdInt: id,
+        metadata: { applicationId: id, invitationId: made.row.id, email: row.email },
+      });
+      return made;
+    });
+    invitation = {
+      id: built.row.id,
+      email: built.row.email,
+      token: built.token,
+      inviteUrl: buildInviteUrl(built.token),
+      expiresAt: built.expiresAt,
+    };
+  } catch (e: unknown) {
     // Samakan bentuk error undangan ke kontrak modul ini.
     const err = e as { http?: number; code?: string; message?: string };
     throw new ApplicationError(
@@ -502,12 +576,14 @@ export const inviteApplication = async (
       typeof err.code === "string" ? err.code : "INVITATION_FAILED",
       typeof err.message === "string" ? err.message : "Gagal membuat undangan"
     );
-  });
+  }
 
-  await db
-    .update(instructorApplications)
-    .set({ status: "approved", reviewedBy: actorId, reviewedAt: new Date() })
-    .where(eq(instructorApplications.id, id));
+  // Email di luar transaksi (efek samping tidak bisa di-rollback).
+  const emailSent = await trySendInvitation(invitation.email, {
+    name: row.name,
+    inviteUrl: invitation.inviteUrl,
+    expiresAt: invitation.expiresAt,
+  });
 
   return {
     application: toPublicApplication(await findById(id)),
@@ -517,7 +593,7 @@ export const inviteApplication = async (
       token: invitation.token,
       inviteUrl: invitation.inviteUrl,
       expiresAt: invitation.expiresAt,
-      emailSent: invitation.emailSent,
+      emailSent,
     },
   };
 };

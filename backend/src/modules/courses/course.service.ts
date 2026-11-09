@@ -1,7 +1,27 @@
 import { z } from "zod";
 import { eq, and, or, like, inArray, desc, asc } from "drizzle-orm";
 import { db } from "../../db";
-import { courses, courseInstructors, users } from "../../db/schema";
+import { auditLogs, courses, courseInstructors, users } from "../../db/schema";
+
+type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
+
+const writeCourseAudit = async (
+  tx: DbTx,
+  entry: {
+    actorUserId: number | null;
+    action: string;
+    targetIdInt?: number | null;
+    metadata?: Record<string, unknown>;
+  }
+) => {
+  await tx.insert(auditLogs).values({
+    actorUserId: entry.actorUserId,
+    action: entry.action,
+    targetType: "course",
+    targetIdInt: entry.targetIdInt ?? null,
+    metadata: entry.metadata ?? null,
+  });
+};
 
 export const CATEGORIES = [
   "Pengembangan Web",
@@ -15,6 +35,9 @@ export const CATEGORIES = [
 ] as const;
 
 export const LEVELS = ["Pemula", "Menengah", "Lanjutan"] as const;
+
+/** Escape wildcard LIKE (% _ \) agar input user tidak melebar. Masih parameterized. */
+const escapeLike = (s: string): string => s.replace(/[\\%_]/g, (m) => `\\${m}`);
 
 /** Query list kursus — koersi string query-param (selalu string) ke angka/enum.
  * Dipakai di boundary controller (validate-early, zod coercion-for-form-data). */
@@ -132,6 +155,12 @@ export const createCourse = async (
       courseId: id,
       userId: ownerUserId,
     });
+    await writeCourseAudit(tx, {
+      actorUserId: ownerUserId,
+      action: "course.create",
+      targetIdInt: id,
+      metadata: { courseId: id, title: input.title },
+    });
     return id;
   });
 
@@ -180,10 +209,11 @@ export const listCourses = async (
   if (filter.category) conditions.push(eq(courses.category, filter.category));
   if (filter.period) conditions.push(eq(courses.period, filter.period));
   if (filter.q) {
+    const q = escapeLike(filter.q);
     conditions.push(
       or(
-        like(courses.title, `%${filter.q}%`),
-        like(courses.description, `%${filter.q}%`)
+        like(courses.title, `%${q}%`),
+        like(courses.description, `%${q}%`)
       )
     );
   }
@@ -234,7 +264,8 @@ export const listMyCourses = async (
  * Mengembalikan URL cover bila menunjuk file internal agar controller
  * bisa bersih-bersih metadata + disk best-effort. */
 export const deleteCourse = async (
-  courseId: number
+  courseId: number,
+  actorId: number | null = null
 ): Promise<{ coverUrl: string | null }> => {
   const existing = await getCourseById(courseId);
   const coverUrl =
@@ -242,6 +273,12 @@ export const deleteCourse = async (
       ? existing.image.trim()
       : null;
   await db.transaction(async (tx) => {
+    await writeCourseAudit(tx, {
+      actorUserId: actorId,
+      action: "course.delete",
+      targetIdInt: courseId,
+      metadata: { courseId, title: existing?.title ?? null },
+    });
     await tx.delete(courses).where(eq(courses.id, courseId));
   });
   return { coverUrl };
@@ -258,7 +295,8 @@ export const parseCoverFileId = (coverUrl: string | null): number | null => {
 
 export const updateCourse = async (
   courseId: number,
-  input: Partial<CreateCourseInput> & { status?: "draft" | "published" | "archived" }
+  input: Partial<CreateCourseInput> & { status?: "draft" | "published" | "archived" },
+  actorId: number | null = null
 ) => {
   const patch: Record<string, unknown> = {};
   if (input.title !== undefined) patch.title = input.title;
@@ -277,6 +315,14 @@ export const updateCourse = async (
   if (input.tools !== undefined) patch.tools = input.tools;
   if (input.status !== undefined) patch.status = input.status;
 
-  await db.update(courses).set(patch).where(eq(courses.id, courseId));
+  await db.transaction(async (tx) => {
+    await tx.update(courses).set(patch).where(eq(courses.id, courseId));
+    await writeCourseAudit(tx, {
+      actorUserId: actorId,
+      action: "course.update",
+      targetIdInt: courseId,
+      metadata: { courseId, changed: Object.keys(patch) },
+    });
+  });
   return getCourseById(courseId);
 };

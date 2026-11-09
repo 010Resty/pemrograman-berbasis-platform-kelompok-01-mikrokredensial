@@ -1,6 +1,8 @@
 import { randomBytes } from "node:crypto";
+import { promises as fsp } from "node:fs";
 import { z } from "zod";
-import { and, asc, desc, eq, gte, inArray, like, lte, or, sql } from "drizzle-orm";
+import QRCode from "qrcode";
+import { and, asc, desc, eq, gte, inArray, isNotNull, isNull, like, lte, ne, or, sql } from "drizzle-orm";
 import { db } from "../../db";
 import {
   auditLogs,
@@ -16,6 +18,13 @@ import {
   users,
 } from "../../db/schema";
 import { canManageCourse } from "../courses/course.service";
+import {
+  buildCertificatePdf,
+  certificateFileName,
+  ensureCertificatePdf,
+  verifyUrlFor,
+  type CertificatePdfData,
+} from "./certificate-pdf";
 import {
   canReadCourseTree,
   getModule,
@@ -49,6 +58,9 @@ export class CertificateError extends Error {
     this.details = details;
   }
 }
+
+/** Escape wildcard LIKE (% _ \) agar pencarian tidak melebar. */
+const escapeLike = (s: string): string => s.replace(/[\\%_]/g, (m) => `\\${m}`);
 
 // ---------- Bentuk baca ----------
 
@@ -86,8 +98,12 @@ export interface PublicCertificate {
   recipientName: string;
   courseId: number;
   courseTitle: string;
-  moduleId: number;
-  moduleTitle: string;
+  /** null = sertifikat level kursus (Fase B). */
+  moduleId: number | null;
+  moduleTitle: string | null;
+  /** Nama instruktur utama kursus (untuk blok tanda tangan). Opsional. */
+  instructorName?: string | null;
+  /** issued | revoked | superseded (digantikan sertifikat kursus). */
   status: string;
   issuedAt: Date;
   revokedAt: Date | null;
@@ -100,8 +116,8 @@ const toPublicCertificate = (row: {
   recipientName: string;
   courseId: number;
   courseTitle: string;
-  moduleId: number;
-  moduleTitle: string;
+  moduleId: number | null;
+  moduleTitle: string | null;
   status: string;
   issuedAt: Date;
   revokedAt: Date | null;
@@ -125,7 +141,7 @@ const certWithTitles = async (certId: number): Promise<PublicCertificate | null>
     })
     .from(certificates)
     .innerJoin(courses, eq(courses.id, certificates.courseId))
-    .innerJoin(modules, eq(modules.id, certificates.moduleId))
+    .leftJoin(modules, eq(modules.id, certificates.moduleId))
     .where(eq(certificates.id, certId))
     .limit(1);
   return rows[0] ? toPublicCertificate(rows[0]) : null;
@@ -290,6 +306,21 @@ export const issueCertificate = async (
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       const createdId = await db.transaction(async (tx) => {
+        // TOCTOU: syarat dihitung SEBELUM tx (getModuleEligibility) dan snapshot
+        // dibekukan by-design agar materi baru belakangan tidak menginvalidasi.
+        // Di dalam tx verifikasi ringan: modul masih ada (cegah FK race hapus modul).
+        const stillThere = await tx
+          .select({ id: modules.id })
+          .from(modules)
+          .where(eq(modules.id, moduleId))
+          .limit(1);
+        if (!stillThere[0]) {
+          throw new CertificateError(
+            404,
+            "MODULE_NOT_FOUND",
+            "Modul tidak ditemukan"
+          );
+        }
         const dup = await tx
           .select({ id: certificates.id, status: certificates.status })
           .from(certificates)
@@ -328,12 +359,26 @@ export const issueCertificate = async (
             "Sertifikat modul ini pernah dicabut; hubungi admin"
           );
         }
+        if (createdId.status === "superseded") {
+          throw new CertificateError(
+            409,
+            "CERT_SUPERSEDED",
+            "Sertifikat modul ini telah digantikan sertifikat kursus"
+          );
+        }
         const cert = await certWithTitles(createdId.id);
         if (!cert) throw new Error("Gagal membaca sertifikat");
         return { certificate: cert, created: false };
       }
       const cert = await certWithTitles(createdId.id);
       if (!cert) throw new Error("Gagal membaca sertifikat");
+      // Fase B: modul baru terbit bisa menuntaskan kursus → cek sertifikat
+      // kursus. Terisolasi: gagal di sini tak boleh menggagalkan modul.
+      try {
+        await tryAutoIssueCourse(userId, eg.courseId);
+      } catch (e) {
+        console.error("[auto-issue] Gagal cek sertifikat kursus:", e);
+      }
       return { certificate: cert, created: true };
     } catch (e) {
       if (
@@ -356,6 +401,13 @@ export const issueCertificate = async (
             "Sertifikat modul ini pernah dicabut; hubungi admin"
           );
         }
+        if (cert.status === "superseded") {
+          throw new CertificateError(
+            409,
+            "CERT_SUPERSEDED",
+            "Sertifikat modul ini telah digantikan sertifikat kursus"
+          );
+        }
         return { certificate: cert, created: false };
       }
       // Tabrakan kode acak milik orang lain: coba lagi dengan kode baru.
@@ -364,11 +416,290 @@ export const issueCertificate = async (
   throw new Error("Gagal menerbitkan sertifikat setelah beberapa percobaan");
 };
 
+// ---------- Penerbitan otomatis ----------
+
+export interface AutoIssueResult {
+  issued: boolean;
+  certificateId: number | null;
+}
+
+/**
+ * Terbitkan otomatis bila syarat modul sudah lengkap. Dipanggil setelah
+ * progres materi ditandai, percobaan kuis dinilai, atau tugas dinilai.
+ *
+ * TIDAK PERNAH melempar: belum eligible / sudah dicabut / balapan
+ * → `{ issued: false }`. Kegagalan tak terduga dicatat log saja agar aksi
+ * utama (progres/kuis/nilai) tidak ikut gagal.
+ */
+export const tryAutoIssueForMaterial = async (
+  userId: number,
+  materialId: number
+): Promise<AutoIssueResult> => {
+  try {
+    const mRows = await db
+      .select({ moduleId: materials.moduleId })
+      .from(materials)
+      .where(eq(materials.id, materialId))
+      .limit(1);
+    const moduleId = mRows[0]?.moduleId;
+    if (!moduleId) return { issued: false, certificateId: null };
+    const uRows = await db
+      .select({ role: users.role })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    const role = uRows[0]?.role ?? "student";
+    const result = await issueCertificate(userId, role, moduleId, {});
+    return { issued: result.created, certificateId: result.certificate.id };
+  } catch (e) {
+    if (e instanceof CertificateError) return { issued: false, certificateId: null };
+    console.error("[auto-issue] Gagal menerbitkan otomatis:", e);
+    return { issued: false, certificateId: null };
+  }
+};
+
+// ---------- Sertifikat kursus (Fase B) ----------
+
+export interface CourseAutoIssueResult {
+  issued: boolean;
+  certificateId: number | null;
+}
+
+/** Baris sertifikat kursus (moduleId NULL) milik peserta, bila ada. */
+const findCourseCert = async (userId: number, courseId: number) => {
+  const rows = await db
+    .select({ id: certificates.id, code: certificates.code, status: certificates.status })
+    .from(certificates)
+    .where(
+      and(
+        eq(certificates.userId, userId),
+        eq(certificates.courseId, courseId),
+        isNull(certificates.moduleId)
+      )
+    )
+    .limit(1);
+  return rows[0] ?? null;
+};
+
+/**
+ * Gantikan sertifikat modul yang masih issued dengan status superseded —
+ * masing-masing dalam transaksi SENDIRI. Satu baris gagal (terkunci/hilang)
+ * hanya dicatat + dilewati; baris lain tetap jalan (isolasi kegagalan).
+ * Idempoten: baris yang sudah berubah status dilewati via update bersyarat.
+ */
+export const supersedeModuleCertificates = async (
+  userId: number,
+  courseId: number,
+  courseCode: string
+): Promise<{ superseded: number; failed: number[] }> => {
+  const rows = await db
+    .select({ id: certificates.id })
+    .from(certificates)
+    .where(
+      and(
+        eq(certificates.userId, userId),
+        eq(certificates.courseId, courseId),
+        isNotNull(certificates.moduleId),
+        eq(certificates.status, "issued")
+      )
+    );
+  let superseded = 0;
+  const failed: number[] = [];
+  for (const r of rows) {
+    try {
+      await db.transaction(async (tx) => {
+        const cur = await tx
+          .select({ status: certificates.status })
+          .from(certificates)
+          .where(eq(certificates.id, r.id))
+          .limit(1);
+        if (!cur[0] || cur[0].status !== "issued") return; // berubah di tengah → lewati
+        await tx
+          .update(certificates)
+          .set({
+            status: "superseded",
+            revokeReason: `Digantikan sertifikat kursus ${courseCode}`,
+          })
+          .where(and(eq(certificates.id, r.id), eq(certificates.status, "issued")));
+        await tx.insert(auditLogs).values({
+          actorUserId: userId,
+          action: "certificate.supersede",
+          targetType: "certificate",
+          targetIdInt: r.id,
+          metadata: { certificateId: r.id, userId, courseId, courseCode },
+        });
+      });
+      superseded++;
+    } catch (e) {
+      failed.push(r.id);
+      console.error("[auto-issue] Gagal supersede sertifikat modul:", r.id, e);
+    }
+  }
+  return { superseded, failed };
+};
+
+/**
+ * Terbitkan sertifikat kursus bila SEMUA modul berkonten sudah bersertifikat
+ * issued. TIDAK PERNAH melempar (cermin tryAutoIssueForMaterial): gagal di
+ * titik mana pun → log + `{ issued: false }`, sertifikat modul tak tersentuh.
+ *
+ * Idempoten + self-heal: bila sertifikat kursus sudah ada namun masih ada
+ * modul issued (supersede lama gagal sebagian), supersede diulang.
+ */
+export const tryAutoIssueCourse = async (
+  userId: number,
+  courseId: number
+): Promise<CourseAutoIssueResult> => {
+  try {
+    const existing = await findCourseCert(userId, courseId);
+    if (existing && existing.status !== "revoked") {
+      // Self-heal supersede yang gagal sebagian di percobaan sebelumnya.
+      await supersedeModuleCertificates(userId, courseId, existing.code);
+      return { issued: false, certificateId: existing.id };
+    }
+    const mods = await db
+      .select({ id: modules.id, title: modules.title })
+      .from(modules)
+      .where(eq(modules.courseId, courseId));
+    // Modul kosong (tanpa materi) tak pernah bersertifikat → dikecualikan,
+    // kalau tidak kursus takkan pernah tuntas.
+    const certifiable: Array<{ id: number; title: string }> = [];
+    for (const m of mods) {
+      const mats = await listMaterialsByModule(m.id);
+      if (mats.length > 0) certifiable.push(m);
+    }
+    if (certifiable.length === 0) return { issued: false, certificateId: null };
+    const certRows = await db
+      .select({ moduleId: certificates.moduleId, code: certificates.code })
+      .from(certificates)
+      .where(
+        and(
+          eq(certificates.userId, userId),
+          eq(certificates.courseId, courseId),
+          isNotNull(certificates.moduleId),
+          eq(certificates.status, "issued")
+        )
+      );
+    const issuedByModule = new Map<number, string>();
+    for (const c of certRows) {
+      if (c.moduleId !== null) issuedByModule.set(c.moduleId, c.code);
+    }
+    const missing = certifiable.filter((m) => !issuedByModule.has(m.id));
+    if (missing.length > 0) return { issued: false, certificateId: null };
+
+    const owners = await db
+      .select({ name: users.name })
+      .from(users)
+      .where(eq(users.id, userId))
+      .limit(1);
+    const recipientName = owners[0]?.name ?? "Peserta";
+    const snapshot = {
+      evaluatedAt: new Date().toISOString(),
+      materials: [] as Array<{
+        materialId: number;
+        title: string;
+        type: string;
+        state: string;
+      }>,
+      courseModules: certifiable.map((m) => ({
+        moduleId: m.id,
+        title: m.title,
+        certificateCode: issuedByModule.get(m.id) ?? "",
+      })),
+    };
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      try {
+        const createdId = await db.transaction(async (tx) => {
+          // Kunci baris enrollment: dua penerbitan kursus yang balapan
+          // (dua modul tuntas bersamaan) antre tertib di sini, sehingga
+          // cek-duplikat di bawah tak bisa lolos ganda.
+          const lock = await tx
+            .select({ status: enrollments.status })
+            .from(enrollments)
+            .where(
+              and(
+                eq(enrollments.userId, userId),
+                eq(enrollments.courseId, courseId)
+              )
+            )
+            .for("update")
+            .limit(1);
+          if (!lock[0] || !["active", "completed"].includes(lock[0].status)) {
+            throw new CertificateError(
+              403,
+              "NO_ACCESS",
+              "Anda tidak memiliki akses ke kursus ini"
+            );
+          }
+          const dup = await tx
+            .select({ id: certificates.id, status: certificates.status })
+            .from(certificates)
+            .where(
+              and(
+                eq(certificates.userId, userId),
+                eq(certificates.courseId, courseId),
+                isNull(certificates.moduleId)
+              )
+            )
+            .limit(1);
+          if (dup[0]) return { id: dup[0].id, created: false };
+          const [h] = await tx.insert(certificates).values({
+            userId,
+            courseId,
+            moduleId: null,
+            code: genCode(),
+            recipientName,
+            requirementsSnapshot: snapshot,
+            status: "issued",
+          });
+          const id = Number((h as unknown as { insertId: number }).insertId);
+          await tx.insert(auditLogs).values({
+            actorUserId: userId,
+            action: "certificate.course_issue",
+            targetType: "certificate",
+            targetIdInt: id,
+            metadata: { certificateId: id, userId, courseId },
+          });
+          return { id, created: true as boolean };
+        });
+        const cert = await certWithTitles(createdId.id);
+        if (!cert) throw new Error("Gagal membaca sertifikat kursus");
+        if (createdId.created) {
+          // Supersede SETELAH commit kursus; gagal di sini tak membatalkan
+          // sertifikat kursus (isolasi) dan dicoba lagi pemicu berikut.
+          await supersedeModuleCertificates(userId, courseId, cert.code);
+        }
+        return { issued: createdId.created, certificateId: cert.id };
+      } catch (e) {
+        if (e !== null && typeof e === "object" && "code" in e) {
+          const code = (e as { code?: unknown }).code;
+          if (code === "ER_DUP_ENTRY") {
+            const again = await findCourseCert(userId, courseId);
+            if (again) {
+              await supersedeModuleCertificates(userId, courseId, again.code);
+              return { issued: false, certificateId: again.id };
+            }
+            continue; // tabrakan kode acak → coba lagi
+          }
+        }
+        throw e;
+      }
+    }
+    return { issued: false, certificateId: null };
+  } catch (e) {
+    console.error("[auto-issue] Gagal menerbitkan sertifikat kursus:", e);
+    return { issued: false, certificateId: null };
+  }
+};
+
 // ---------- Daftar milik sendiri ----------
 
 export const listMyCertificates = async (
   userId: number
 ): Promise<PublicCertificate[]> => {
+  // Superseded disembunyikan (digantikan sertifikat kursus); riwayat utuh
+  // tetap di sisi instruktur/admin + endpoint verifikasi.
   const rows = await db
     .select({
       id: certificates.id,
@@ -385,10 +716,142 @@ export const listMyCertificates = async (
     })
     .from(certificates)
     .innerJoin(courses, eq(courses.id, certificates.courseId))
-    .innerJoin(modules, eq(modules.id, certificates.moduleId))
-    .where(eq(certificates.userId, userId))
+    .leftJoin(modules, eq(modules.id, certificates.moduleId))
+    .where(
+      and(eq(certificates.userId, userId), ne(certificates.status, "superseded"))
+    )
     .orderBy(desc(certificates.issuedAt), desc(certificates.id));
-  return rows.map(toPublicCertificate);
+  const certs = rows.map(toPublicCertificate);
+  // Nama instruktur per kursus (batch per courseId, bukan N+1 per baris).
+  const names = await instructorNamesByCourse([...new Set(certs.map((c) => c.courseId))]);
+  for (const c of certs) c.instructorName = names.get(c.courseId) ?? null;
+  return certs;
+};
+
+// ---------- Unduh PDF ----------
+
+/**
+ * Nama instruktur utama kursus untuk blok tanda tangan:
+ * pengampu terawal → pembuat kursus → generik. Tidak pernah melempar
+ * (fallback generik) agar PDF tetap bisa dibuat.
+ */
+const primaryInstructorName = async (courseId: number): Promise<string> => {
+  try {
+    const link = await db
+      .select({ name: users.name })
+      .from(courseInstructors)
+      .innerJoin(users, eq(users.id, courseInstructors.userId))
+      .where(eq(courseInstructors.courseId, courseId))
+      .orderBy(asc(courseInstructors.assignedAt), asc(courseInstructors.userId))
+      .limit(1);
+    if (link[0]?.name) return link[0].name;
+    const course = await db
+      .select({ createdBy: courses.createdBy })
+      .from(courses)
+      .where(eq(courses.id, courseId))
+      .limit(1);
+    const ownerId = course[0]?.createdBy;
+    if (ownerId) {
+      const owner = await db
+        .select({ name: users.name })
+        .from(users)
+        .where(eq(users.id, ownerId))
+        .limit(1);
+      if (owner[0]?.name) return owner[0].name;
+    }
+  } catch (e) {
+    console.error("[certificate] Gagal membaca instruktur utama:", e);
+  }
+  return "Tim Pengajar ARISTOTELES";
+};
+
+/**
+ * Nama instruktur utama per kursus (batch). Kueri tetap ringan: 2 query
+ * per kursus, bukan per baris sertifikat.
+ */
+const instructorNamesByCourse = async (
+  courseIds: number[]
+): Promise<Map<number, string>> => {
+  const out = new Map<number, string>();
+  await Promise.all(
+    courseIds.map(async (courseId) => {
+      out.set(courseId, await primaryInstructorName(courseId));
+    })
+  );
+  return out;
+};
+
+export interface CertificateDownload {
+  buffer: Buffer;
+  filename: string;
+}
+
+/**
+ * Siapkan PDF unduhan satu sertifikat. Isolasi kegagalan: PDF dibuat malas
+ * dari data (tanpa mengubah jalur penerbitan); galat di sini hanya
+ * menggagalkan request unduh ini — daftar/terbit/verifikasi tak tersentuh.
+ */
+export const downloadCertificatePdf = async (
+  viewerId: number,
+  role: string,
+  certId: number
+): Promise<CertificateDownload> => {
+  const rows = await db
+    .select()
+    .from(certificates)
+    .where(eq(certificates.id, certId))
+    .limit(1);
+  const row = rows[0];
+  // 404 untuk milik orang lain juga (hindari oracle keberadaan ID).
+  if (!row) {
+    throw new CertificateError(404, "CERT_NOT_FOUND", "Sertifikat tidak ditemukan");
+  }
+  const owner = row.userId === viewerId;
+  if (!owner && !(await canManageCourse(viewerId, role, row.courseId))) {
+    throw new CertificateError(404, "CERT_NOT_FOUND", "Sertifikat tidak ditemukan");
+  }
+  if (row.status === "revoked") {
+    throw new CertificateError(403, "CERT_REVOKED", "Sertifikat telah dicabut");
+  }
+  if (row.status === "superseded") {
+    // Modul digantikan sertifikat kursus: arahkan ke kode pengganti bila ada.
+    const courseCert = await findCourseCert(row.userId, row.courseId);
+    throw new CertificateError(
+      410,
+      "CERT_SUPERSEDED",
+      courseCert
+        ? `Sertifikat ini telah digantikan sertifikat kursus ${courseCert.code}`
+        : "Sertifikat ini telah digantikan sertifikat kursus",
+      { courseCertificateCode: courseCert?.code ?? null }
+    );
+  }
+  const cert = await certWithTitles(certId);
+  if (!cert) {
+    throw new CertificateError(404, "CERT_NOT_FOUND", "Sertifikat tidak ditemukan");
+  }
+  const [holder, instructorName] = await Promise.all([
+    db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, row.userId))
+      .limit(1),
+    primaryInstructorName(row.courseId),
+  ]);
+  const data: CertificatePdfData = {
+    code: cert.code,
+    recipientName: cert.recipientName,
+    recipientEmail: holder[0]?.email ?? null,
+    courseTitle: cert.courseTitle,
+    moduleTitle: cert.moduleTitle,
+    instructorName,
+    issuedAt: cert.issuedAt,
+    verifyUrl: verifyUrlFor(cert.code),
+  };
+  const filePath = await ensureCertificatePdf(data);
+  return {
+    buffer: await fsp.readFile(filePath),
+    filename: certificateFileName(cert.moduleTitle ?? cert.courseTitle, cert.recipientName),
+  };
 };
 
 // ---------- Verifikasi publik (minimal, aman) ----------
@@ -397,10 +860,15 @@ export interface PublicVerification {
   code: string;
   recipientName: string;
   courseTitle: string;
-  moduleTitle: string;
+  /** null = sertifikat level kursus. */
+  moduleTitle: string | null;
+  /** Nama instruktur utama kursus (untuk blok tanda tangan). */
+  instructorName: string | null;
+  /** issued | revoked | superseded (lihat revokeReason untuk pengganti). */
   status: string;
   issuedAt: Date;
   revokedAt: Date | null;
+  revokeReason: string | null;
 }
 
 export const verifyCertificate = async (
@@ -410,15 +878,17 @@ export const verifyCertificate = async (
     .select({
       code: certificates.code,
       recipientName: certificates.recipientName,
+      courseId: certificates.courseId,
       courseTitle: courses.title,
       moduleTitle: modules.title,
       status: certificates.status,
       issuedAt: certificates.issuedAt,
       revokedAt: certificates.revokedAt,
+      revokeReason: certificates.revokeReason,
     })
     .from(certificates)
     .innerJoin(courses, eq(courses.id, certificates.courseId))
-    .innerJoin(modules, eq(modules.id, certificates.moduleId))
+    .leftJoin(modules, eq(modules.id, certificates.moduleId))
     .where(eq(certificates.code, code.trim().toUpperCase()))
     .limit(1);
   if (!rows[0]) {
@@ -428,7 +898,46 @@ export const verifyCertificate = async (
       "Kode sertifikat tidak ditemukan"
     );
   }
-  return rows[0];
+  const row = rows[0];
+  // Respons minimal publik: courseId hanya dipakai internal (instruktur).
+  return {
+    code: row.code,
+    recipientName: row.recipientName,
+    courseTitle: row.courseTitle,
+    moduleTitle: row.moduleTitle,
+    instructorName: await primaryInstructorName(row.courseId),
+    status: row.status,
+    issuedAt: row.issuedAt,
+    revokedAt: row.revokedAt,
+    revokeReason: row.revokeReason,
+  };
+};
+
+/**
+ * Buffer PNG QR tautan verifikasi satu kode (untuk fasimil sampul).
+ * Publik dan tanpa PII (QR hanya menaut ke halaman verifikasi).
+ * 404 untuk kode tak dikenal — sama seperti endpoint verifikasi.
+ */
+export const getCertificateQr = async (code: string): Promise<Buffer> => {
+  const normalized = code.trim().toUpperCase();
+  const rows = await db
+    .select({ id: certificates.id })
+    .from(certificates)
+    .where(eq(certificates.code, normalized))
+    .limit(1);
+  if (!rows[0]) {
+    throw new CertificateError(
+      404,
+      "CODE_NOT_FOUND",
+      "Kode sertifikat tidak ditemukan"
+    );
+  }
+  return QRCode.toBuffer(verifyUrlFor(normalized), {
+    type: "png",
+    width: 480,
+    margin: 1,
+    errorCorrectionLevel: "M",
+  });
 };
 
 // ---------- Cakupan instruktur ----------
@@ -451,7 +960,7 @@ const managedCourseIds = async (
   return [...new Set([...a.map((r) => r.id), ...b.map((r) => r.id)])];
 };
 
-export type InstructorCertificateStatus = "aktif" | "dicabut";
+export type InstructorCertificateStatus = "aktif" | "dicabut" | "digantikan";
 
 /** Item sertifikat untuk UI instruktur (kontrak frontend certificates.ts). */
 export interface InstructorCertificateItem {
@@ -463,8 +972,9 @@ export interface InstructorCertificateItem {
   recipientName: string;
   courseId: number;
   courseTitle: string;
-  moduleId: number;
-  moduleTitle: string;
+  /** null = sertifikat level kursus. */
+  moduleId: number | null;
+  moduleTitle: string | null;
   issuedAt: Date;
   status: InstructorCertificateStatus;
   revokedAt: Date | null;
@@ -478,8 +988,8 @@ const toInstructorItem = (row: {
   studentName: string;
   courseId: number;
   courseTitle: string;
-  moduleId: number;
-  moduleTitle: string;
+  moduleId: number | null;
+  moduleTitle: string | null;
   status: string;
   issuedAt: Date;
   revokedAt: Date | null;
@@ -495,24 +1005,30 @@ const toInstructorItem = (row: {
   moduleId: row.moduleId,
   moduleTitle: row.moduleTitle,
   issuedAt: row.issuedAt,
-  status: row.status === "revoked" ? "dicabut" : "aktif",
+  status:
+    row.status === "revoked"
+      ? "dicabut"
+      : row.status === "superseded"
+        ? "digantikan"
+        : "aktif",
   revokedAt: row.revokedAt,
   revokeReason: row.revokeReason,
 });
 
-/** Normalisasi status filter frontend (aktif/dicabut) ke nilai DB. */
+/** Normalisasi status filter frontend (aktif/dicabut/digantikan) ke nilai DB. */
 const normalizeCertStatus = (
   s: string | undefined
-): "issued" | "revoked" | undefined => {
+): "issued" | "revoked" | "superseded" | undefined => {
   if (s === "issued" || s === "aktif") return "issued";
   if (s === "revoked" || s === "dicabut") return "revoked";
+  if (s === "superseded" || s === "digantikan") return "superseded";
   return undefined;
 };
 
 export interface CertificateListFilter {
   courseId?: number;
   moduleId?: number;
-  status?: "issued" | "revoked" | "aktif" | "dicabut";
+  status?: "issued" | "revoked" | "superseded" | "aktif" | "dicabut" | "digantikan";
   q?: string;
   from?: string;
   to?: string;
@@ -563,10 +1079,11 @@ export const listCertificates = async (
   const dbStatus = normalizeCertStatus(filter.status);
   if (dbStatus !== undefined) conditions.push(eq(certificates.status, dbStatus));
   if (filter.q) {
+    const q = escapeLike(filter.q);
     conditions.push(
       or(
-        like(certificates.recipientName, `%${filter.q}%`),
-        like(certificates.code, `%${filter.q}%`)
+        like(certificates.recipientName, `%${q}%`),
+        like(certificates.code, `%${q}%`)
       )
     );
   }
@@ -597,7 +1114,7 @@ export const listCertificates = async (
     })
     .from(certificates)
     .innerJoin(courses, eq(courses.id, certificates.courseId))
-    .innerJoin(modules, eq(modules.id, certificates.moduleId))
+    .leftJoin(modules, eq(modules.id, certificates.moduleId))
     .innerJoin(users, eq(users.id, certificates.userId));
   const where = conditions.length > 0 ? and(...conditions) : undefined;
   const [countRows, rows] = await Promise.all([
@@ -661,7 +1178,7 @@ export const getCertificateDetail = async (
     })
     .from(certificates)
     .innerJoin(courses, eq(courses.id, certificates.courseId))
-    .innerJoin(modules, eq(modules.id, certificates.moduleId))
+    .leftJoin(modules, eq(modules.id, certificates.moduleId))
     .innerJoin(users, eq(users.id, certificates.userId))
     .where(eq(certificates.id, certId))
     .limit(1);
@@ -751,7 +1268,7 @@ export const revokeCertificate = async (
     })
     .from(certificates)
     .innerJoin(courses, eq(courses.id, certificates.courseId))
-    .innerJoin(modules, eq(modules.id, certificates.moduleId))
+    .leftJoin(modules, eq(modules.id, certificates.moduleId))
     .innerJoin(users, eq(users.id, certificates.userId))
     .where(eq(certificates.id, certId))
     .limit(1);
@@ -941,7 +1458,7 @@ export const listModuleEligibility = async (
     if (taskPassed < taskMats.length) failReasons.push(`${taskMats.length - taskPassed} tugas belum lulus`);
     const meets = failReasons.length === 0 && mats.length > 0;
     const status: ParticipantEligibilityStatus =
-      certStatus === "issued"
+      certStatus === "issued" || certStatus === "superseded"
         ? "sudah_terbit"
         : meets
           ? "memenuhi"
@@ -1003,6 +1520,8 @@ export interface ModuleCertificateStatus {
   issuedCount: number;
   notEligibleCount: number;
   revokedCount: number;
+  /** Modul yang digantikan sertifikat kursus (subset riwayat, bukan aktif). */
+  supersededCount: number;
 }
 
 const managedCoursesWithTitles = async (
@@ -1175,9 +1694,11 @@ export const getModuleCertificateStatus = async (
     .groupBy(certificates.status);
   let issuedCount = 0;
   let revokedCount = 0;
+  let supersededCount = 0;
   for (const r of certRows) {
     if (r.status === "issued") issuedCount = Number(r.n);
     if (r.status === "revoked") revokedCount = Number(r.n);
+    if (r.status === "superseded") supersededCount = Number(r.n);
   }
   return {
     moduleId: mod.id,
@@ -1188,6 +1709,7 @@ export const getModuleCertificateStatus = async (
     issuedCount,
     notEligibleCount,
     revokedCount,
+    supersededCount,
   };
 };
 
@@ -1262,6 +1784,8 @@ export const listGlobalEligibility = async (
   role: string,
   filter: GlobalEligibilityFilter = {}
 ): Promise<FrontendEligibilityEntry[]> => {
+  // Batas eksplisit (performa): agregat eligibility berat di data besar.
+  const MAX_ELIGIBILITY_ROWS = 500;
   const courseList = await managedCoursesWithTitles(viewerId, role);
   if (courseList.length === 0) return [];
   const allowedCourseIds = new Set(courseList.map((c) => c.id));
@@ -1326,11 +1850,12 @@ export const listGlobalEligibility = async (
         taskStatus: taskStatus as FrontendEligibilityEntry["taskStatus"],
         status: e.status,
       });
-      // Batasi kerja sejak awal: berhenti bila sudah 500 (hindari hitung semua baru potong).
-      if (out.length >= 500) return out;
+      // Batasi kerja sejak awal: berhenti bila sudah mencapai batas eksplisit
+      // (hindari hitung semua baru potong; batas didokumentasikan di API_CONTRACT §14).
+      if (out.length >= MAX_ELIGIBILITY_ROWS) return out;
     }
   }
-  return out.slice(0, 500);
+  return out.slice(0, MAX_ELIGIBILITY_ROWS);
 };
 
 /** Rincian kelayakan satu peserta pada satu modul (id gabungan moduleId:userId). */
@@ -1437,7 +1962,7 @@ export const getGlobalEligibilityDetail = async (
   if (mats.length === 0) failReasons.push("Modul belum memiliki materi");
   const meets = failReasons.length === 0 && mats.length > 0;
   const status: FrontendEligibilityStatus =
-    certStatus === "issued"
+    certStatus === "issued" || certStatus === "superseded"
       ? "sudah_terbit"
       : meets
         ? "memenuhi"

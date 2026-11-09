@@ -75,6 +75,7 @@ before(async () => {
   const mkUser = async (name: string, email: string, role: "admin" | "teacher") => {
     const [h] = await db.insert(schema.users).values({
       name,
+      username: email.split("@")[0] + "-t",
       email,
       passwordHash: hash,
       role,

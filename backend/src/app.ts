@@ -9,6 +9,10 @@ import certificateRoutes from "./modules/certificates/certificate.routes";
 import voucherRoutes from "./modules/vouchers/voucher.routes";
 import adminRoutes from "./modules/admin/admin.routes";
 import invitationRoutes from "./modules/invitations/invitation.routes";
+import paymentRoutes from "./modules/payments/payment.routes";
+import promoRoutes from "./modules/promos/promo.routes";
+import patunganRoutes from "./modules/patungan/patungan.routes";
+import profileRoutes from "./modules/profile/profile.routes";
 import applicationRoutes from "./modules/applications/application.routes";
 import dashboardRoutes from "./modules/dashboard/dashboard.routes";
 import { uploadsRouter, filesRouter } from "./modules/uploads/upload.routes";
@@ -23,19 +27,43 @@ dotenv.config();
 
 const app: Application = express();
 
+// Di balik proxy (staging/prod) agar req.ip akurat untuk rate-limit per IP.
+// Aman untuk single-instance maupun multi-instance.
+app.set("trust proxy", 1);
+
 // Security middleware
 app.use(helmet());
 
-// CORS configuration
+// CORS configuration: baca dari env, fallback dev.
+const corsOrigin = (process.env.CORS_ORIGIN ?? "http://localhost:5173")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 app.use(
   cors({
-    origin:"http://localhost:5173",
+    origin: corsOrigin.length === 1 ? corsOrigin[0] : corsOrigin,
     credentials: true,
   })
 );
 
-// Logging
-app.use(morgan("dev"));
+// Logging — redaksi query sensitif (token undangan, kode OTP)
+// agar tidak tersimpan di access log.
+morgan.token("redacted-url", (req) => {
+  try {
+    const raw = ((req as unknown as { originalUrl?: string }).originalUrl ?? req.url ?? "") as string;
+    const q = raw.indexOf("?");
+    if (q === -1) return raw;
+    const params = new URLSearchParams(raw.slice(q + 1));
+    for (const k of ["token", "code"]) {
+      if (params.has(k)) params.set(k, "[redacted]");
+    }
+    const qs = params.toString();
+    return qs ? `${raw.slice(0, q)}?${qs}` : raw.slice(0, q);
+  } catch {
+    return ((req as unknown as { originalUrl?: string }).originalUrl ?? req.url ?? "") as string;
+  }
+});
+app.use(morgan(":method :redacted-url :status :response-time ms - :res[content-length]"));
 
 // Body parsing (batas JSON dinaikkan untuk transport unggahan base64;
 // validasi ukuran per-jenis tetap ditegakkan di modul uploads).
@@ -79,6 +107,15 @@ app.use("/api/v1", adminRoutes);
 app.use("/api/v1", invitationRoutes);
 // Pengajuan minat instruktur (publik) + peninjauan (admin, K-01)
 app.use("/api/v1", applicationRoutes);
+// Pembayaran QRIS manual: ajukan + bukti (peserta), verifikasi + grant (admin)
+app.use("/api/v1", paymentRoutes);
+// Promo kurasi admin (diskon persen / pajang / patungan).
+app.use("/api/v1", promoRoutes);
+// Grup patungan: anggota username tervalidasi, iuran sendiri-sendiri,
+// akses dibuka setelah semua lunas (tanpa akses parsial).
+app.use("/api/v1", patunganRoutes);
+// Profil milik sendiri (semua peran): baca + ubah + lepas avatar.
+app.use("/api/v1", profileRoutes);
 
 // Upload & serve berkas (gambar/audio/PDF/cover/tugas)
 app.use("/api/v1/uploads", uploadsRouter);

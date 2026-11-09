@@ -10,6 +10,7 @@ import {
   resendVerification,
   resetPassword,
   verifyEmail,
+  verifyResetCode,
 } from "./auth.service";
 
 export const register = async (
@@ -102,6 +103,24 @@ export const resetPasswordHandler = async (
   }
 };
 
+export const verifyResetCodeHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await verifyResetCode(req.body);
+
+    res.status(200).json({
+      status: "success",
+      message: "Kode valid",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const login = async (
   req: Request,
   res: Response,
@@ -141,8 +160,10 @@ export const me = async (
       .select({
         id: users.id,
         name: users.name,
+        username: users.username,
         email: users.email,
         role: users.role,
+        avatarFileId: users.avatarFileId,
       })
       .from(users)
       .where(eq(users.id, Number(req.user.id)))
@@ -163,7 +184,10 @@ export const me = async (
       status: "success",
       message: "Data user berhasil diambil",
       data: {
-        user,
+        user: {
+          ...user,
+          avatarUrl: user.avatarFileId ? `/api/v1/files/${user.avatarFileId}/content` : null,
+        },
       },
     });
   } catch (error) {

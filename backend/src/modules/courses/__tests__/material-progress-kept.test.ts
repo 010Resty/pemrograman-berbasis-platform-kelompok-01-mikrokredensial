@@ -42,6 +42,7 @@ before(async () => {
 
   const [uH] = await db.insert(schema.users).values({
     name: "Siswa Uji",
+    username: "siswa.uji",
     email: "siswa@uji.io",
     passwordHash: "hash-uji",
     role: "student",

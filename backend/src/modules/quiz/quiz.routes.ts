@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { authenticate, requireRole } from "../../middlewares/auth.middleware";
+import { authOtpLimiter } from "../../middlewares/rate-limit.middleware";
 import {
   attemptHandler,
   bestHandler,
@@ -18,7 +19,8 @@ router.get("/materials/:id/quiz", authenticate, getQuizHandler);
 router.put("/materials/:id/quiz", ...write, putQuizHandler);
 
 // Percobaan: jawaban dinilai server, skor klien tidak dipercaya.
-router.post("/materials/:id/quiz-attempts", authenticate, attemptHandler);
+// Dibatasi per IP agar kunci tidak bisa di-brute-force.
+router.post("/materials/:id/quiz-attempts", authenticate, authOtpLimiter(), attemptHandler);
 router.get("/materials/:id/quiz-attempts", authenticate, historyHandler);
 router.get("/materials/:id/quiz-best", authenticate, bestHandler);
 

@@ -191,7 +191,7 @@ export const update = async (
       });
       return;
     }
-    const course = await updateCourse(id, parsed.data);
+    const course = await updateCourse(id, parsed.data, userId);
     if (!course) {
       res.status(404).json({ status: "error", message: "Kursus tidak ditemukan", data: null });
       return;
@@ -228,10 +228,10 @@ export const remove = async (
         });
       return;
     }
-    const { coverUrl } = await deleteCourse(id);
+    const { coverUrl } = await deleteCourse(id, userId);
     const coverFileId = parseCoverFileId(coverUrl);
     if (coverFileId !== null) {
-      await deleteFileById(coverFileId);
+      await deleteFileById(coverFileId, userId);
     }
     res.status(200).json({ status: "success", message: "Kursus dihapus", data: null });
   } catch (error) {

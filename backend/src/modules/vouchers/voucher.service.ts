@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { z } from "zod";
-import { and, desc, eq, like, or, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { db } from "../../db";
 import {
   auditLogs,
@@ -38,22 +38,42 @@ export const createVoucherSchema = z
         message: "Format kode 4–32 karakter (huruf, angka, tanda -)",
       }),
     courseId: z.number().int().positive(),
-    kind: z.enum(["personal", "umum"]),
+    kind: z.enum(["personal", "umum", "diskon"]),
     maxUses: z.number().int().min(1).max(10000).optional(),
     assignedUserId: z.number().int().positive().optional(),
     assignedEmail: z.string().trim().email().max(191).optional(),
     expiresAt: z.string().trim().max(100).optional(),
+    /** Wajib bila kind="diskon"; dilarang untuk kind lain. */
+    discountType: z.enum(["percent", "nominal"]).optional(),
+    discountValue: z.number().int().min(1).optional(),
   })
   .strict()
   .refine((v) => v.kind !== "personal" || v.assignedUserId !== undefined || v.assignedEmail !== undefined, {
     message: "Voucher personal wajib menentukan penerima",
     path: ["assignedUserId"],
-  });
+  })
+  .refine(
+    (v) =>
+      (v.kind === "diskon" && v.discountType !== undefined && v.discountValue !== undefined) ||
+      (v.kind !== "diskon" && v.discountType === undefined && v.discountValue === undefined),
+    {
+      message: "Voucher diskon wajib punya jenis + nilai diskon; jenis lain tidak boleh",
+      path: ["discountType"],
+    }
+  )
+  .refine(
+    (v) =>
+      v.discountType !== "percent" ||
+      (v.discountValue !== undefined && v.discountValue >= 1 && v.discountValue <= 100),
+    { message: "Diskon persen 1–100", path: ["discountValue"] }
+  );
 
 export const redeemSchema = z
   .object({
     code: z.string().trim().min(1).max(100),
-    courseId: z.number().int().positive(),
+    // Opsional: bila absen, server memakai kursus yang terikat pada voucher.
+    // Bila diisi dan berbeda → COURSE_MISMATCH (kompatibel klien lama).
+    courseId: z.number().int().positive().optional(),
   })
   .strict();
 
@@ -61,6 +81,9 @@ export const redeemSchema = z
 
 const normalizeCode = (code: string): string =>
   code.trim().toUpperCase().replace(/\s+/g, "");
+
+/** Escape wildcard LIKE (% _ \) agar pencarian tidak melebar. Masih parameterized. */
+const escapeLike = (s: string): string => s.replace(/[\\%_]/g, (m) => `\\${m}`);
 
 const genCode = (): string =>
   `ATS-${randomBytes(4).toString("hex").toUpperCase()}`;
@@ -116,6 +139,8 @@ export interface PublicVoucher {
   assignedEmail: string | null;
   expiresAt: Date | null;
   status: string;
+  discountType: string | null;
+  discountValue: number | null;
 }
 
 // ---------- Pembuatan (admin) ----------
@@ -133,7 +158,7 @@ export const createVoucher = async (
     throw new VoucherError(404, "COURSE_NOT_FOUND", "Kursus tidak ditemukan");
   }
   let assignee: { id: number; email: string; name: string } | null = null;
-  if (input.kind === "personal") {
+  if (input.kind === "personal" || (input.kind === "diskon" && (input.assignedUserId !== undefined || input.assignedEmail !== undefined))) {
     const found = await resolveUser(input.assignedUserId, input.assignedEmail);
     if (!found) {
       throw new VoucherError(404, "USER_NOT_FOUND", "Penerima voucher tidak ditemukan");
@@ -174,38 +199,51 @@ export const createVoucher = async (
   if (dup[0]) {
     throw new VoucherError(409, "CODE_TAKEN", "Kode voucher sudah digunakan");
   }
-  await db.transaction(async (tx) => {
-    await tx.insert(vouchers).values({
-      code,
-      courseId: input.courseId,
-      kind: input.kind,
-      maxUses,
-      usedCount: 0,
-      assignedUserId: assignee?.id ?? null,
-      expiresAt,
-      status: input.kind === "personal" ? "assigned" : "available",
-    });
-    await writeAuditLog(tx, {
-      actorUserId: actorId,
-      action: "voucher.create",
-      targetType: "voucher",
-      targetIdStr: code,
-      metadata: {
+  try {
+    await db.transaction(async (tx) => {
+      await tx.insert(vouchers).values({
         code,
         courseId: input.courseId,
         kind: input.kind,
         maxUses,
+        usedCount: 0,
         assignedUserId: assignee?.id ?? null,
-      },
+        expiresAt,
+        status: assignee ? "assigned" : "available",
+        discountType: input.kind === "diskon" ? (input.discountType ?? null) : null,
+        discountValue: input.kind === "diskon" ? (input.discountValue ?? null) : null,
+      });
+      await writeAuditLog(tx, {
+        actorUserId: actorId,
+        action: "voucher.create",
+        targetType: "voucher",
+        targetIdStr: code,
+        metadata: {
+          code,
+          courseId: input.courseId,
+          kind: input.kind,
+          maxUses,
+          assignedUserId: assignee?.id ?? null,
+          discountType: input.kind === "diskon" ? input.discountType : undefined,
+          discountValue: input.kind === "diskon" ? input.discountValue : undefined,
+        },
+      });
     });
-  });
+  } catch (e) {
+    // Balapan dua admin membuat kode sama: pre-check lolos bersamaan,
+    // UNIQUE(code) menggagalkan salah satu → petakan ke 409, bukan 500.
+    if (isDupEntry(e)) {
+      throw new VoucherError(409, "CODE_TAKEN", "Kode voucher sudah digunakan");
+    }
+    throw e;
+  }
   return {
     code,
     courseId: input.courseId,
     kind: input.kind,
     maxUses,
     usedCount: 0,
-    status: input.kind === "personal" ? "assigned" : "available",
+    status: assignee ? "assigned" : "available",
   };
 };
 
@@ -214,7 +252,7 @@ export const createVoucher = async (
 export interface VoucherListFilter {
   courseId?: number;
   status?: string;
-  kind?: "personal" | "umum";
+  kind?: "personal" | "umum" | "diskon";
   q?: string;
   limit?: number;
   page?: number;
@@ -226,14 +264,35 @@ export const listVouchers = async (
   const conditions = [];
   if (filter.courseId !== undefined) conditions.push(eq(vouchers.courseId, filter.courseId));
   if (filter.status !== undefined) {
-    conditions.push(eq(vouchers.status, filter.status as "available"));
+    if (filter.status === "active") {
+      // Grup "Aktif" versi UI: available/assigned yang belum lewat tanggal.
+      conditions.push(inArray(vouchers.status, ["available", "assigned"]));
+      conditions.push(
+        or(isNull(vouchers.expiresAt), gt(vouchers.expiresAt, new Date()))
+      );
+    } else if (filter.status === "expired") {
+      // Grup "Kedaluarsa" versi UI: status expired ATAU sudah lewat tanggal
+      // (NULL tidak memenuhi perbandingan tanggal, jadi aman tanpa cek null).
+      conditions.push(
+        or(
+          eq(vouchers.status, "expired"),
+          and(
+            inArray(vouchers.status, ["available", "assigned"]),
+            lte(vouchers.expiresAt, new Date())
+          )
+        )
+      );
+    } else {
+      conditions.push(eq(vouchers.status, filter.status as "available"));
+    }
   }
   if (filter.kind !== undefined) conditions.push(eq(vouchers.kind, filter.kind));
   if (filter.q) {
+    const q = escapeLike(filter.q);
     conditions.push(
       or(
-        like(vouchers.code, `%${filter.q}%`),
-        like(courses.title, `%${filter.q}%`)
+        like(vouchers.code, `%${q}%`),
+        like(courses.title, `%${q}%`)
       )
     );
   }
@@ -257,6 +316,8 @@ export const listVouchers = async (
         assignedUserId: vouchers.assignedUserId,
         expiresAt: vouchers.expiresAt,
         status: vouchers.status,
+        discountType: vouchers.discountType,
+        discountValue: vouchers.discountValue,
       })
       .from(vouchers)
       .leftJoin(courses, eq(courses.id, vouchers.courseId))
@@ -297,11 +358,15 @@ export const getVoucherDetail = async (code: string) => {
       maxUses: vouchers.maxUses,
       usedCount: vouchers.usedCount,
       assignedUserId: vouchers.assignedUserId,
+      assignedEmail: users.email,
       expiresAt: vouchers.expiresAt,
       status: vouchers.status,
+      discountType: vouchers.discountType,
+      discountValue: vouchers.discountValue,
     })
     .from(vouchers)
     .leftJoin(courses, eq(courses.id, vouchers.courseId))
+    .leftJoin(users, eq(users.id, vouchers.assignedUserId))
     .where(eq(vouchers.code, normalizeCode(code)))
     .limit(1);
   const v = rows[0];
@@ -320,11 +385,16 @@ export const getVoucherDetail = async (code: string) => {
     .where(eq(voucherRedemptions.voucherCode, v.code))
     .orderBy(desc(voucherRedemptions.redeemedAt), desc(voucherRedemptions.id))
     .limit(50);
+  // Total riwayat sebenarnya (daftar di atas dibatasi 50 terbaru).
+  const [countRow] = await db
+    .select({ n: sql<number>`count(*)` })
+    .from(voucherRedemptions)
+    .where(eq(voucherRedemptions.voucherCode, v.code));
   return {
     ...v,
     remaining: Math.max(v.maxUses - v.usedCount, 0),
     redemptions: reds,
-    redemptionCount: reds.length,
+    redemptionCount: Number(countRow?.n ?? reds.length),
   };
 };
 
@@ -420,9 +490,29 @@ export const setVoucherStatus = async (
 
 // ---------- Penukaran (peserta) ----------
 
+/** Harga resmi kursus dari DB (acuan diskon; harga klien tidak dipercaya). */
+export const getCoursePrice = async (
+  courseId: number
+): Promise<{ id: number; title: string; priceNominal: number; status: string }> => {
+  const rows = await db
+    .select({
+      id: courses.id,
+      title: courses.title,
+      priceNominal: courses.priceNominal,
+      status: courses.status,
+    })
+    .from(courses)
+    .where(eq(courses.id, courseId))
+    .limit(1);
+  const course = rows[0];
+  if (!course) {
+    throw new VoucherError(404, "COURSE_NOT_FOUND", "Kursus tidak ditemukan");
+  }
+  return course;
+};
+
 /** Kelayakan kursus untuk akses via voucher (selaras aturan enrollFree). */
-const redeemableCourse = async (courseId: number) => {
-  const rows = await db.select().from(courses).where(eq(courses.id, courseId)).limit(1);
+const redeemableCourse = async (courseId: number) => {  const rows = await db.select().from(courses).where(eq(courses.id, courseId)).limit(1);
   const course = rows[0];
   if (!course || course.status === "draft") {
     throw new VoucherError(404, "COURSE_NOT_FOUND", "Kursus tidak ditemukan");
@@ -437,7 +527,7 @@ const redeemableCourse = async (courseId: number) => {
 export const redeemVoucher = async (
   userId: number,
   rawCode: string,
-  courseId: number
+  courseId?: number
 ) => {
   const code = normalizeCode(rawCode);
   const vRows = await db.select().from(vouchers).where(eq(vouchers.code, code)).limit(1);
@@ -447,6 +537,13 @@ export const redeemVoucher = async (
   }
   if (v.status === "revoked") {
     throw new VoucherError(403, "VOUCHER_DISABLED", "Voucher ini dinonaktifkan");
+  }
+  if (v.kind === "diskon") {
+    throw new VoucherError(
+      400,
+      "DISCOUNT_NOT_REDEEMABLE",
+      "Voucher diskon dipakai saat pembayaran, bukan ditukar langsung"
+    );
   }
   if (v.expiresAt !== null && v.expiresAt.getTime() <= Date.now()) {
     // Tandai kedaluwarsa agar konsisten, lalu tolak.
@@ -481,20 +578,31 @@ export const redeemVoucher = async (
   if (v.kind === "personal" && v.assignedUserId !== userId) {
     throw new VoucherError(403, "VOUCHER_FOR_ACCOUNT", "Voucher ini untuk akun lain");
   }
-  if (v.courseId === null || v.courseId !== courseId) {
+  // Kursus tujuan: dari request bila diisi (klien lama), bila absen pakai
+  // kursus yang terikat pada voucher.
+  // Setiap voucher wajib terikat courseId saat dibuat; null hanya defensif.
+  if (courseId !== undefined && v.courseId !== courseId) {
     throw new VoucherError(
       403,
       "COURSE_MISMATCH",
       "Voucher ini tidak berlaku untuk kursus tersebut"
     );
   }
-  await redeemableCourse(courseId);
+  const targetCourseId = courseId ?? v.courseId;
+  if (targetCourseId === null) {
+    throw new VoucherError(
+      403,
+      "COURSE_MISMATCH",
+      "Voucher ini tidak terikat ke kursus mana pun"
+    );
+  }
+  await redeemableCourse(targetCourseId);
 
   // Sudah enrolled aktif → tolak tanpa menyentuh kuota.
   const existing = await db
     .select({ status: enrollments.status })
     .from(enrollments)
-    .where(and(eq(enrollments.userId, userId), eq(enrollments.courseId, courseId)))
+    .where(and(eq(enrollments.userId, userId), eq(enrollments.courseId, targetCourseId)))
     .limit(1);
   if (existing[0] && ["active", "completed"].includes(existing[0].status)) {
     throw new VoucherError(409, "ALREADY_ENROLLED", "Anda sudah terdaftar di kursus ini");
@@ -523,8 +631,18 @@ export const redeemVoucher = async (
         ) {
           throw new VoucherError(403, "QUOTA_EXHAUSTED", "Kuota voucher sudah habis");
         }
+        // Cek ulang enrollment di DALAM transaksi: cegah dua voucher berbeda
+        // untuk kursus sama menelan kuota sia-sia saat request paralel.
+        const inside = await tx
+          .select({ status: enrollments.status })
+          .from(enrollments)
+          .where(and(eq(enrollments.userId, userId), eq(enrollments.courseId, targetCourseId)))
+          .limit(1);
+        if (inside[0] && ["active", "completed"].includes(inside[0].status)) {
+          throw new VoucherError(409, "ALREADY_ENROLLED", "Anda sudah terdaftar di kursus ini");
+        }
         // Baris jejak: UNIQUE(voucher,user) menggagalkan balapan akun sama.
-        await tx.insert(voucherRedemptions).values({ voucherCode: code, userId, courseId });
+        await tx.insert(voucherRedemptions).values({ voucherCode: code, userId, courseId: targetCourseId });
         await tx
           .update(vouchers)
           .set({ usedCount: sql`${vouchers.usedCount} + 1` })
@@ -541,17 +659,17 @@ export const redeemVoucher = async (
           );
         await tx
           .insert(enrollments)
-          .values({ userId, courseId, source: "voucher", status: "active" })
+          .values({ userId, courseId: targetCourseId, source: "voucher", status: "active" })
           .onDuplicateKeyUpdate({ set: { source: "voucher", status: "active" } });
         await writeAuditLog(tx, {
           actorUserId: userId,
           action: "voucher.redeem",
           targetType: "voucher",
           targetIdStr: code,
-          metadata: { code, userId, courseId },
+          metadata: { code, userId, courseId: targetCourseId },
         });
       });
-      return { courseId, status: "active", source: "voucher", voucherCode: code };
+      return { courseId: targetCourseId, status: "active", source: "voucher", voucherCode: code };
     } catch (e) {
       if (isDupEntry(e)) {
         throw new VoucherError(
@@ -568,6 +686,84 @@ export const redeemVoucher = async (
     }
   }
   throw new VoucherError(503, "RETRY_EXHAUSTED", "Coba lagi dalam beberapa saat");
+};
+
+export const validateDiscountSchema = z
+  .object({
+    code: z.string().trim().min(1).max(100),
+    courseId: z.number().int().positive(),
+  })
+  .strict();
+
+export interface DiscountQuote {
+  valid: true;
+  code: string;
+  discountType: "percent" | "nominal";
+  discountValue: number;
+  /** Besaran potongan (rupiah) terhadap harga penuh. */
+  discountAmount: number;
+}
+
+/**
+ * Validasi voucher DISKON tanpa menghanguskan (untuk kalkulasi total saat
+ * checkout). Pemakaian dicatat saat pembayaran disetujui admin — lihat
+ * modul payments. Skema baca konsisten dengan redeem (status, kedaluwarsa,
+ * kuota, akun, kursus).
+ */
+export const validateDiscountVoucher = async (
+  userId: number,
+  rawCode: string,
+  courseId: number,
+  priceNominal: number
+): Promise<DiscountQuote> => {
+  const code = normalizeCode(rawCode);
+  const rows = await db.select().from(vouchers).where(eq(vouchers.code, code)).limit(1);
+  const v = rows[0];
+  if (!v) throw new VoucherError(404, "CODE_NOT_FOUND", "Kode voucher tidak valid");
+  if (v.kind !== "diskon" || !v.discountType || !v.discountValue) {
+    throw new VoucherError(
+      400,
+      "NOT_DISCOUNT",
+      "Kode ini bukan voucher diskon (tukar langsung bila voucher akses)"
+    );
+  }
+  if (v.status === "revoked") {
+    throw new VoucherError(403, "VOUCHER_DISABLED", "Voucher ini dinonaktifkan");
+  }
+  if (v.expiresAt !== null && v.expiresAt.getTime() <= Date.now()) {
+    throw new VoucherError(403, "VOUCHER_EXPIRED", "Voucher ini sudah kedaluwarsa");
+  }
+  if (v.status === "expired") {
+    throw new VoucherError(403, "VOUCHER_EXPIRED", "Voucher ini sudah kedaluwarsa");
+  }
+  if (v.status === "redeemed" || v.usedCount >= v.maxUses) {
+    throw new VoucherError(403, "QUOTA_EXHAUSTED", "Kuota voucher sudah habis");
+  }
+  if (v.assignedUserId !== null && v.assignedUserId !== userId) {
+    throw new VoucherError(403, "VOUCHER_FOR_ACCOUNT", "Voucher ini untuk akun lain");
+  }
+  if (v.courseId === null || v.courseId !== courseId) {
+    throw new VoucherError(403, "COURSE_MISMATCH", "Voucher ini tidak berlaku untuk kursus tersebut");
+  }
+  const prior = await db
+    .select({ id: voucherRedemptions.id })
+    .from(voucherRedemptions)
+    .where(and(eq(voucherRedemptions.voucherCode, code), eq(voucherRedemptions.userId, userId)))
+    .limit(1);
+  if (prior[0]) {
+    throw new VoucherError(409, "ALREADY_REDEEMED", "Voucher ini sudah pernah Anda pakai");
+  }
+  const discountAmount =
+    v.discountType === "percent"
+      ? Math.min(priceNominal, Math.floor((priceNominal * v.discountValue) / 100))
+      : Math.min(priceNominal, v.discountValue);
+  return {
+    valid: true as const,
+    code,
+    discountType: v.discountType,
+    discountValue: v.discountValue,
+    discountAmount,
+  };
 };
 
 const isDupEntry = (e: unknown): boolean =>

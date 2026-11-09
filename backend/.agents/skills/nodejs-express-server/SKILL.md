@@ -100,3 +100,9 @@ Detailed implementations in the `references/` directory:
 - Use callback hell (use promises/async-await)
 - Expose stack traces in production
 - Trust client-side validation only
+
+## ARISTOTELES — Project Guardrails (2026-11-04, append-only, precedence: backend/AGENTS.md)
+
+- ORM satu-satunya: Drizzle ORM. JANGAN ikuti `references/database-integration-postgresql-with-sequelize.md` (Sequelize + `sync({alter:true})` destruktif) untuk ARISTOTELES. Gunakan skill `drizzle` + `src/db/` + `drizzle.config.ts`.
+- Validasi Zod-only. ESM `import` (bukan CJS `require` pada contoh Quick Start).
+- Jangan `npm install`, `drizzle-kit generate/migrate/push/studio`, `tsx src/db/migrate.ts/seed.ts`, atau jalankan `scripts/security-checklist.sh` tanpa persetujuan eksplisit.

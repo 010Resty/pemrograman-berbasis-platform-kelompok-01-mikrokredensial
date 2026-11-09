@@ -83,7 +83,7 @@ before(async () => {
 
   const hash = await bcrypt.hash(TEST_PASSWORD, 4);
   const mkUser = async (name: string, email: string, role: "admin" | "teacher" | "student") => {
-    const [h] = await db.insert(schema.users).values({ name, email, passwordHash: hash, role, emailVerifiedAt: new Date() });
+    const [h] = await db.insert(schema.users).values({ name, username: email.split("@")[0] + "-t", email, passwordHash: hash, role, emailVerifiedAt: new Date() });
     return Number((h as unknown as { insertId: number }).insertId);
   };
   ids.admin = await mkUser("Admin Uji", "admin@uji.io", "admin");
@@ -276,6 +276,27 @@ describe("penukaran voucher", () => {
       "GET",
       `/api/v1/courses/${ids.paid}/access`,
       tokens.s1
+    );
+    assert.equal(access.json.data.hasAccess, true);
+  });
+
+  it("tanpa courseId → pakai kursus terikat voucher", async () => {
+    await api("POST", "/api/v1/admin/vouchers", tokens.admin, {
+      code: "UMUM-B7-NOCOURSE",
+      courseId: ids.paid2,
+      kind: "umum",
+      maxUses: 5,
+    });
+    // s5: belum terdaftar di paid2 dan tak dipakai uji paid2 lain.
+    const r = await api<{ courseId: number }>("POST", "/api/v1/vouchers/redeem", tokens.s5, {
+      code: "UMUM-B7-NOCOURSE",
+    });
+    assert.equal(r.http, 201);
+    assert.equal(r.json.data.courseId, ids.paid2);
+    const access = await api<{ hasAccess: boolean }>(
+      "GET",
+      `/api/v1/courses/${ids.paid2}/access`,
+      tokens.s5
     );
     assert.equal(access.json.data.hasAccess, true);
   });
@@ -636,5 +657,49 @@ describe("undangan instruktur", () => {
       password: "Katasandi123",
     });
     assert.equal(acceptExpired.http, 410);
+  });
+});
+
+describe("detail voucher + filter grup status (admin)", () => {
+  it("detail memuat email penerima personal + hitungan redemptions sebenarnya", async () => {
+    const personal = await api<{ code: string; assignedEmail: string | null; redemptionCount: number }>(
+      "GET",
+      "/api/v1/admin/vouchers/PERSONAL-B7-S2",
+      tokens.admin
+    );
+    assert.equal(personal.http, 200);
+    assert.equal(personal.json.data.assignedEmail, "siswa2@uji.io");
+    assert.equal(typeof personal.json.data.redemptionCount, "number");
+  });
+
+  it("grup status active/expired konsisten dengan badge UI", async () => {
+    const mk = await api<{ code: string }>("POST", "/api/v1/admin/vouchers", tokens.admin, {
+      code: "GRUP-STATUS-01",
+      courseId: ids.paid,
+      kind: "umum",
+      maxUses: 5,
+      expiresAt: new Date(Date.now() + 24 * 3600 * 1000).toISOString(),
+    });
+    assert.equal(mk.http, 201, JSON.stringify(mk.json));
+    await db
+      .update(schema.vouchers)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.vouchers.code, "GRUP-STATUS-01"));
+
+    const active = await api<{ items: Array<{ code: string }> }>(
+      "GET",
+      "/api/v1/admin/vouchers?status=active&limit=100",
+      tokens.admin
+    );
+    assert.equal(active.http, 200);
+    assert.ok(!active.json.data.items.some((v) => v.code === "GRUP-STATUS-01"));
+
+    const expired = await api<{ items: Array<{ code: string }> }>(
+      "GET",
+      "/api/v1/admin/vouchers?status=expired&limit=100",
+      tokens.admin
+    );
+    assert.equal(expired.http, 200);
+    assert.ok(expired.json.data.items.some((v) => v.code === "GRUP-STATUS-01"));
   });
 });

@@ -4,12 +4,15 @@ import {
   VoucherError,
   createVoucher,
   createVoucherSchema,
+  getCoursePrice,
   getVoucherDetail,
   listRedemptions,
   listVouchers,
   redeemSchema,
   redeemVoucher,
   setVoucherStatus,
+  validateDiscountSchema,
+  validateDiscountVoucher,
 } from "./voucher.service";
 
 const uid = (req: AuthenticatedRequest): number | null => {
@@ -104,10 +107,10 @@ export const listHandler = async (
     const q = req.query;
     const status =
       typeof q.status === "string" &&
-      ["available", "assigned", "redeemed", "expired", "revoked"].includes(q.status)
+      ["available", "assigned", "redeemed", "expired", "revoked", "active"].includes(q.status)
         ? q.status
         : undefined;
-    const kind = q.kind === "personal" || q.kind === "umum" ? q.kind : undefined;
+    const kind = q.kind === "personal" || q.kind === "umum" || q.kind === "diskon" ? q.kind : undefined;
     const { items, total } = await listVouchers({
       courseId: num(q.courseId),
       status,
@@ -219,6 +222,42 @@ export const enableHandler = async (
         status: "success",
         message: "Voucher diaktifkan kembali.",
         data: await setVoucherStatus(actorId, String(req.params.code ?? ""), "active"),
+      });
+    } catch (e) {
+      if (!voucherError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// POST /api/v1/vouchers/validate — cek voucher diskon tanpa menghanguskan (peserta).
+export const validateDiscountHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    const parsed = validateDiscountSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        status: "error",
+        message: "Data validasi tidak valid",
+        errors: toFieldErrors(parsed.error.issues),
+        data: null,
+      });
+      return;
+    }
+    try {
+      const courseId = parsed.data.courseId;
+      const course = await getCoursePrice(courseId);
+      const result = await validateDiscountVoucher(userId, parsed.data.code, courseId, course.priceNominal);
+      res.status(200).json({
+        status: "success",
+        message: "Voucher diskon berlaku.",
+        data: { ...result, priceNominal: course.priceNominal },
       });
     } catch (e) {
       if (!voucherError(res, e)) throw e;

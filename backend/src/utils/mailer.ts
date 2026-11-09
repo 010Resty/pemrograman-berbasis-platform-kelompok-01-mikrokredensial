@@ -241,9 +241,16 @@ const escapeHtml = (value: string): string =>
 const otpHtml = (title: string, intro: string, code: string): string => `
 <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:16px">
   <h2 style="color:#1d4ed8;margin:0 0 8px">${escapeHtml(title)}</h2>
+  <p style="color:#475569;font-size:14px">Halo,</p>
   <p style="color:#475569;font-size:14px">${escapeHtml(intro)}</p>
   <div style="font-size:32px;font-weight:bold;letter-spacing:8px;text-align:center;background:#eff6ff;border-radius:12px;padding:16px;margin:16px 0;color:#1e3a8a">${escapeHtml(code)}</div>
-  <p style="color:#94a3b8;font-size:12px">Kode kedaluwarsa dalam 10 menit. Jangan bagikan ke siapa pun.</p>
+  <p style="color:#475569;font-size:13px">Cara memakai kode ini:</p>
+  <ol style="color:#475569;font-size:13px;padding-left:20px;margin:0 0 8px">
+    <li>Salin 6 digit kode di atas.</li>
+    <li>Tempel pada halaman verifikasi ARISTOTELES.</li>
+    <li>Selesaikan dalam 10 menit sebelum kedaluwarsa.</li>
+  </ol>
+  <p style="color:#94a3b8;font-size:12px">Kode kedaluwarsa dalam 10 menit. Jangan bagikan ke siapa pun, termasuk pihak yang mengaku dari ARISTOTELES. Jika Anda tidak meminta kode ini, abaikan email ini dan pastikan akun Anda aman.</p>
 </div>`;
 
 const invitationHtml = (opts: {
@@ -260,10 +267,17 @@ const invitationHtml = (opts: {
   return `
 <div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;padding:24px;border:1px solid #e2e8f0;border-radius:16px">
   <h2 style="color:#1d4ed8;margin:0 0 8px">Undangan Instruktur ARISTOTELES</h2>
-  <p style="color:#475569;font-size:14px">${escapeHtml(greeting)} Anda diundang sebagai instruktur ARISTOTELES. Buka tautan berikut untuk mengaktifkan akun dan mengatur password:</p>
+  <p style="color:#475569;font-size:14px">${escapeHtml(greeting)}</p>
+  <p style="color:#475569;font-size:14px">Kabar baik — admin ARISTOTELES mengundang Anda untuk bergabung sebagai <strong>instruktur</strong> di platform pembelajaran mikrokredensial kami. Sebagai instruktur, Anda dapat menyusun kurikulum, mengunggah materi, membuat kuis dan tugas, menilai peserta, serta memantau perkembangan mereka.</p>
+  <p style="color:#475569;font-size:14px">Untuk mengaktifkan akun Anda, klik tombol berikut lalu atur kata sandi Anda:</p>
   <p style="text-align:center;margin:20px 0"><a href="${escapeHtml(opts.inviteUrl)}" style="display:inline-block;background:#1d4ed8;color:#fff;text-decoration:none;font-weight:bold;font-size:14px;border-radius:12px;padding:12px 24px">Aktifkan Akun Instruktur</a></p>
-  <p style="color:#475569;font-size:12px;word-break:break-all">${escapeHtml(opts.inviteUrl)}</p>
-  <p style="color:#94a3b8;font-size:12px">Berlaku hingga ${escapeHtml(expiry)}. Tautan sekali pakai — jangan teruskan ke orang lain.</p>
+  <p style="color:#475569;font-size:13px">Setelah aktivasi:</p>
+  <ol style="color:#475569;font-size:13px;padding-left:20px;margin:0 0 8px">
+    <li>Masuk dengan email dan kata sandi baru Anda.</li>
+    <li>Lengkapi profil dan keahlian Anda.</li>
+    <li>Mulai mengelola kursus yang ditugaskan kepada Anda.</li>
+  </ol>
+  <p style="color:#94a3b8;font-size:12px">Undangan ini berlaku hingga ${escapeHtml(expiry)} dan hanya dapat dipakai satu kali — jangan teruskan ke orang lain. Jika Anda tidak mengenal undangan ini, abaikan email ini.</p>
 </div>`;
 };
 

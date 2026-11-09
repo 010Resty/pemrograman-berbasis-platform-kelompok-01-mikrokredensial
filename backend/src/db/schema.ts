@@ -4,6 +4,7 @@ import {
   int,
   boolean,
   timestamp,
+  date,
   mysqlEnum,
   text,
   mediumtext,
@@ -12,6 +13,7 @@ import {
   uniqueIndex,
   primaryKey,
 } from "drizzle-orm/mysql-core";
+import type { AnyMySqlColumn } from "drizzle-orm/mysql-core";
 
 // Konvensi ID: integer auto-increment di semua tabel entitas,
 // selaras dengan frontend (mis. Course.id: number).
@@ -21,12 +23,37 @@ export const users = mysqlTable("users", {
   id: int("id").autoincrement().primaryKey(),
   name: varchar("name", { length: 100 }).notNull(),
   email: varchar("email", { length: 191 }).notNull().unique(),
+  // Username unik untuk identitas publik (mis. anggota patungan).
+  // Wajib diisi untuk akun baru; baris lama di-backfill saat migrasi 0014.
+  username: varchar("username", { length: 50 }).notNull().unique(),
   passwordHash: varchar("password_hash", { length: 255 }).notNull(),
   role: mysqlEnum("role", ["student", "teacher", "admin"])
     .notNull()
     .default("student"),
   // Keahlian instruktur (opsional, dikelola admin; NULL = belum diisi).
   expertise: varchar("expertise", { length: 100 }),
+  // Profil peserta (opsional, dikelola pemilik akun via /me/profile).
+  // NULL = belum diisi; avatar menunjuk files kind=image milik sendiri.
+  phone: varchar("phone", { length: 30 }),
+  gender: mysqlEnum("gender", ["L", "P"]),
+  birthPlace: varchar("birth_place", { length: 100 }),
+  birthDate: date("birth_date"),
+  avatarFileId: int("avatar_file_id").references(
+    (): AnyMySqlColumn => files.id,
+    {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }
+  ),
+  // Sampul banner profil (opsional, milik sendiri, kind=profile_cover).
+  // Anotasi sama demi siklus inferensi (lihat avatar).
+  coverFileId: int("cover_file_id").references(
+    (): AnyMySqlColumn => files.id,
+    {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }
+  ),
   // Penonaktifan oleh admin; ditegakkan saat login (jendela token ≤15 mnt).
   // Penanda verifikasi email alur OTP. NULL = belum diverifikasi.
   // Baris lama di-backfill saat migrasi 0008.
@@ -219,6 +246,9 @@ export const files = mysqlTable("files", {
     "assignment",
     "applicant_image",
     "applicant_cv",
+    "payment_proof",
+    "avatar",
+    "profile_cover",
   ])
     .notNull()
     .default("image"),
@@ -420,6 +450,14 @@ export const submissions = mysqlTable(
     driveLink: varchar("drive_link", { length: 500 }),
     score: int("score"),
     feedback: text("feedback"),
+    // Rincian rubrik K-06 (Kelengkapan/Ketepatan isi/Kerapian, 0–100).
+    // NULL = dinilai langsung tanpa rubrik (kompatibel nilai lama).
+    // Skor efektif = rata-rata bulat, dihitung SERVER saat rubrik dikirim.
+    rubricScores: json("rubric_scores").$type<{
+      kelengkapan: number;
+      ketepatan: number;
+      kerapian: number;
+    }>(),
     gradedBy: int("graded_by").references(() => users.id, {
       onDelete: "set null",
       onUpdate: "cascade",
@@ -481,8 +519,11 @@ export const vouchers = mysqlTable(
       onDelete: "restrict",
       onUpdate: "cascade",
     }),
-    kind: mysqlEnum("kind", ["personal", "umum"]).notNull().default("umum"),
+    kind: mysqlEnum("kind", ["personal", "umum", "diskon"]).notNull().default("umum"),
     maxUses: int("max_uses").notNull().default(1),
+    /** Diskon khusus kind="diskon" (K-03 opsi A): percent 1–100 atau nominal rupiah. */
+    discountType: mysqlEnum("discount_type", ["percent", "nominal"]),
+    discountValue: int("discount_value"),
     usedCount: int("used_count").notNull().default(0),
     assignedUserId: int("assigned_user_id").references(() => users.id, {
       onDelete: "restrict",
@@ -537,6 +578,72 @@ export const voucherRedemptions = mysqlTable(
   })
 );
 
+// Pembayaran manual QRIS + verifikasi admin (tanpa gateway).
+// Alur: peserta ajukan (bukti bayar) → admin setujui/tolak.
+// Setuju (nominal >= tagihan) → enrollment source "payment:manual" + audit.
+// Satu antrean "menunggu" per (peserta, kursus); bukti boleh diunggah ulang
+// selama masih menunggu.
+export const payments = mysqlTable(
+  "payments",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    courseId: int("course_id")
+      .notNull()
+      .references(() => courses.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    invoice: varchar("invoice", { length: 50 }).notNull().unique(),
+    method: mysqlEnum("method", ["qris"]).notNull().default("qris"),
+    amountExpected: int("amount_expected").notNull(),
+    amountPaid: int("amount_paid"),
+    voucherCode: varchar("voucher_code", { length: 100 }).references(() => vouchers.code, {
+      onDelete: "restrict",
+      onUpdate: "cascade",
+    }),
+    discountAmount: int("discount_amount").notNull().default(0),
+    // Snapshot slug promo yang menang (non-stack: promo vs voucher, terbesar menang).
+    // Tanpa FK agar riwayat tidak ikut berubah bila slug kampanye diubah.
+    promoSlug: varchar("promo_slug", { length: 100 }),
+    // Tautan grup patungan bila pembayaran ini adalah iuran anggota patungan.
+    // FK set-null: riwayat pembayaran tetap utuh bila grup dihapus.
+    patunganGroupId: int("patungan_group_id").references(() => patunganGroups.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    proofFileId: int("proof_file_id").references(() => files.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    status: mysqlEnum("status", ["menunggu", "diverifikasi", "ditolak"])
+      .notNull()
+      .default("menunggu"),
+    rejectReason: varchar("reject_reason", { length: 500 }),
+    verifiedBy: int("verified_by").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    verifiedAt: timestamp("verified_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    paymentUserCourseIdx: index("payments_user_course_idx").on(
+      table.userId,
+      table.courseId,
+      table.status
+    ),
+    paymentPatunganGroupIdx: index("payments_patungan_group_idx").on(
+      table.patunganGroupId
+    ),
+  })
+);
+
 // Jejak audit tindakan administratif dan perubahan hak akses
 // (pemberian/pencabutan akses manual, penerbitan/pencabutan sertifikat, dsb).
 export const auditLogs = mysqlTable("audit_logs", {
@@ -553,12 +660,12 @@ export const auditLogs = mysqlTable("audit_logs", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 
-// Sertifikat per modul (K-05). Sertifikat tingkat kursus adalah turunan
-// (terbit bila semua modul tuntas) sehingga tidak disimpan sebagai baris.
+// Sertifikat per modul (K-05) + satu baris per (peserta, kursus) untuk
+// sertifikat tingkat kursus (moduleId NULL; terbit bila semua modul tuntas).
 // Kelayakan dievaluasi sekali saat penerbitan; snapshot persyaratan + nama
 // penerima diarsipkan agar materi baru belakangan tidak menginvalidasi.
-// Satu baris per (peserta, modul): UNIQUE(userId, moduleId) + transaksi
-// membuat penerbitan idempoten dan anti-ganda saat request bersamaan.
+// Modul: UNIQUE(userId, moduleId) + transaksi = idempoten anti-ganda.
+// Kursus: keunikan aplikasi (cek-dalam-transaksi + retry tabrakan kode).
 export const certificates = mysqlTable(
   "certificates",
   {
@@ -576,11 +683,14 @@ export const certificates = mysqlTable(
         onUpdate: "cascade",
       }),
     moduleId: int("module_id")
-      .notNull()
       .references(() => modules.id, {
         onDelete: "cascade",
         onUpdate: "cascade",
       }),
+    // NULL = sertifikat level kursus (terbit bila semua modul tuntas,
+    // Fase B). Keunikan sertifikat kursus (satu per peserta+kursus)
+    // ditegakkan di lapisan aplikasi (cek-dulu-dalam-transaksi +
+    // retry tabrakan kode) karena indeks unik tak mencakup NULL.
     // ID kredensial deterministik ala frontend lawas, mis. ATS-2026-C1-M1.
     // Dipertahankan nullable demi kompatibilitas seed lama; kode verifikasi
     // resmi adalah `code` (unik per sertifikat, tak tertebak).
@@ -590,6 +700,7 @@ export const certificates = mysqlTable(
     // Snapshot nama penerima saat terbit; ganti nama profil tak mengubahnya.
     recipientName: varchar("recipient_name", { length: 100 }).notNull(),
     // Arsip persyaratan saat kelayakan diverifikasi (audit Tahap 3).
+    // Sertifikat kursus (moduleId NULL): materials kosong + courseModules.
     requirementsSnapshot: json("requirements_snapshot").$type<{
       evaluatedAt: string;
       materials: Array<{
@@ -598,8 +709,15 @@ export const certificates = mysqlTable(
         type: string;
         state: string;
       }>;
+      courseModules?: Array<{
+        moduleId: number;
+        title: string;
+        certificateCode: string;
+      }>;
     }>(),
-    status: mysqlEnum("status", ["issued", "revoked"])
+    // issued = berlaku; revoked = dicabut pengelola; superseded = modul
+    // yang digantikan sertifikat kursus (disembunyikan dari daftar).
+    status: mysqlEnum("status", ["issued", "revoked", "superseded"])
       .notNull()
       .default("issued"),
     revokeReason: varchar("revoke_reason", { length: 500 }),
@@ -634,6 +752,8 @@ export const emailVerificationPending = mysqlTable(
   {
     email: varchar("email", { length: 191 }).primaryKey(),
     name: varchar("name", { length: 100 }).notNull(),
+    // Username pilihan pendaftar; disalin ke `users` saat OTP terverifikasi.
+    username: varchar("username", { length: 50 }),
     passwordHash: varchar("password_hash", { length: 255 }).notNull(),
     codeHash: varchar("code_hash", { length: 64 }).notNull(),
     expiresAt: timestamp("expires_at").notNull(),
@@ -703,3 +823,145 @@ export const passwordResetOtps = mysqlTable("password_reset_otps", {
   lastSentAt: timestamp("last_sent_at").defaultNow().notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// Promo kurasi admin (diskon persen / pajang / patungan).
+// Diskon fase 1: percent-only 1–90 (ditegakkan di Zod, bukan DB).
+// `status: pending` + `proposedBy` disiapkan untuk alur usulan instruktur
+// (fase 2) tanpa mengubah kontrak publik.
+export const promoCampaigns = mysqlTable(
+  "promo_campaigns",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    slug: varchar("slug", { length: 100 }).notNull().unique(),
+    title: varchar("title", { length: 200 }).notNull(),
+    badgeLabel: varchar("badge_label", { length: 100 }),
+    type: mysqlEnum("type", ["diskon", "kurasi", "patungan"]).notNull().default("diskon"),
+    discountPercent: int("discount_percent"),
+    status: mysqlEnum("status", ["draft", "active", "archived"]).notNull().default("draft"),
+    startsAt: timestamp("starts_at"),
+    endsAt: timestamp("ends_at"),
+    proposedBy: int("proposed_by").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    createdBy: int("created_by").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    promoStatusIdx: index("promo_campaigns_status_idx").on(table.status),
+  })
+);
+
+// Keanggotaan kursus per promo (kurasi per kursus, bukan global).
+export const promoCourses = mysqlTable(
+  "promo_courses",
+  {
+    campaignId: int("campaign_id")
+      .notNull()
+      .references(() => promoCampaigns.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    courseId: int("course_id")
+      .notNull()
+      .references(() => courses.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    position: int("position").notNull().default(0),
+    customBadge: varchar("custom_badge", { length: 100 }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.campaignId, table.courseId] }),
+    promoCourseIdx: index("promo_courses_course_idx").on(table.courseId),
+  })
+);
+
+// Grup patungan: 1 grup = 1 kursus, anggota 2–15 (termasuk pembuat).
+// Alur: pending (kumpul iuran sendiri-sendiri) → complete (semua approve
+// → akses dibuka untuk semua sekaligus) / cancelled. Tidak ada akses
+// parsial: tidak satu pun anggota mendapat akses sebelum grup complete.
+export const patunganGroups = mysqlTable(
+  "patungan_groups",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    // Kode grup untuk tampilan (mis. PTG-7KQ2XA), unik tak tertebak.
+    code: varchar("code", { length: 20 }).notNull().unique(),
+    courseId: int("course_id")
+      .notNull()
+      .references(() => courses.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    // Snapshot slug kampanye patungan yang dipakai saat grup dibuat.
+    // Tanpa FK agar riwayat tidak ikut berubah bila slug kampanye diubah.
+    promoSlug: varchar("promo_slug", { length: 100 }),
+    memberCount: int("member_count").notNull(),
+    // Snapshot nominal kursus saat grup dibuat (iuran dihitung dari ini).
+    priceNominal: int("price_nominal").notNull(),
+    status: mysqlEnum("status", ["pending", "complete", "cancelled"])
+      .notNull()
+      .default("pending"),
+    createdBy: int("created_by").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    cancelledBy: int("cancelled_by").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    cancelReason: varchar("cancel_reason", { length: 500 }),
+    completedAt: timestamp("completed_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    patunganGroupCourseIdx: index("patungan_groups_course_idx").on(table.courseId),
+    patunganGroupStatusIdx: index("patungan_groups_status_idx").on(table.status),
+  })
+);
+
+// Anggota grup patungan. `position` 0 = pembuat grup.
+// `paymentStatus`: unpaid → menunggu (bukti diunggah) → diverifikasi/ditolak.
+// Grup complete hanya bila SEMUA anggota diverifikasi.
+export const patunganGroupMembers = mysqlTable(
+  "patungan_group_members",
+  {
+    groupId: int("group_id")
+      .notNull()
+      .references(() => patunganGroups.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    position: int("position").notNull().default(0),
+    // Iuran anggota ini (total habis dibagi; jumlah = priceNominal grup).
+    shareAmount: int("share_amount").notNull(),
+    paymentStatus: mysqlEnum("payment_status", [
+      "unpaid",
+      "menunggu",
+      "diverifikasi",
+      "ditolak",
+    ])
+      .notNull()
+      .default("unpaid"),
+    paymentId: int("payment_id").references(() => payments.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    paidAt: timestamp("paid_at"),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.groupId, table.userId] }),
+    patunganMemberUserIdx: index("patungan_members_user_idx").on(table.userId),
+  })
+);

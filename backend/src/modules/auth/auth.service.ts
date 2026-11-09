@@ -20,6 +20,10 @@ import {
   verifyOtpCode,
 } from "./otp.service";
 import {
+  isValidUsername,
+  normalizeUsername,
+} from "../../utils/username";
+import {
   sendPasswordResetEmail,
   sendVerificationEmail,
 } from "../../utils/mailer";
@@ -70,8 +74,23 @@ const emailField = z
   .max(191)
   .transform((value) => value.toLowerCase());
 
-const registerSchema = z.object({
+/**
+ * Username publik: 3–30 karakter (huruf kecil, angka, titik, _, -).
+ * Dipakai sebagai identitas anggota patungan — harus unik.
+ */
+export const usernameField = z
+  .string()
+  .trim()
+  .min(3, "Username minimal 3 karakter")
+  .max(30, "Username maksimal 30 karakter")
+  .transform((value) => normalizeUsername(value))
+  .refine((value) => isValidUsername(value), {
+    message: "Username hanya boleh huruf kecil, angka, titik, underscore, atau strip",
+  });
+
+export const registerSchema = z.object({
   name: z.string().trim().min(2, "Nama minimal 2 karakter").max(100),
+  username: usernameField,
   email: emailField,
   password: z.string().min(8, "Password minimal 8 karakter").max(72),
 });
@@ -104,6 +123,14 @@ export const resetPasswordSchema = z.object({
     .trim()
     .regex(/^\d{6}$/, "Kode OTP harus 6 digit angka"),
   newPassword: z.string().min(8, "Password minimal 8 karakter").max(72),
+});
+
+export const verifyResetCodeSchema = z.object({
+  email: emailField,
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, "Kode OTP harus 6 digit angka"),
 });
 
 const getJwtSecret = (): string => {
@@ -159,6 +186,15 @@ const otpResult = (email: string) => ({
   resendCooldownSeconds: getOtpCooldownSeconds(),
 });
 
+/**
+ * Info kedaluwarsa generik untuk lupa-password: SELALU disertakan dengan
+ * nilai sama agar tidak membocorkan apakah email terdaftar.
+ */
+const otpExpiry = () => ({
+  expiresInSeconds: getOtpExpiresMinutes() * 60,
+  resendCooldownSeconds: getOtpCooldownSeconds(),
+});
+
 const requirePending = async (email: string) => {
   const rows = await db
     .select()
@@ -183,7 +219,7 @@ export const registerUser = async (_input: unknown) => {
     );
   }
 
-  const { name, email, password } = parsed.data;
+  const { name, username, email, password } = parsed.data;
 
   const existingUser = await db
     .select({ id: users.id })
@@ -193,6 +229,25 @@ export const registerUser = async (_input: unknown) => {
 
   if (existingUser.length > 0) {
     throw new AuthValidationError("Email sudah terdaftar", null, 409);
+  }
+
+  // Username unik lintas akun permanen + antrean verifikasi (mencegah
+  // dua email berbeda mengklaim username yang sama).
+  const usernameTaken = await db
+    .select({ id: users.id })
+    .from(users)
+    .where(eq(users.username, username))
+    .limit(1);
+  if (usernameTaken.length > 0) {
+    throw new AuthValidationError("Username sudah dipakai", [{ field: "username", message: "Username sudah dipakai" }], 409);
+  }
+  const pendingUsernameTaken = await db
+    .select({ email: emailVerificationPending.email })
+    .from(emailVerificationPending)
+    .where(eq(emailVerificationPending.username, username))
+    .limit(1);
+  if (pendingUsernameTaken.length > 0 && pendingUsernameTaken[0]!.email !== email) {
+    throw new AuthValidationError("Username sudah dipakai", [{ field: "username", message: "Username sudah dipakai" }], 409);
   }
 
   const pending = await requirePending(email);
@@ -217,6 +272,7 @@ export const registerUser = async (_input: unknown) => {
       .update(emailVerificationPending)
       .set({
         name,
+        username,
         passwordHash,
         codeHash: hashOtpCode(code),
         expiresAt,
@@ -228,6 +284,7 @@ export const registerUser = async (_input: unknown) => {
     await db.insert(emailVerificationPending).values({
       email,
       name,
+      username,
       passwordHash,
       codeHash: hashOtpCode(code),
       expiresAt,
@@ -321,22 +378,55 @@ export const verifyEmail = async (_input: unknown) => {
     throw new AuthValidationError("Email sudah terdaftar", null, 409);
   }
 
-  const created = await db.transaction(async (tx) => {
-    const [h] = await tx.insert(users).values({
-      name: pending.name,
-      email: pending.email,
-      passwordHash: pending.passwordHash,
-      role: "student",
-      emailVerifiedAt: new Date(),
-      isActive: true,
-    });
-    const userId = Number((h as unknown as { insertId: number }).insertId);
-    await tx
+  // Username dikunci saat kode dibuat; cek ulang untuk balapan dua
+  // verifikasi paralel (UNIQUE(username) sebagai jaring pengaman akhir).
+  const pendingUsername = pending.username ? normalizeUsername(pending.username) : null;
+  if (pendingUsername !== null && !isValidUsername(pendingUsername)) {
+    await db
       .delete(emailVerificationPending)
       .where(eq(emailVerificationPending.email, email));
-    return { userId, name: pending.name, email: pending.email };
-  });
+    throw new AuthValidationError("Username tidak valid. Daftar ulang dengan username lain.", null, 400);
+  }
+  if (pendingUsername !== null) {
+    const usernameTaken = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.username, pendingUsername))
+      .limit(1);
+    if (usernameTaken.length > 0) {
+      await db
+        .delete(emailVerificationPending)
+        .where(eq(emailVerificationPending.email, email));
+      throw new AuthValidationError("Username sudah dipakai. Daftar ulang dengan username lain.", null, 409);
+    }
+  }
 
+  let created: { userId: number; username: string; name: string; email: string };
+  try {
+    created = await db.transaction(async (tx) => {
+      const [h] = await tx.insert(users).values({
+        name: pending.name,
+        username: pendingUsername ?? pending.email.split("@")[0].slice(0, 30),
+        email: pending.email,
+        passwordHash: pending.passwordHash,
+        role: "student",
+        emailVerifiedAt: new Date(),
+        isActive: true,
+      });
+      const userId = Number((h as unknown as { insertId: number }).insertId);
+      await tx
+        .delete(emailVerificationPending)
+        .where(eq(emailVerificationPending.email, email));
+      return { userId, username: pendingUsername ?? pending.email.split("@")[0].slice(0, 30), name: pending.name, email: pending.email };
+    });
+  } catch (e) {
+    // Balapan dua verifikasi paralel: pre-check lolos bersamaan,
+    // UNIQUE(username) menolak yang kedua.
+    if (e !== null && typeof e === "object" && "code" in e && e.code === "ER_DUP_ENTRY") {
+      throw new AuthValidationError("Username sudah dipakai. Daftar ulang dengan username lain.", null, 409);
+    }
+    throw e;
+  }
   const accessToken = createAccessToken({
     id: created.userId,
     email: created.email,
@@ -349,8 +439,10 @@ export const verifyEmail = async (_input: unknown) => {
     user: {
       id: created.userId,
       name: created.name,
+      username: created.username,
       email: created.email,
       role: "student" as const,
+      avatarUrl: null,
     },
   };
 };
@@ -439,6 +531,7 @@ export const requestPasswordReset = async (_input: unknown) => {
     return {
       message:
         "Jika email terdaftar, kode reset telah dikirim. Periksa kotak masuk Anda.",
+      ...otpExpiry(),
     };
   }
 
@@ -453,6 +546,7 @@ export const requestPasswordReset = async (_input: unknown) => {
     return {
       message:
         "Jika email terdaftar, kode reset telah dikirim. Periksa kotak masuk Anda.",
+      ...otpExpiry(),
     };
   }
 
@@ -464,9 +558,13 @@ export const requestPasswordReset = async (_input: unknown) => {
   const row = existing[0];
 
   if (row && resendCooldownRemaining(row.lastSentAt) > 0) {
+    // Cooldown: kode lama tetap berlaku (attempts TIDAK di-reset), tanpa
+    // kirim ulang. Bentuk respons disamakan agar tidak bocor + frontend
+    // tetap dapat umur kode.
     return {
       message:
         "Jika email terdaftar, kode reset telah dikirim. Periksa kotak masuk Anda.",
+      ...otpExpiry(),
     };
   }
 
@@ -502,7 +600,67 @@ export const requestPasswordReset = async (_input: unknown) => {
   return {
     message:
       "Jika email terdaftar, kode reset telah dikirim. Periksa kotak masuk Anda.",
+    ...otpExpiry(),
   };
+};
+
+/**
+ * Verifikasi kode OTP reset SAJA (tanpa mengubah password).
+ * Dipakai gerbang layar password-baru: kode salah tidak boleh lanjut.
+ * Kebijakan SAMA dengan resetPassword (pesan generik, kedaluwarsa,
+ * maks percobaan, attempts+1 tiap salah) — bedanya baris OTP tidak
+ * dihapus saat sukses agar bisa dipakai reset berikutnya.
+ */
+export const verifyResetCode = async (_input: unknown) => {
+  const parsed = verifyResetCodeSchema.safeParse(_input);
+
+  if (!parsed.success) {
+    throw new AuthValidationError(
+      "Data verifikasi tidak valid",
+      toFieldErrors(parsed.error.issues)
+    );
+  }
+
+  const { email, code } = parsed.data;
+  // Pesan dibuat sama untuk semua kegagalan agar tidak membocorkan status.
+  const genericFailure = new AuthValidationError(
+    "Kode salah atau kedaluwarsa.",
+    null,
+    400
+  );
+
+  const rows = await db
+    .select()
+    .from(passwordResetOtps)
+    .where(eq(passwordResetOtps.email, email))
+    .limit(1);
+  const row = rows[0];
+
+  if (!row) throw genericFailure;
+
+  if (isOtpExpired(row.expiresAt)) {
+    await db
+      .delete(passwordResetOtps)
+      .where(eq(passwordResetOtps.email, email));
+    throw genericFailure;
+  }
+
+  if (row.attempts >= getOtpMaxAttempts()) {
+    await db
+      .delete(passwordResetOtps)
+      .where(eq(passwordResetOtps.email, email));
+    throw genericFailure;
+  }
+
+  if (!verifyOtpCode(code, row.codeHash)) {
+    await db
+      .update(passwordResetOtps)
+      .set({ attempts: row.attempts + 1 })
+      .where(eq(passwordResetOtps.email, email));
+    throw genericFailure;
+  }
+
+  return { message: "Kode valid. Silakan buat password baru." };
 };
 
 /**
@@ -649,8 +807,10 @@ export const loginUser = async (_input: unknown) => {
     user: {
       id: user.id,
       name: user.name,
+      username: user.username,
       email: user.email,
       role: user.role,
+      avatarUrl: user.avatarFileId ? `/api/v1/files/${user.avatarFileId}/content` : null,
     },
   };
 };

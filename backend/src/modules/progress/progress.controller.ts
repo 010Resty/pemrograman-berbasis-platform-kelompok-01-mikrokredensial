@@ -1,4 +1,5 @@
 import { Response, NextFunction } from "express";
+import { z } from "zod";
 import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import { canReadCourseTree } from "../courses/curricula.service";
 import { resolveLearningGuard } from "../enrollments/enrollment.service";
@@ -9,11 +10,21 @@ import {
   markComplete,
   unmarkComplete,
 } from "./progress.service";
+import { tryAutoIssueForMaterial } from "../certificates/certificate.service";
 
 const uid = (req: AuthenticatedRequest): number | null => {
   const id = Number(req.user?.id);
   return Number.isInteger(id) && id > 0 ? id : null;
 };
+
+// Standar AGENTS: validasi Zod untuk param/query (dulu Number() manual).
+const materialIdParamSchema = z.object({
+  id: z.coerce.number().int().positive(),
+});
+
+const courseQuerySchema = z.object({
+  courseId: z.coerce.number().int().positive(),
+});
 
 const notFound = (res: Response) =>
   res.status(404).json({
@@ -66,18 +77,22 @@ export const markHandler = async (
   next: NextFunction
 ) => {
   try {
-    const materialId = Number(req.params.id);
-    if (!Number.isInteger(materialId) || materialId <= 0) {
+    const parsed = materialIdParamSchema.safeParse(req.params);
+    if (!parsed.success) {
       notFound(res);
       return;
     }
+    const materialId = parsed.data.id;
     const userId = await guardMaterial(req, res, materialId);
     if (userId === null) return;
     const { alreadyCompleted } = await markComplete(userId, materialId);
+    // Sertifikat terbit otomatis bila modul ini baru saja lengkap.
+    // Best-effort: tidak pernah menggagalkan respons progres.
+    const auto = await tryAutoIssueForMaterial(userId, materialId);
     res.status(200).json({
       status: "success",
       message: alreadyCompleted ? "Progres sudah tercatat." : "Materi ditandai selesai.",
-      data: { materialId, completed: true, alreadyCompleted },
+      data: { materialId, completed: true, alreadyCompleted, certificateIssued: auto.issued },
     });
   } catch (e) {
     next(e);
@@ -91,11 +106,12 @@ export const unmarkHandler = async (
   next: NextFunction
 ) => {
   try {
-    const materialId = Number(req.params.id);
-    if (!Number.isInteger(materialId) || materialId <= 0) {
+    const parsed = materialIdParamSchema.safeParse(req.params);
+    if (!parsed.success) {
       notFound(res);
       return;
     }
+    const materialId = parsed.data.id;
     const userId = await guardMaterial(req, res, materialId);
     if (userId === null) return;
     const { removed } = await unmarkComplete(userId, materialId);
@@ -160,8 +176,8 @@ export const listHandler = async (
       });
       return;
     }
-    const courseId = Number(rawCourse);
-    if (!Number.isInteger(courseId) || courseId <= 0) {
+    const parsedCourse = courseQuerySchema.safeParse({ courseId: rawCourse });
+    if (!parsedCourse.success) {
       res.status(400).json({
         status: "error",
         message: "ID kursus tidak valid",
@@ -169,6 +185,7 @@ export const listHandler = async (
       });
       return;
     }
+    const courseId = parsedCourse.data.courseId;
     const verdict = await canReadCourseTree(userId, req.user?.role ?? "", courseId);
     if (verdict !== "ok") {
       notFound(res);

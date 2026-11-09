@@ -6,6 +6,12 @@
  *
  * Frontend SvelteKit memetakan kontrak ini secara ketat
  * (perbandingan `status === "success"`, bukan truthy).
+ *
+ * CATATAN 2026-11-04: helper `success()`/`failure()` di bawah saat ini TIDAK
+ * dipakai — semua controller membangun envelope inline per `docs/API_CONTRACT.md`
+ * §1.1 (termasuk `code`/`failReasons` yang tidak ada di tipe ini).
+ * Jangan hapus file ini (tipe diimpor tes/tipe lain), dan jangan mulai migrasi
+ * massal ke helper tanpa persetujuan: envelope inline adalah kanonis.
  */
 
 export interface ApiSuccess<T> {
