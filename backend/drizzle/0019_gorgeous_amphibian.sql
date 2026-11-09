@@ -1,0 +1,1 @@
+ALTER TABLE `submissions` ADD `rubric_scores` json;

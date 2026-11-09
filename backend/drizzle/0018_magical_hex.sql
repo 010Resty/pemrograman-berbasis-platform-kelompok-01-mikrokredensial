@@ -1,0 +1,3 @@
+ALTER TABLE `files` MODIFY COLUMN `kind` enum('image','audio','pdf','cover','assignment','applicant_image','applicant_cv','payment_proof','avatar','profile_cover') NOT NULL DEFAULT 'image';--> statement-breakpoint
+ALTER TABLE `users` ADD `cover_file_id` int;--> statement-breakpoint
+ALTER TABLE `users` ADD CONSTRAINT `users_cover_file_id_files_id_fk` FOREIGN KEY (`cover_file_id`) REFERENCES `files`(`id`) ON DELETE set null ON UPDATE cascade;

@@ -1,0 +1,1 @@
+ALTER TABLE `files` MODIFY COLUMN `kind` enum('image','audio','pdf','cover','assignment','applicant_image','applicant_cv','payment_proof','avatar') NOT NULL DEFAULT 'image';
