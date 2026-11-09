@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { page as routePage } from '$app/state';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { periodBadgeClass, periodIcon, type CoursePeriod } from '$lib/data/course-meta';
 	import {
@@ -7,6 +9,7 @@
 		fetchPublicCourseList,
 		type BackendCourse
 	} from '$lib/api/courses';
+	import { fetchPromos, type PromoCampaign } from '$lib/api/promos';
 	import { fetchMyEnrollments } from '$lib/api/progress';
 	import { ownedCourses, setServerCourseFlags } from '$lib/stores/enrollment.svelte';
 
@@ -30,10 +33,10 @@
 		'Desain',
 		'Bisnis'
 	];
-	const COVER_FALLBACK =
-		'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80';
 
-	let search = $state('');
+	// Kata kunci awal boleh datang dari header portal (?q=…); alur
+	// debounce + fetch yang sama tetap dipakai setelahnya.
+	let search = $state(routePage.url.searchParams.get('q') ?? '');
 	let debouncedSearch = $state('');
 	let activeCategory = $state('Semua');
 	let activePeriod = $state<'all' | CoursePeriod>('all');
@@ -45,6 +48,35 @@
 	let loading = $state(true);
 	let loadError = $state('');
 	let loadSeq = 0;
+
+	/** Kampanye promo aktif (kurasi admin). Null = tanpa filter promo. */
+	let promos = $state<PromoCampaign[]>([]);
+	let activePromo = $state<string | null>(null);
+
+	const promoMemberIds = $derived.by((): Set<number> | null => {
+		if (!activePromo) return null;
+		const camp = promos.find((p) => p.slug === activePromo);
+		if (!camp) return null;
+		return new Set(camp.courses.map((m) => m.courseId));
+	});
+
+	const visibleCatalog = $derived(
+		promoMemberIds === null ? catalog : catalog.filter((c) => promoMemberIds.has(c.id))
+	);
+
+	const promoByCourse = $derived.by((): Map<number, { percent: number | null; badge: string | null }> => {
+		const map = new Map<number, { percent: number | null; badge: string | null }>();
+		for (const p of promos) {
+			for (const m of p.courses) {
+				const cur = map.get(m.courseId);
+				// Sama seperti server (non-stack, terbesar menang): tampilkan persen tertinggi.
+				if (!cur || (p.discountPercent ?? 0) > (cur.percent ?? 0)) {
+					map.set(m.courseId, { percent: p.discountPercent, badge: m.badgeLabel ?? p.badgeLabel });
+				}
+			}
+		}
+		return map;
+	});
 
 	const periodFilters: { value: 'all' | CoursePeriod; label: string }[] = [
 		{ value: 'all', label: 'Semua Periode' },
@@ -87,7 +119,17 @@
 		}
 	}
 
-	const paged = $derived(catalog.slice((page - 1) * perPage, page * perPage));
+	const paged = $derived(visibleCatalog.slice((page - 1) * perPage, page * perPage));
+
+	/** Promo diambil sekali (tidak ikut debounce filter katalog). */
+	let promosStarted = false;
+	async function loadPromos(): Promise<void> {
+		try {
+			promos = await fetchPromos();
+		} catch {
+			promos = [];
+		}
+	}
 
 	/** Nama pengampu per baris halaman aktif (satu-satunya sumber: detail kursus). */
 	async function ensureNames(list: BackendCourse[]): Promise<void> {
@@ -134,15 +176,21 @@
 	});
 
 	$effect(() => {
+		if (!browser || promosStarted) return;
+		promosStarted = true;
+		void loadPromos();
+	});
+
+	$effect(() => {
 		if (!browser || loading || loadError) return;
 		void page;
 		void perPage;
-		void catalog;
+		void visibleCatalog;
 		void ensureNames(paged);
 	});
 
 	$effect(() => {
-		const maxPage = Math.max(1, Math.ceil(catalog.length / perPage));
+		const maxPage = Math.max(1, Math.ceil(visibleCatalog.length / perPage));
 		if (page > maxPage) page = maxPage;
 	});
 
@@ -166,16 +214,12 @@
 	/>
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-6">
-		<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">
-			Menu Utama · Semua Kursus
-		</p>
-		<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Semua Kursus</h1>
-		<p class="mt-1 text-sm text-slate-500">
-			Klik kartu untuk melihat pratinjau: info, modul, dan materi.
-		</p>
-	</div>
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Menu Utama · Semua Kursus"
+		title="Semua Kursus"
+		description="Klik kartu untuk melihat pratinjau: info, modul, dan materi."
+	/>
 
 	<!-- Search + filter -->
 	<div class="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center">
@@ -232,8 +276,51 @@
 		{/each}
 	</div>
 
+	{#if promos.length > 0}
+		<div class="mb-6 flex flex-wrap items-center gap-2" role="group" aria-label="Filter promo">
+			<span class="inline-flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-red-600 uppercase">
+				<i class="fa-solid fa-tags" aria-hidden="true"></i> Promo:
+			</span>
+			<button
+				type="button"
+				onclick={() => (activePromo = null)}
+				aria-pressed={activePromo === null}
+				class={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200 ease-smooth active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 ${
+					activePromo === null
+						? 'bg-red-600 text-white shadow-lg shadow-red-600/25'
+						: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+				}`}
+			>
+				Semua
+			</button>
+			{#each promos as promo (promo.slug)}
+				<button
+					type="button"
+					onclick={() => (activePromo = activePromo === promo.slug ? null : promo.slug)}
+					aria-pressed={activePromo === promo.slug}
+					title={promo.title}
+					class={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200 ease-smooth active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 ${
+						activePromo === promo.slug
+							? 'bg-red-600 text-white shadow-lg shadow-red-600/25'
+							: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+					}`}
+				>
+					{promo.badgeLabel ?? promo.title}
+					{#if promo.discountPercent !== null}
+						<span class={activePromo === promo.slug ? 'text-white/90' : 'text-red-600'}>-{promo.discountPercent}%</span>
+					{/if}
+				</button>
+			{/each}
+		</div>
+	{/if}
+
 	<p class="mb-4 text-xs font-medium text-slate-500" role="status">
-		Menampilkan {catalog.length} kursus
+		Menampilkan {visibleCatalog.length} kursus
+		{#if activePromo}
+			<span class="font-bold text-red-600">
+				· promo {promos.find((p) => p.slug === activePromo)?.badgeLabel ?? activePromo}
+			</span>
+		{/if}
 		{#if !loading && !loadError && catalog.length >= 100}
 			<span class="text-slate-400">(maks 100 pertama — persempit pencarian bila kurang)</span>
 		{/if}
@@ -263,11 +350,11 @@
 				<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
 			</button>
 		</div>
-	{:else if catalog.length === 0}
+	{:else if visibleCatalog.length === 0}
 		<div class="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
 			<i class="fa-solid fa-magnifying-glass mb-3 text-3xl text-slate-300" aria-hidden="true"></i>
 			<p class="text-sm font-semibold text-slate-700">Kursus tidak ditemukan.</p>
-			<p class="mt-1 text-xs text-slate-500">Coba kata kunci atau kategori lain.</p>
+			<p class="mt-1 text-xs text-slate-500">Coba kata kunci, kategori, atau promo lain.</p>
 		</div>
 	{:else}
 		<div class="overflow-hidden rounded-2xl border border-slate-200/70 bg-white shadow-sm">
@@ -276,6 +363,7 @@
 					{@const enrolled = isEnrolled(course)}
 					{@const paid = isPaid(course)}
 					{@const period = coursePeriod(course)}
+					{@const promo = promoByCourse.get(course.id)}
 					<article
 						class="group flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm transition-all duration-300 ease-smooth hover:-translate-y-1 hover:shadow-xl"
 					>
@@ -284,16 +372,27 @@
 							class="relative block overflow-hidden focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600"
 							aria-label={`Lihat pratinjau: ${course.title}`}
 						>
+							{#if course.image}
 							<img
-								src={course.image || COVER_FALLBACK}
+								src={course.image}
 								alt={`Sampul kursus ${course.title}`}
 								class="h-48 w-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-105"
 								loading="lazy"
 							/>
+							{:else}
+							<div
+								class="flex h-48 w-full items-center justify-center bg-gradient-to-br from-blue-700 to-indigo-900"
+								role="img"
+								aria-label={`Sampul kursus ${course.title}`}
+							>
+								<i class="fa-solid fa-book-open text-4xl text-white/40" aria-hidden="true"></i>
+							</div>
+							{/if}
 							{#if course.duration}
 								<span
-									class="absolute top-3 left-3 rounded-md bg-red-600 px-3 py-1 text-[10px] font-extrabold text-white uppercase"
+									class="absolute top-3 left-3 inline-flex items-center gap-1.5 rounded-md bg-slate-900/75 px-2.5 py-1 text-[10px] font-bold text-white"
 								>
+									<i class="fa-solid fa-clock" aria-hidden="true"></i>
 									{course.duration}
 								</span>
 							{/if}
@@ -319,6 +418,12 @@
 						</a>
 						<div class="flex flex-1 flex-col justify-between space-y-4 p-6">
 							<div>
+								{#if promo?.percent != null}
+									<p class="mb-1.5 inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-0.5 text-[10px] font-extrabold text-white uppercase">
+										<i class="fa-solid fa-tags" aria-hidden="true"></i>
+										{promo.badge ?? 'Promo'} −{promo.percent}%
+									</p>
+								{/if}
 								<div class="mb-2 flex items-center justify-between text-xs text-slate-500">
 									<span class="font-bold tracking-wide text-blue-600 uppercase">{course.level}</span>
 									{#if course.status === 'archived'}
@@ -355,7 +460,7 @@
 				{/each}
 			</div>
 			<div class="border-t border-slate-100 bg-slate-50/70">
-				<Pagination bind:page bind:perPage perPageOptions={[12, 24, 48]} totalItems={catalog.length} itemLabel="kursus" label="Navigasi halaman katalog" id="catalog-pagination" />
+				<Pagination bind:page bind:perPage perPageOptions={[12, 24, 48]} totalItems={visibleCatalog.length} itemLabel="kursus" label="Navigasi halaman katalog" id="catalog-pagination" />
 			</div>
 		</div>
 	{/if}

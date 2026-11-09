@@ -1,5 +1,9 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatCard from '$lib/components/ui/StatCard.svelte';
+	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import { getCurrentUser } from '$lib/stores/auth.svelte';
 	import {
 		fetchMyCertificates,
@@ -7,14 +11,6 @@
 		fetchMyProgressSummary,
 		type MyCertificate
 	} from '$lib/api/progress';
-
-	interface StatCard {
-		label: string;
-		value: string;
-		icon: string;
-		color: string;
-		bgColor: string;
-	}
 
 	interface Module {
 		id: number;
@@ -91,12 +87,37 @@
 		return 'in-progress';
 	}
 
-	const stats = $derived<StatCard[]>([
-		{ label: 'Kursusku', value: String(summary?.totalCourses ?? 0), icon: 'fa-book-open', color: 'text-blue-600', bgColor: 'bg-blue-50' },
-		{ label: 'Selesai', value: String(completedCourses), icon: 'fa-circle-check', color: 'text-emerald-600', bgColor: 'bg-emerald-50' },
-		{ label: 'Sertifikat', value: String(issuedCertificates.length), icon: 'fa-award', color: 'text-amber-600', bgColor: 'bg-amber-50' },
-		{ label: 'Materi Selesai', value: `${summary?.completedMaterials ?? 0}/${summary?.totalMaterials ?? 0}`, icon: 'fa-clock', color: 'text-violet-600', bgColor: 'bg-violet-50' }
-	]);
+	const stats = $derived(
+		[
+			{
+				label: 'Kursusku',
+				value: String(summary?.totalCourses ?? 0),
+				icon: 'fa-book-open',
+				tone: 'blue' as const,
+				href: resolve('/user/kursusku')
+			},
+			{
+				label: 'Selesai',
+				value: String(completedCourses),
+				icon: 'fa-circle-check',
+				tone: 'emerald' as const
+			},
+			{
+				label: 'Sertifikat',
+				value: String(issuedCertificates.length),
+				icon: 'fa-award',
+				tone: 'amber' as const,
+				href: resolve('/user/sertifikat')
+			},
+			{
+				label: 'Materi Selesai',
+				value: `${summary?.completedMaterials ?? 0}/${summary?.totalMaterials ?? 0}`,
+				icon: 'fa-list-check',
+				tone: 'violet' as const,
+				href: resolve('/user/kursusku')
+			}
+		]
+	);
 
 	const modules = $derived<Module[]>(
 		(summary?.perCourse ?? []).map((c) => ({
@@ -112,7 +133,7 @@
 	const certificates = $derived<Certificate[]>(
 		issuedCertificates.slice(0, 3).map((c) => ({
 			id: c.id,
-			title: c.moduleTitle,
+			title: c.moduleTitle ?? c.courseTitle,
 			issuer: c.courseTitle,
 			date: formatDate(c.issuedAt)
 		}))
@@ -150,19 +171,13 @@
 	<meta name="description" content="Dashboard pengguna Aristoteles untuk memantau kursus dan sertifikat." />
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<!-- Welcome Section -->
-	<div class="mb-8">
-		<div
-			class="mb-3 inline-flex items-center gap-1.5 rounded-full border border-blue-100 bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700"
-		>
-			<i class="fa-solid fa-user-graduate" aria-hidden="true"></i> Dashboard Mahasiswa
-		</div>
-		<h1 class="mb-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">
-			Selamat Datang, {firstName}!
-		</h1>
-		<p class="text-sm text-slate-500">Pantau progres belajar dan sertifikasimu di sini.</p>
-	</div>
+<div class="page-wrap page-stack">
+	<!-- Sapaan -->
+	<PageHeader
+		eyebrow="Dashboard Mahasiswa"
+		title={`Selamat datang, ${firstName}!`}
+		description="Pantau progres belajar dan sertifikasimu di sini."
+	/>
 
 	{#if loading}
 		<div class="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4" aria-label="Memuat dasbor">
@@ -191,19 +206,9 @@
 		</div>
 	{:else}
 	<!-- Stats Grid -->
-	<div class="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
+	<div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
 		{#each stats as stat (stat.label)}
-			<div
-				class="rounded-2xl border border-slate-200/60 bg-white p-5 transition-all duration-200 ease-smooth hover:shadow-lg hover:shadow-slate-200/50"
-			>
-				<div class="mb-3 flex items-center justify-between">
-					<div class="flex h-11 w-11 items-center justify-center rounded-xl {stat.bgColor}">
-						<i class="fa-solid {stat.icon} {stat.color} text-lg" aria-hidden="true"></i>
-					</div>
-				</div>
-				<div class="text-2xl font-bold text-slate-900">{stat.value}</div>
-				<div class="mt-0.5 text-xs font-medium text-slate-500">{stat.label}</div>
-			</div>
+			<StatCard label={stat.label} value={stat.value} icon={stat.icon} tone={stat.tone} href={stat.href} />
 		{/each}
 	</div>
 
@@ -228,14 +233,29 @@
 					</a>
 				</div>
 				{#if modules.length === 0}
-					<p class="px-6 py-6 text-center text-xs text-slate-500">
-						Belum ada kursus yang diikuti. Jelajahi kursus untuk mulai belajar.
-					</p>
+					<EmptyState
+						icon="fa-book-open"
+						title="Belum ada kursus yang diikuti"
+						description="Jelajahi katalog kursus dan mulai belajar untuk melihat progresmu di sini."
+					>
+						{#snippet actions()}
+							<a
+								href={resolve('/user/semua-kursus')}
+								class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+							>
+								Jelajahi kursus <i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
+							</a>
+						{/snippet}
+					</EmptyState>
 				{:else}
 				<div class="divide-y divide-slate-100">
 					{#each modules as module (module.id)}
-						<div class="px-6 py-4 transition-colors duration-200 ease-smooth hover:bg-slate-50/50">
-							<div class="mb-2 flex items-center justify-between">
+						<a
+							href={resolve(`/user/kursusku/${module.id}`)}
+							class="block px-6 py-4 transition-colors duration-200 ease-smooth hover:bg-slate-50/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600"
+							aria-label={`Lanjutkan ${module.title}, ${module.completedMaterials} dari ${module.totalMaterials} materi selesai`}
+						>
+							<div class="mb-2 flex items-center justify-between gap-3">
 								<div class="mr-4 min-w-0 flex-1">
 									<h3 class="truncate text-sm font-semibold text-slate-800">{module.title}</h3>
 									<p class="mt-0.5 text-xs text-slate-500">
@@ -266,7 +286,7 @@
 									>{formatPercent(module.progress)}</span
 								>
 							</div>
-						</div>
+						</a>
 					{/each}
 				</div>
 				{/if}
@@ -361,11 +381,8 @@
 			<!-- Learning Progress Summary -->
 			<section
 				aria-labelledby="heading-progres"
-				class="relative overflow-hidden rounded-2xl bg-gradient-to-br from-blue-600 via-blue-700 to-indigo-800 p-6 text-white"
+				class="relative overflow-hidden rounded-2xl bg-navy p-6 text-white"
 			>
-				<div class="absolute -top-12 -right-12 h-40 w-40 rounded-full bg-white/10 blur-2xl" aria-hidden="true"></div>
-				<div class="absolute -bottom-8 -left-8 h-32 w-32 rounded-full bg-cyan-400/20 blur-2xl" aria-hidden="true"></div>
-
 				<div class="relative z-10">
 					<div
 						class="mb-4 inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-cyan-300"
@@ -397,10 +414,10 @@
 					</div>
 
 					<a
-						href="/user/semua-kursus"
+						href={overallPercent > 0 ? '/user/kursusku' : '/user/semua-kursus'}
 						class="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-white/15 py-2.5 px-4 text-sm font-semibold text-white transition-colors duration-200 ease-smooth hover:bg-white/25 focus-visible:outline-2 focus-visible:outline-white"
 					>
-						Jelajahi Kursus Baru
+						{overallPercent > 0 ? 'Lanjutkan belajar' : 'Jelajahi Kursus Baru'}
 						<i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
 					</a>
 				</div>

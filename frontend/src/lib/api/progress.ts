@@ -1,4 +1,4 @@
-import { apiRequest } from './backend';
+import { apiRequest, getApiBase } from './backend';
 import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svelte';
 
 /**
@@ -49,8 +49,11 @@ export interface MyCertificate {
 	recipientName: string;
 	courseId: number;
 	courseTitle: string;
-	moduleId: number;
-	moduleTitle: string;
+	/** null = sertifikat level kursus. */
+	moduleId: number | null;
+	moduleTitle: string | null;
+	/** Nama instruktur utama kursus (untuk sampul). */
+	instructorName?: string | null;
 	status: string;
 	issuedAt: string;
 	revokedAt: string | null;
@@ -95,4 +98,52 @@ export function fetchMyEnrollments(): Promise<MyEnrollment[]> {
 /** Sertifikat milik saya (GET /api/v1/me/certificates). */
 export function fetchMyCertificates(): Promise<MyCertificate[]> {
 	return req<MyCertificate[]>('/me/certificates');
+}
+
+export interface CertificatePdfDownload {
+	blob: Blob;
+	filename: string;
+}
+
+function filenameFromDisposition(header: string | null, fallback: string): string {
+	if (header) {
+		const star = /filename\*=UTF-8''([^;]+)/i.exec(header);
+		if (star?.[1]) {
+			try {
+				return decodeURIComponent(star[1].trim());
+			} catch {
+				/* abaikan, lanjut ke pola biasa */
+			}
+		}
+		const plain = /filename="([^"]+)"/i.exec(header) ?? /filename=([^;]+)/i.exec(header);
+		if (plain?.[1]) return plain[1].trim();
+	}
+	return fallback;
+}
+
+/**
+ * Unduh PDF sertifikat milik sendiri sebagai Blob
+ * (GET /api/v1/me/certificates/:id/download mewajibkan token; tautan <a>
+ * biasa tidak membawa Authorization sehingga 403).
+ * Pemanggil membuat object URL dan mencabutnya setelah dipakai.
+ */
+export async function downloadMyCertificatePdf(id: number): Promise<CertificatePdfDownload> {
+	const token = getAccessToken();
+	const res = await fetch(`${getApiBase()}/me/certificates/${id}/download`, {
+		headers: token ? { authorization: `Bearer ${token}` } : {}
+	});
+	if (!res.ok) {
+		let message = `Gagal mengunduh sertifikat (HTTP ${res.status}).`;
+		try {
+			const json = (await res.json()) as { message?: unknown };
+			if (typeof json.message === 'string' && json.message) message = json.message;
+		} catch {
+			/* respons bukan JSON — pakai pesan default */
+		}
+		throw new Error(message);
+	}
+	return {
+		blob: await res.blob(),
+		filename: filenameFromDisposition(res.headers.get('content-disposition'), `sertifikat-${id}.pdf`)
+	};
 }

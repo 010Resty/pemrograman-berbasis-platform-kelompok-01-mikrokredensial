@@ -1,11 +1,6 @@
 <script lang="ts">
-	import { browser } from '$app/environment';
 	import type { Course, Material } from '$lib/data/courses';
 	import { getMaterialDetail } from '$lib/data/material-details';
-	import {
-		DEFAULT_PASS_SCORE,
-		findQuizPassScoreByMaterial
-	} from '$lib/stores/quiz-drafts';
 	import TextMaterial from './TextMaterial.svelte';
 	import PhotoMaterial from './PhotoMaterial.svelte';
 	import AudioMaterial from './AudioMaterial.svelte';
@@ -28,10 +23,6 @@
 	} = $props();
 
 	const detail = $derived(getMaterialDetail(material, course, moduleTitle));
-	/** Nilai minimum dari draf instruktur (bila ada di browser yang sama), fallback 70. */
-	const customPass = $derived(
-		browser ? (findQuizPassScoreByMaterial(material.id) ?? DEFAULT_PASS_SCORE) : DEFAULT_PASS_SCORE
-	);
 </script>
 
 {#if material.type === 'materi'}
@@ -60,14 +51,9 @@
 		intro={detail.intro}
 		points={detail.points ?? []}
 	/>
-{:else if material.type === 'kuis' && detail.questions}
+{:else if material.type === 'kuis'}
 	<QuizMaterial
-		questions={detail.questions}
-		intro={detail.intro}
 		materialId={material.id}
-		courseId={String(course.id)}
-		moduleId={moduleId || moduleTitle}
-		passScore={customPass}
 		onPass={() => onComplete?.(material.id)}
 	/>
 {:else if material.type === 'tugas' && detail.assignment}

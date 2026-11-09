@@ -8,6 +8,10 @@
 	import { getCurrentUser, homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
 	import { fetchMyCertificates, fetchMyEnrollments } from '$lib/api/progress';
+	import type { MyCertificate, MyEnrollment } from '$lib/api/progress';
+	import { fetchMyPayments } from '$lib/api/payments';
+	import type { MyPaymentListItem } from '$lib/api/payments';
+	import { fileUrl } from '$lib/api/courses';
 	import { syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
 	import { untrack } from 'svelte';
 
@@ -31,19 +35,38 @@
 	let courseBadge = $state<string | undefined>(undefined);
 	let certBadge = $state<string | undefined>(undefined);
 	let badgesStarted = false;
+	let myEnrollments = $state<MyEnrollment[]>([]);
+	let myIssuedCerts = $state<MyCertificate[]>([]);
+	let pendingPayments = $state(0);
+	let rejectedPayments = $state(0);
+	let pendingSample = $state<MyPaymentListItem[]>([]);
+	let rejectedSample = $state<MyPaymentListItem[]>([]);
+	let refreshing = false;
 
 	async function loadBadges(): Promise<void> {
+		if (refreshing) return;
+		refreshing = true;
 		try {
-			const [enrollments, certs] = await Promise.all([
+			const [enrollments, certs, pending, rejected] = await Promise.all([
 				fetchMyEnrollments(),
-				fetchMyCertificates()
+				fetchMyCertificates(),
+				fetchMyPayments({ status: 'menunggu', limit: 3 }),
+				fetchMyPayments({ status: 'ditolak', limit: 3 })
 			]);
+			myEnrollments = enrollments;
+			myIssuedCerts = certs.filter((c) => c.status === 'issued');
+			pendingPayments = pending.total;
+			rejectedPayments = rejected.total;
+			pendingSample = pending.items;
+			rejectedSample = rejected.items;
 			courseBadge = String(enrollments.length);
-			certBadge = String(certs.filter((c) => c.status === 'issued').length);
+			certBadge = String(myIssuedCerts.length);
 			// Gerbang materi (ownedCourses) ikut kebenaran server yang sama.
 			void syncEnrollmentsFromServer(enrollments);
 		} catch {
 			// Abaikan: navigasi tetap jalan tanpa badge.
+		} finally {
+			refreshing = false;
 		}
 	}
 
@@ -51,6 +74,36 @@
 		if (!browser || badgesStarted) return;
 		badgesStarted = true;
 		untrack(() => void loadBadges());
+	});
+
+	// Realtime tanpa push server: refresh saat pindah halaman, tab kembali
+	// fokus/visible, + interval 60 dtk. GET didedup di backend.ts.
+	$effect(() => {
+		if (!browser) return;
+		const path = page.url.pathname;
+		if (!badgesStarted || phase !== 'ready') return;
+		untrack(() => void loadBadges());
+		void path;
+	});
+
+	$effect(() => {
+		if (!browser) return;
+		const onVisible = () => {
+			if (document.visibilityState === 'visible' && phase === 'ready') void loadBadges();
+		};
+		const onFocus = () => {
+			if (phase === 'ready') void loadBadges();
+		};
+		document.addEventListener('visibilitychange', onVisible);
+		window.addEventListener('focus', onFocus);
+		const timer = setInterval(() => {
+			if (phase === 'ready') void loadBadges();
+		}, 60000);
+		return () => {
+			document.removeEventListener('visibilitychange', onVisible);
+			window.removeEventListener('focus', onFocus);
+			clearInterval(timer);
+		};
 	});
 
 	async function runVerify(): Promise<void> {
@@ -78,8 +131,23 @@
 
 	let sidebarOpen = $state(false);
 	let isCollapsed = $state(false);
-	let searchQuery = $state('');
 	let showProfileMenu = $state(false);
+	let showNotifMenu = $state(false);
+
+	// Notifikasi jujur dari backend (tanpa tabel notifikasi khusus):
+	// - kursus aktif dari /me/enrollments
+	// - sertifikat terbit dari /me/certificates
+	// - pembayaran menunggu/ditolak dari /me/payments (endpoint list baru)
+	// Bell menyala hanya bila ada info (>0); gagal fetch = badge hilang.
+	const notifCount = $derived(
+		(myEnrollments.length > 0 ? 1 : 0) +
+			(myIssuedCerts.length > 0 ? 1 : 0) +
+			(pendingPayments > 0 ? 1 : 0) +
+			(rejectedPayments > 0 ? 1 : 0)
+	);
+	const notifLabel = $derived(
+		notifCount > 0 ? `${notifCount} informasi penting — buka Notifikasi` : 'Notifikasi'
+	);
 
 	// Halaman materi (kursus/modul/materi) tampil full-frame:
 	// sidebar utama + header disembunyikan, diganti sidebar modul di halaman itu sendiri.
@@ -92,19 +160,34 @@
 		{ label: 'Dashboard', icon: 'fa-house', href: '/user' },
 		{ label: 'Kursusku', icon: 'fa-book-open', href: '/user/kursusku', badge: courseBadge },
 		{ label: 'Semua Kursus', icon: 'fa-layer-group', href: '/user/semua-kursus' },
-		{ label: 'Sertifikat', icon: 'fa-award', href: '/user/sertifikat', badge: certBadge }
+		{ label: 'Sertifikat', icon: 'fa-award', href: '/user/sertifikat', badge: certBadge },
+		{ label: 'Promo', icon: 'fa-tags', href: '/user/promo' },
+		{ label: 'Profil', icon: 'fa-user', href: '/user/profile' }
 	]);
 
 	function toggleProfileMenu() {
 		showProfileMenu = !showProfileMenu;
+		if (showProfileMenu) showNotifMenu = false;
 	}
 
 	function closeProfileMenu() {
 		showProfileMenu = false;
 	}
 
+	function toggleNotifMenu() {
+		showNotifMenu = !showNotifMenu;
+		if (showNotifMenu) showProfileMenu = false;
+	}
+
+	function closeNotifMenu() {
+		showNotifMenu = false;
+	}
+
 	function handleWindowKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') closeProfileMenu();
+		if (e.key === 'Escape') {
+			closeProfileMenu();
+			closeNotifMenu();
+		}
 	}
 
 	// Profil dari sesi auth (bukan data dummy): nama/email milik akun yang login.
@@ -114,6 +197,8 @@
 	const displayInitials = $derived(
 		(displayName.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('') || 'PG').toUpperCase()
 	);
+	// Foto dari sesi (relatif server) → absolut backend; null = inisial.
+	const avatarSrc = $derived(session?.avatarUrl ? fileUrl(session.avatarUrl) : null);
 </script>
 
 <svelte:window onkeydown={handleWindowKeydown} />
@@ -144,6 +229,7 @@
 				profileName={displayName}
 				profileRole="Mahasiswa"
 				profileAlt={`Foto profil ${displayName}`}
+			profileAvatarUrl={avatarSrc}
 			/>
 
 	<!-- Main column -->
@@ -163,67 +249,130 @@
 				<i class="fa-solid {sidebarOpen ? 'fa-xmark' : 'fa-bars'} text-lg" aria-hidden="true"></i>
 			</button>
 			<Logo size="sm" showText={true} textSize="md" />
-			<button
-				type="button"
+			<a
+				href="/user/sertifikat"
 				class="relative flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-				aria-label="Notifikasi, 1 belum dibaca"
+				aria-label={notifLabel}
 			>
 				<i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
-				<span class="absolute top-1.5 right-1.5 h-2 w-2 rounded-full bg-red-500" aria-hidden="true"
-				></span>
-			</button>
+				{#if notifCount > 0}
+					<span class="absolute top-0.5 right-0.5 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white" aria-hidden="true">{notifCount}</span>
+				{/if}
+			</a>
 		</div>
 
 		<!-- Header: Search & Profile -->
 		<header
 			class="sticky top-0 z-20 border-b border-slate-200 bg-white/80 px-4 py-3 backdrop-blur-md sm:px-6 lg:px-8"
 		>
-			<div class="flex items-center justify-between gap-4">
-				<!-- Search Bar -->
-				<div class="max-w-md flex-1">
-					<form role="search" aria-label="Pencarian kursus" onsubmit={(e) => e.preventDefault()}>
-						<div class="relative">
-							<div
-								class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400"
-							>
-								<i class="fa-solid fa-magnifying-glass text-sm" aria-hidden="true"></i>
-							</div>
-							<label for="user-search" class="sr-only">Cari kursus atau sertifikat</label>
-							<input
-								id="user-search"
-								type="search"
-								placeholder="Cari kursus, sertifikat..."
-								bind:value={searchQuery}
-								autocomplete="off"
-								class="w-full rounded-xl border border-transparent bg-slate-100 py-2.5 pr-4 pl-10 text-sm text-slate-800 transition-all placeholder:text-slate-400 focus:border-blue-500 focus:bg-white focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
-							/>
-							{#if searchQuery}
-								<button
-									type="button"
-									class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 transition-colors hover:text-slate-600"
-									onclick={() => (searchQuery = '')}
-									aria-label="Hapus pencarian"
-								>
-									<i class="fa-solid fa-xmark text-sm" aria-hidden="true"></i>
-								</button>
-							{/if}
-						</div>
-					</form>
-				</div>
-
-				<!-- Right Section: Notifications & Profile -->
+			<div class="flex items-center justify-end gap-4">
+				<!-- Right Section: Profile -->
 				<div class="flex items-center gap-3">
-					<button
-						type="button"
-						class="relative hidden min-h-11 min-w-11 items-center justify-center rounded-xl p-2.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 sm:flex"
-						aria-label="Notifikasi, 1 belum dibaca"
-					>
-						<i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
-						<span
-							class="absolute top-2 right-2 h-2 w-2 rounded-full border-2 border-white bg-red-500"
-							aria-hidden="true"
-						></span>
-					</button>
+					<!-- Notifikasi -->
+					<div class="relative">
+						<button
+							type="button"
+							class="relative flex min-h-11 min-w-11 items-center justify-center rounded-xl p-2.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+							onclick={toggleNotifMenu}
+							aria-label={notifLabel}
+							aria-expanded={showNotifMenu}
+							aria-haspopup="menu"
+						>
+							<i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
+							{#if notifCount > 0}
+								<span class="absolute top-1 right-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold text-white" aria-hidden="true">{notifCount}</span>
+							{/if}
+						</button>
+
+						{#if showNotifMenu}
+							<div
+								role="menu"
+								aria-label="Notifikasi"
+								class="absolute top-full right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-xl"
+							>
+								<div class="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+									<div>
+										<div class="text-sm font-semibold text-slate-800">Notifikasi</div>
+										<div class="text-xs text-slate-500">Perubahan dan informasi penting</div>
+									</div>
+									<button
+										type="button"
+										class="flex min-h-9 min-w-9 items-center justify-center rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-blue-600"
+										onclick={() => void loadBadges()}
+										aria-label="Muat ulang notifikasi"
+										title="Muat ulang"
+									>
+										<i class="fa-solid fa-rotate-right text-xs" aria-hidden="true"></i>
+									</button>
+								</div>
+								<div class="p-1.5" role="none">
+									{#if myEnrollments.length > 0}
+										<a
+											role="menuitem"
+											href="/user/kursusku"
+											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+											onclick={closeNotifMenu}
+										>
+											<i class="fa-solid fa-book-open mt-0.5 w-4 text-center text-emerald-500" aria-hidden="true"></i>
+											<span>
+												<span class="block font-semibold text-slate-800">{myEnrollments.length} kursus aktif</span>
+												<span class="block text-xs text-slate-500">Akses belajar Anda — lanjutkan progres.</span>
+											</span>
+										</a>
+									{/if}
+									{#if myIssuedCerts.length > 0}
+										<a
+											role="menuitem"
+											href="/user/sertifikat"
+											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+											onclick={closeNotifMenu}
+										>
+											<i class="fa-solid fa-award mt-0.5 w-4 text-center text-amber-500" aria-hidden="true"></i>
+											<span>
+												<span class="block font-semibold text-slate-800">{myIssuedCerts.length} sertifikat terbit</span>
+												<span class="block text-xs text-slate-500">Lihat dan unduh PDF sertifikat.</span>
+											</span>
+										</a>
+									{/if}
+									{#if pendingPayments > 0}
+										<a
+											role="menuitem"
+											href={pendingSample[0]
+												? `/user/pembayaran/${pendingSample[0].courseId}`
+												: '/user/semua-kursus'}
+											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+											onclick={closeNotifMenu}
+										>
+											<i class="fa-solid fa-money-bill-transfer mt-0.5 w-4 text-center text-blue-500" aria-hidden="true"></i>
+											<span>
+												<span class="block font-semibold text-slate-800">{pendingPayments} pembayaran menunggu</span>
+												<span class="block text-xs text-slate-500">{pendingSample[0]?.courseTitle ?? 'Menunggu verifikasi admin'} — cek bukti bayar.</span>
+											</span>
+										</a>
+									{/if}
+									{#if rejectedPayments > 0}
+										<a
+											role="menuitem"
+											href={rejectedSample[0]
+												? `/user/pembayaran/${rejectedSample[0].courseId}`
+												: '/user/semua-kursus'}
+											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+											onclick={closeNotifMenu}
+										>
+											<i class="fa-solid fa-circle-exclamation mt-0.5 w-4 text-center text-red-500" aria-hidden="true"></i>
+											<span>
+												<span class="block font-semibold text-slate-800">{rejectedPayments} pembayaran ditolak</span>
+												<span class="block text-xs text-slate-500">{rejectedSample[0]?.rejectReason ?? rejectedSample[0]?.courseTitle ?? 'Perlu perbaikan'} — ajukan ulang.</span>
+											</span>
+										</a>
+									{/if}
+									{#if notifCount === 0}
+										<p class="px-3 py-4 text-center text-xs text-slate-500">Belum ada informasi penting.</p>
+									{/if}
+								</div>
+							</div>
+						{/if}
+					</div>
 
 					<!-- Profile Dropdown -->
 					<div class="relative">
@@ -236,10 +385,14 @@
 							aria-haspopup="menu"
 						>
 							<span
-								class="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-bold text-white shadow-md"
+								class="flex h-9 w-9 items-center justify-center overflow-hidden rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-sm font-bold text-white shadow-md"
 								aria-hidden="true"
 							>
-								{displayInitials}
+								{#if avatarSrc}
+									<img src={avatarSrc} alt="" class="h-full w-full object-cover" />
+								{:else}
+									{displayInitials}
+								{/if}
 							</span>
 							<span class="hidden text-left sm:block">
 								<span class="block text-sm leading-tight font-semibold text-slate-800"
@@ -278,6 +431,15 @@
 									>
 										<i class="fa-solid fa-award w-4 text-center text-slate-400" aria-hidden="true"></i>
 										Sertifikat
+									</a>
+									<a
+										role="menuitem"
+										href="/user/profile"
+										class="flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+										onclick={closeProfileMenu}
+									>
+										<i class="fa-solid fa-user w-4 text-center text-slate-400" aria-hidden="true"></i>
+										Profil Saya
 									</a>
 								</div>
 								<div class="border-t border-slate-100 p-1.5">

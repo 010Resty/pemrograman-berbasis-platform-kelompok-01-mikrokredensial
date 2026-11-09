@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { resolve } from '$app/paths';
+	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import { fetchMyEnrollments, fetchMyProgressSummary, type MyEnrollment } from '$lib/api/progress';
 	import {
 		fetchPublicCourses,
@@ -32,6 +34,7 @@
 	}
 
 	let activeFilter = $state<Status>('all');
+	let courseSearch = $state('');
 
 	let enrollments = $state<MyEnrollment[]>([]);
 	let progressByCourse = $state<Record<number, { completed: number; total: number; percent: number }>>({});
@@ -41,9 +44,8 @@
 	let started = false;
 	let loadSeq = 0;
 
-	// Tukar voucher resmi (K-03): backend validasi 4 cocok + anti-race.
+	// Tukar voucher resmi (K-03): kursus tujuan ikut voucher, backend validasi + anti-race.
 	let voucherCode = $state('');
-	let voucherCourseId = $state<number | ''>('');
 	let voucherStatus = $state<'idle' | 'loading' | 'error' | 'success'>('idle');
 	let voucherMessage = $state('');
 
@@ -81,10 +83,6 @@
 			}
 			progressByCourse = byCourse;
 			catalog = Array.isArray(cat) ? cat : [];
-			if (voucherCourseId === '') {
-				const firstOpen = catalog.find((c) => !enr.some((e) => e.courseId === c.id));
-				if (firstOpen) voucherCourseId = firstOpen.id;
-			}
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat kursus.';
@@ -98,8 +96,6 @@
 		started = true;
 		void load();
 	});
-
-	const enrolledIds = $derived(new Set(enrollments.map((e) => e.courseId)));
 
 	const cards = $derived<CourseCard[]>(
 		enrollments.map((e) => {
@@ -127,14 +123,13 @@
 		})
 	);
 
-	// Kursus katalog yang belum diikuti — pilihan tujuan voucher.
-	const openCourses = $derived(catalog.filter((c) => !enrolledIds.has(c.id)));
-
 	const inProgressCount = $derived(cards.filter((c) => c.status === 'in-progress').length);
 	const completedCount = $derived(cards.filter((c) => c.status === 'completed').length);
 
 	const filtered = $derived(
-		activeFilter === 'all' ? cards : cards.filter((c) => c.status === activeFilter)
+		(activeFilter === 'all' ? cards : cards.filter((c) => c.status === activeFilter)).filter(
+			(c) => courseSearch.trim() === '' || c.title.toLowerCase().includes(courseSearch.trim().toLowerCase())
+		)
 	);
 
 	const filters: { value: Status; label: string }[] = [
@@ -164,14 +159,9 @@
 			voucherMessage = 'Masukkan kode voucher.';
 			return;
 		}
-		if (voucherCourseId === '') {
-			voucherStatus = 'error';
-			voucherMessage = 'Pilih kursus tujuan voucher.';
-			return;
-		}
 		voucherStatus = 'loading';
 		try {
-			await redeemVoucher(voucherCode, voucherCourseId);
+			await redeemVoucher(voucherCode);
 			voucherStatus = 'success';
 			voucherMessage = 'Voucher berhasil ditukar. Akses kursus dibuka.';
 			voucherCode = '';
@@ -193,37 +183,27 @@
 	/>
 </svelte:head>
 
-<div class="p-4 sm:p-6 lg:p-8">
-	<div class="mb-6">
-		<p class="text-xs font-bold tracking-widest text-blue-600 uppercase">Menu Utama · Kursusku</p>
-		<h1 class="mt-1 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">Kursusku</h1>
-		<p class="mt-1 text-sm text-slate-500">
-			Lanjutkan pembelajaranmu — {inProgressCount} kursus sedang berjalan,
-			{completedCount} selesai.
-		</p>
-		<p class="mt-1 text-xs text-slate-400">
-			Hanya kursus yang sudah Anda ikuti tampil di sini — lihat katalog di
+<div class="page-wrap page-stack">
+	<PageHeader
+		eyebrow="Menu Utama · Kursusku"
+		title="Kursusku"
+		description={`Lanjutkan pembelajaranmu — ${inProgressCount} kursus sedang berjalan, ${completedCount} selesai. Hanya kursus yang sudah Anda ikuti tampil di sini.`}
+	>
+		{#snippet actions()}
 			<a
-				href="/user/semua-kursus"
-				class="rounded font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-				>Semua Kursus</a
-			>.
-		</p>
-	</div>
+				href={resolve('/user/semua-kursus')}
+				class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+			>
+				<i class="fa-solid fa-layer-group" aria-hidden="true"></i> Semua Kursus
+			</a>
+		{/snippet}
+	</PageHeader>
 
 	<!-- Redeem kode voucher (K-03: validasi 4 cocok + anti-race di backend) -->
 	<section
 		aria-labelledby="voucher-heading"
-		class="relative mb-6 overflow-hidden rounded-2xl bg-gradient-to-br from-indigo-600 via-blue-700 to-indigo-800 p-5 text-white sm:p-6"
+		class="relative mb-6 overflow-hidden rounded-2xl bg-navy p-5 text-white sm:p-6"
 	>
-		<div
-			class="pointer-events-none absolute -top-10 -right-10 h-40 w-40 rounded-full bg-white/10 blur-2xl"
-			aria-hidden="true"
-		></div>
-		<div
-			class="pointer-events-none absolute -bottom-10 -left-10 h-32 w-32 rounded-full bg-cyan-400/20 blur-2xl"
-			aria-hidden="true"
-		></div>
 		<div class="relative flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
 			<div class="flex items-start gap-3.5">
 				<span
@@ -237,8 +217,8 @@
 						Punya kode voucher?
 					</h2>
 					<p class="mt-0.5 text-xs text-blue-100 sm:text-sm">
-						Tukarkan kode dari kampus atau event untuk membuka kursus. Satu kode hanya untuk satu
-						akun dan satu kursus.
+						Tukarkan kode dari kampus atau event — kursus yang terikat pada kode langsung
+						terbuka. Satu kode hanya untuk satu akun dan satu kursus.
 					</p>
 				</div>
 			</div>
@@ -261,19 +241,6 @@
 							class="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 font-mono text-sm font-bold tracking-widest text-white uppercase placeholder:text-blue-200/60 placeholder:normal-case placeholder:tracking-normal focus:border-white focus:bg-white/15 focus:ring-4 focus:ring-white/20 focus:outline-none"
 						/>
 					</div>
-					<div class="relative flex-1">
-						<label for="voucher-course" class="sr-only">Kursus tujuan</label>
-						<select
-							id="voucher-course"
-							bind:value={voucherCourseId}
-							class="w-full rounded-xl border border-white/20 bg-white/10 px-4 py-2.5 text-sm font-semibold text-white focus:border-white focus:bg-white/15 focus:ring-4 focus:ring-white/20 focus:outline-none [&>option]:text-slate-800"
-						>
-							<option value="" disabled>Pilih kursus…</option>
-							{#each openCourses as c (c.id)}
-								<option value={c.id}>{c.title}</option>
-							{/each}
-						</select>
-					</div>
 					<button
 						type="submit"
 						disabled={voucherStatus === 'loading'}
@@ -287,7 +254,7 @@
 					</button>
 				</div>
 				<p id="voucher-help" class="mt-1.5 text-[11px] text-blue-200">
-					Kode tidak valid, sudah dipakai, atau untuk kursus lain akan ditolak oleh server.
+					Kode tidak valid, sudah dipakai, atau kedaluwarsa akan ditolak oleh server.
 				</p>
 				{#if voucherStatus === 'error' || voucherStatus === 'success'}
 					<p
@@ -340,7 +307,32 @@
 		</div>
 	{:else}
 		<!-- Filter -->
-		<div class="mb-6 flex flex-wrap gap-2" role="group" aria-label="Filter status kursus">
+		<div class="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center">
+			<div class="relative w-full sm:max-w-xs">
+				<div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400">
+					<i class="fa-solid fa-magnifying-glass text-sm" aria-hidden="true"></i>
+				</div>
+				<label for="kursusku-search" class="sr-only">Cari kursus yang diikuti</label>
+				<input
+					id="kursusku-search"
+					type="search"
+					bind:value={courseSearch}
+					placeholder="Cari judul kursus…"
+					autocomplete="off"
+					class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-9 pl-10 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+				/>
+				{#if courseSearch}
+					<button
+						type="button"
+						class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-slate-400 transition-colors hover:text-slate-600"
+						onclick={() => (courseSearch = '')}
+						aria-label="Hapus pencarian"
+					>
+						<i class="fa-solid fa-xmark text-sm" aria-hidden="true"></i>
+					</button>
+				{/if}
+			</div>
+			<div class="flex flex-wrap gap-2" role="group" aria-label="Filter status kursus">
 			{#each filters as f (f.value)}
 				<button
 					type="button"
@@ -355,15 +347,18 @@
 					{f.label}
 				</button>
 			{/each}
+			</div>
 		</div>
 
 		{#if filtered.length === 0}
 			<div class="rounded-2xl border border-dashed border-slate-300 bg-white p-12 text-center">
 				<i class="fa-solid fa-folder-open mb-3 text-3xl text-slate-300" aria-hidden="true"></i>
 				<p class="text-sm font-semibold text-slate-700">
-					{enrollments.length === 0
-						? 'Anda belum mengikuti kursus apa pun.'
-						: 'Tidak ada kursus pada filter ini.'}
+					{courseSearch.trim() !== ''
+						? `Tidak ada kursus yang cocok dengan “${courseSearch.trim()}”.`
+						: enrollments.length === 0
+							? 'Anda belum mengikuti kursus apa pun.'
+							: 'Tidak ada kursus pada filter ini.'}
 				</p>
 				<p class="mt-1 text-xs text-slate-500">
 					Jelajahi katalog atau tukar kode voucher untuk mulai belajar.
@@ -441,7 +436,11 @@
 									<span class="text-slate-500"
 										>{course.completed}/{course.total} materi</span
 									>
-									<span class="font-bold text-slate-700">{course.percent}%</span>
+									<span class="font-bold text-slate-700"
+										>{Number.isInteger(course.percent)
+											? course.percent
+											: course.percent.toFixed(1)}%</span
+									>
 								</div>
 								<div
 									class="h-2 overflow-hidden rounded-full bg-slate-100"
@@ -458,7 +457,7 @@
 								</div>
 							</div>
 
-							<div class="mt-5 flex gap-2">
+							<div class="mt-5 flex flex-col gap-2 sm:flex-row">
 								{#if course.period === 'upcoming'}
 									<div class="flex-1">
 										<span

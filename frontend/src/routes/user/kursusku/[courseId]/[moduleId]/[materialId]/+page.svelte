@@ -5,11 +5,11 @@
 	import type { JSONContent } from '@tiptap/core';
 	import { generateHTML } from '@tiptap/html';
 	import '$lib/tiptap/content.css';
+	import { sanitizeTiptapHtml } from '$lib/security/sanitize';
 	import { createEditorExtensions, toEmbedUrl } from '$lib/tiptap/extensions';
 	import {
 		getModuleMaterials,
 		isMaterialLocked,
-		isSubModuleLocked,
 		type Course,
 		type CourseModule
 	} from '$lib/data/courses';
@@ -220,9 +220,6 @@
 	const showEnroll = $derived(!loading && !loadError && !notFound && !!course && !hasAccess && !isPaid);
 	const paidPrice = $derived(detail?.priceLabel ?? '');
 	const startMonth = $derived(detail?.startMonth ?? '');
-	const quizPass = $derived(
-		typeof matDetail?.passScore === 'number' ? matDetail.passScore : 70
-	);
 	const contentHtml = $derived(tiptapToHtml(matDetail?.content ?? null));
 	const taskAssignment = $derived<AssignmentDetail>({
 		brief: tiptapToText(matDetail?.content ?? null) || matDetail?.title || 'Tugas',
@@ -256,24 +253,32 @@
 	/** K-07: modul independen — tidak ada kunci antar-modul di sini. */
 	const moduleLocked = $derived(false);
 
-	const subLocked = $derived(
-		!course || !module || currentSubInfo.subIndex < 0
-			? false
-			: isSubModuleLocked(course.modules, moduleIndex, currentSubInfo.subIndex, (id) =>
-					doneIds.has(id)
-				)
-	);
+	/** K-07: materi dalam sub-modul saat ini (kunci hanya di dalamnya). */
+	const subMats = $derived(currentSubInfo.sub?.materials ?? []);
+	const subIdx = $derived(subMats.findIndex((m) => m.id === page.params.materialId));
 
 	/** Materi saat ini terkunci bila modul/sub terkunci atau ada materi sebelumnya yang belum selesai */
+	/** K-07: terkunci hanya bila ada materi sebelumnya DALAM sub-modul sama yang belum selesai. */
 	const locked = $derived(
-		matIndex < 0
+		matIndex < 0 || subIdx < 0
 			? false
-			: moduleLocked || subLocked || isMaterialLocked(flat, matIndex, (id) => doneIds.has(id))
+			: moduleLocked || isMaterialLocked(subMats, subIdx, (id) => doneIds.has(id))
 	);
 
 	/** Materi berikutnya terkunci? (untuk tombol navigasi) */
+	/** Materi berikutnya dalam sub-modulnya (untuk status tombol navigasi). */
+	const nextSubMats = $derived.by(() => {
+		if (!next || !module) return [];
+		const found = resolveSubModules(module).find((s) =>
+			s.materials.some((m) => m.id === next.id)
+		);
+		return found ? found.materials : [];
+	});
+	const nextSubIdx = $derived(next ? nextSubMats.findIndex((m) => m.id === next.id) : -1);
 	const nextLocked = $derived(
-		!next ? false : isMaterialLocked(flat, matIndex + 1, (id) => doneIds.has(id))
+		!next || nextSubIdx < 0
+			? false
+			: isMaterialLocked(nextSubMats, nextSubIdx, (id) => doneIds.has(id))
 	);
 
 	/** Modul setelah modul saat ini (untuk tombol lanjut di akhir modul) */
@@ -691,7 +696,6 @@
 							{#if modOpen}
 								<ol id={`lp-mod-${mod.id}`} class="space-y-3 px-4 pb-4 sm:px-6 sm:pl-14">
 									{#each resolveSubModules(mod) as sub, si (sub.id)}
-										{@const sLocked = isSubModuleLocked(tree, mi, si, (id) => doneIds.has(id))}
 										<li>
 											{#if !String(sub.id).endsWith('-direct')}
 												<p class="mb-1 flex items-center gap-1.5 text-[11px] font-bold tracking-wide text-slate-500 uppercase">
@@ -700,11 +704,10 @@
 												</p>
 											{/if}
 											<ol class="space-y-1">
-												{#each sub.materials as mat (mat.id)}
-													{@const flatIdx = modFlat.findIndex((f) => f.id === mat.id)}
+												{#each sub.materials as mat, sIdx (mat.id)}
 													{@const isCurrent = mat.id === material?.id}
 													{@const matDone = doneIds.has(mat.id)}
-													{@const matLocked = sLocked || isMaterialLocked(modFlat, flatIdx, (id) => doneIds.has(id))}
+													{@const matLocked = isMaterialLocked(sub.materials, sIdx, (id) => doneIds.has(id))}
 													<li>
 														{#if matLocked && !isCurrent}
 															<span class="flex cursor-not-allowed items-center gap-2.5 rounded-xl border border-slate-100 bg-slate-50/60 px-3 py-2 opacity-70" title="Selesaikan materi sebelumnya untuk membuka" aria-label={`Terkunci: ${mat.title}`}>
@@ -725,7 +728,7 @@
 																	{:else if matDone}
 																		<i class="fa-solid fa-check"></i>
 																	{:else}
-																		{flatIdx + 1}
+																		{sIdx + 1}
 																	{/if}
 																</span>
 																<span class="min-w-0 flex-1 truncate text-[13px] font-bold">{mat.title}</span>
@@ -834,9 +837,6 @@
 												{#each modSubs as sub, si (sub.id)}
 													{@const isCurrentSub =
 														isCurrentModule && sub.id === currentSubInfo.sub?.id}
-													{@const sLocked = isSubModuleLocked(course.modules, mi, si, (id) =>
-														doneIds.has(id)
-													)}
 													{@const sOpen = sidebarOpenSubs.has(sub.id)}
 													<div
 														class={`overflow-hidden rounded-xl border ${isCurrentSub ? 'border-blue-200 bg-blue-50/40' : 'border-slate-100 bg-slate-50/50'}`}
@@ -847,19 +847,12 @@
 															aria-expanded={sOpen}
 															class="flex w-full items-center gap-2 px-2.5 py-2 text-left focus-visible:outline-2 focus-visible:outline-blue-600"
 														>
-															{#if sLocked && !isCurrentSub}
-																<i
-																	class="fa-solid fa-lock text-[9px] text-slate-400"
-																	aria-hidden="true"
-																></i>
-															{:else}
 																<span
 																	class={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[10px] font-extrabold ${isCurrentSub ? 'bg-blue-600 text-white' : 'bg-violet-100 text-violet-700'}`}
 																	aria-hidden="true"
 																>
 																	{si + 1}
 																</span>
-															{/if}
 															<span
 																class="min-w-0 flex-1 truncate text-[12px] font-bold {isCurrentSub
 																	? 'text-blue-800'
@@ -876,16 +869,12 @@
 															<ol
 																class="space-y-0.5 border-t border-slate-100 bg-white px-1.5 py-1.5"
 															>
-																{#each sub.materials as mat (mat.id)}
-																	{@const flatIdx = modFlat.findIndex((f) => f.id === mat.id)}
+																{#each sub.materials as mat, sIdx (mat.id)}
 																	{@const isCurrent = mat.id === material.id}
 																	{@const matDone = doneIds.has(mat.id)}
 																	{@const lockedItem =
 																		modLocked ||
-																		sLocked ||
-																		isMaterialLocked(modFlat, flatIdx, (id) =>
-																			doneIds.has(id)
-																		)}
+																		isMaterialLocked(sub.materials, sIdx, (id) => doneIds.has(id))}
 																	<li>
 																		{#if lockedItem && !isCurrent}
 																			<span
@@ -929,7 +918,7 @@
 																					{:else if matDone}
 																						<i class="fa-solid fa-check text-[8px]"></i>
 																					{:else}
-																						{flatIdx + 1}
+																						{sIdx + 1}
 																					{/if}
 																				</span>
 																				<span class="min-w-0 flex-1 truncate text-[13px]"
@@ -1026,11 +1015,7 @@
 							{#key material.id}
 								{#if material.type === 'kuis'}
 									<QuizMaterial
-										questions={[]}
 										materialId={material.id}
-										courseId={String(course.id)}
-										moduleId={module.id}
-										passScore={quizPass}
 										onPass={() => void serverMarkDone(material.id)}
 									/>
 								{:else if material.type === 'tugas'}
@@ -1044,7 +1029,8 @@
 										onSubmit={() => void serverMarkDone(material.id)}
 									/>
 								{:else if contentHtml}
-									<div class="tiptap">{@html contentHtml}</div>
+									<!-- eslint-disable-next-line svelte/no-at-html-tags -- disanitasi via sanitizeTiptapHtml -->
+									<div class="mdoc">{@html sanitizeTiptapHtml(contentHtml)}</div>
 								{:else}
 									<p class="text-sm text-slate-500">Konten materi belum tersedia.</p>
 								{/if}

@@ -4,16 +4,15 @@ import { getCourseMeta } from '$lib/data/course-meta';
 import { fetchMyEnrollments, type MyEnrollment } from '$lib/api/progress';
 
 /**
- * Kepemilikan course: server backend adalah sumber kebenaran
- * (GET /me/enrollments, status active/completed), localStorage hanya
- * cache offline agar gerbang materi tetap jalan saat backend tidak terjangkau.
- * Sinkronkan via `syncEnrollmentsFromServer()` setelah login/masuk portal
- * dan setiap ada pendaftaran baru (gratis/voucher/hibah).
- * Course GRATIS selalu terbuka; course berlabel harga terkunci
- * sampai ada enrollment aktif di server (atau pembayaran simulasi lokal
- * yang dicatat `purchaseCourse` — tanpa gateway, bukan akses resmi).
+ * Kepemilikan course: server backend satu-satunya sumber kebenaran
+ * (GET /me/enrollments, status active/completed).
+ * `ownedCourses` murni tembusan: ditulis ulang PENUH setiap sinkronisasi
+ * berhasil (`syncEnrollmentsFromServer`), tidak pernah ditambah/dihapus
+ * dari tempat lain. Tidak ada pembelian lokal, tidak ada buka-kunci manual.
+ * localStorage hanya cache sesi (key v3; entri v2 lama yang mungkin berisi
+ * kepemilikan palsu otomatis ditinggalkan).
  */
-const KEY = 'aristoteles:owned-courses:v2';
+const KEY = 'aristoteles:owned-courses:v3';
 
 export const ownedCourses = new SvelteSet<number>();
 
@@ -83,13 +82,13 @@ export function canOpenMaterials(courseId: number): boolean {
 
 /** Single-flight: pemanggilan bersamaan berbagi satu request. */
 let syncInFlight: Promise<number> | null = null;
-let lastSyncedAt = 0;
 
 /**
- * Tarik enrollment aktif/completed milik sendiri dari server ke
- * `ownedCourses` (gerbang materi). Tanpa token/sesi = 0 dan cache lokal
- * dipertahankan (bukan sukses palsu). Terima daftar yang sudah diambil
- * (mis. badge layout) agar tidak dobel request.
+ * Tulis ulang `ownedCourses` dari enrollment aktif/completed milik sendiri.
+ * Berhasil = ganti total + persist (entri basi/palsu ikut terbuang).
+ * Gagal (offline/tanpa sesi) = cache terakhir dipertahankan, kembalikan 0 —
+ * bukan sukses palsu. Terima daftar yang sudah diambil (mis. badge layout)
+ * agar tidak dobel request.
  */
 export function syncEnrollmentsFromServer(prefetched?: MyEnrollment[]): Promise<number> {
 	if (syncInFlight) return syncInFlight;
@@ -100,44 +99,16 @@ export function syncEnrollmentsFromServer(prefetched?: MyEnrollment[]): Promise<
 		} catch {
 			return 0;
 		}
-		let added = 0;
+		ownedCourses.clear();
 		for (const e of list) {
-			if (
-				(e.status === 'active' || e.status === 'completed') &&
-				!ownedCourses.has(e.courseId)
-			) {
+			if (e.status === 'active' || e.status === 'completed') {
 				ownedCourses.add(e.courseId);
-				added++;
 			}
 		}
-		if (added > 0) persist();
-		lastSyncedAt = Date.now();
-		return added;
+		persist();
+		return ownedCourses.size;
 	})().finally(() => {
 		syncInFlight = null;
 	});
 	return syncInFlight;
-}
-
-/** Waktu sinkronisasi terakhir (0 = belum pernah). */
-export function lastEnrollmentsSyncAt(): number {
-	return lastSyncedAt;
-}
-
-/** Simulasi pembayaran: langsung membuka akses + menyimpan bukti milik. */
-export function purchaseCourse(courseId: number): void {
-	ownedCourses.add(courseId);
-	persist();
-}
-
-/** Hapus kepemilikan satu course (batal ikut / reset demo). */
-export function releaseCourse(courseId: number): void {
-	ownedCourses.delete(courseId);
-	persist();
-}
-
-/** Hapus semua kepemilikan (reset demo pembayaran). */
-export function resetOwnership(): void {
-	ownedCourses.clear();
-	persist();
 }

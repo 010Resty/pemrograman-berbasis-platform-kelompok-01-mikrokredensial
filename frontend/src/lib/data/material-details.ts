@@ -97,28 +97,7 @@ const overrides: Record<string, MaterialDetail> = {
 		],
 		points: ['Mulai dari 360px, perluas dengan min-width', 'Satuan relatif untuk tipografi dan layout', 'Uji sentuh: target minimal 44×44 px']
 	},
-	'm1-2-mat3': {
-		questions: [
-			{
-				question: 'Properti apa yang mengatur jarak antar item di Flexbox/Grid tanpa margin?',
-				options: ['margin', 'gap', 'padding', 'spacing'],
-				answer: 1,
-				explanation: 'gap mengatur jarak antar item grid/flex secara konsisten.'
-			},
-			{
-				question: 'Pendekatan apa yang disarankan untuk desain responsif modern?',
-				options: ['Desktop-first', 'Mobile-first', 'Fixed 960px', 'Tanpa media query'],
-				answer: 1,
-				explanation: 'Mobile-first menjaga basis tetap ringan lalu ditambah sesuai lebar layar.'
-			},
-			{
-				question: 'Untuk layout dua dimensi (baris + kolom), alat yang paling tepat adalah…',
-				options: ['Flexbox', 'Float', 'CSS Grid', 'Position absolute'],
-				answer: 2,
-				explanation: 'Grid dirancang untuk dua dimensi; Flexbox unggul di satu dimensi.'
-			}
-		]
-	},
+	// Kuis dikerjakan dari bank soal server (tanpa kunci di klien) — lihat QuizMaterial.
 	// ===== Kursus 1 · Modul 3 =====
 	'm1-3-mat1': {
 		intro: 'DOM adalah jembatan antara HTML dan JavaScript. Pahami event agar antarmukamu hidup.',
@@ -172,28 +151,7 @@ const overrides: Record<string, MaterialDetail> = {
 		],
 		points: ['Build menghasilkan aset statis berversi hash', 'Auto-deploy dari repo menghemat waktu', 'Checklist go-live: performa, meta, 404']
 	},
-	'm1-4-mat3': {
-		questions: [
-			{
-				question: 'Prinsip komunikasi komponen yang disarankan adalah…',
-				options: ['Dua arah bebas', 'Props in, event out', 'State global untuk semua', 'DOM scraping'],
-				answer: 1,
-				explanation: 'Alur satu arah membuat perubahan mudah dilacak dan di-debug.'
-			},
-			{
-				question: 'Kapan state perlu diangkat ke parent (lifting state up)?',
-				options: ['Selalu', 'Saat dipakai/dibagi beberapa anak', 'Tidak pernah', 'Hanya untuk form'],
-				answer: 1,
-				explanation: 'State diletakkan di leluhur terdekat yang dipakai bersama.'
-			},
-			{
-				question: 'Fungsi hash pada nama file hasil build berguna untuk…',
-				options: ['Keamanan enkripsi', 'Cache busting', 'Kompresi gambar', 'Minifikasi HTML'],
-				answer: 1,
-				explanation: 'Nama berubah tiap ada perubahan isi sehingga browser memuat versi baru.'
-			}
-		]
-	},
+	// Kuis dikerjakan dari bank soal server (tanpa kunci di klien) — lihat QuizMaterial.
 	// ===== Contoh audio & foto =====
 	'm4-1-mat2': {
 		intro: 'Dengarkan penjelasan tentang rekayasa sosial — serangan yang menargetkan manusia, bukan mesin.',
@@ -237,28 +195,10 @@ function defaultDetail(mat: Material, course: Course, moduleTitle: string): Mate
 				points: ['Amati detail visual selama 2 menit', 'Hubungkan dengan konsep di modul ini', 'Catat istilah baru yang muncul']
 			};
 		case 'kuis':
+			// Tanpa bank soal lokal: kunci jawaban tidak pernah dikirim ke klien.
+			// Soal + penilaian 100% dari backend (QuizMaterial server-only, K-02).
 			return {
-				intro: `Uji pemahamanmu tentang "${mat.title}". Nilai minimal 70 untuk lolos.`,
-				questions: [
-					{
-						question: `Apa tujuan utama mempelajari "${mat.title}"?`,
-						options: ['Menghafal istilah', 'Memahami konsep dan menerapkannya', 'Mengumpulkan sertifikat', 'Menghabiskan waktu'],
-						answer: 1,
-						explanation: 'Pemahaman yang bisa diterapkan adalah inti tiap materi.'
-					},
-					{
-						question: 'Langkah terbaik setelah menyelesaikan materi ini?',
-						options: ['Langsung lupa', 'Latihan mandiri dan diskusi', 'Mengulang tanpa tujuan', 'Melewati modul'],
-						answer: 1,
-						explanation: 'Latihan menguatkan memori jangka panjang.'
-					},
-					{
-						question: 'Tanda kamu benar-benar paham adalah…',
-						options: ['Bisa menjelaskan ulang dengan sederhana', 'Bisa mengeja istilah', 'Cepat selesai', 'Banyak catatan'],
-						answer: 0,
-						explanation: 'Menjelaskan sederhana membuktikan pemahaman mendalam.'
-					}
-				]
+				intro: `Uji pemahamanmu tentang "${mat.title}" langsung dari bank soal server. Nilai minimal 70 untuk lolos.`
 			};
 		case 'tugas':
 			return {

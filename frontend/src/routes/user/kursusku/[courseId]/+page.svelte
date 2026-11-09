@@ -7,7 +7,6 @@
 		getCourseById,
 		getModuleMaterials,
 		isMaterialLocked,
-		isSubModuleLocked,
 		normalizeMaterialType,
 		type Course,
 		type CourseModule,
@@ -35,8 +34,7 @@
 		resolveSubModules,
 		subModuleProgress
 	} from '$lib/data/training';
-	import { doneMaterials } from '$lib/stores/progress.svelte';
-	import { getQuizResult } from '$lib/stores/quiz-results.svelte';
+	import { doneMaterials, syncServerProgress } from '$lib/stores/progress.svelte';
 	import { latestFor } from '$lib/stores/submissions.svelte';
 	import { getCourseMeta } from '$lib/data/course-meta';
 	import { moduleCredentialId } from '$lib/data/certificates';
@@ -58,8 +56,8 @@
 
 	/**
 	 * Tahap 2a — baca-saja. Status kuis per modul.
-	 * Mode server: nilai terbaik dari backend (K-02). Mode lokal:
-	 * percobaan terakhir di browser.
+	 * Server-only (K-02): nilai terbaik dari backend. Mode lokal
+	 * (pratinjau statis) tidak punya bank soal server → 0 lulus.
 	 */
 	function quizStatsFor(mod: CourseModule): { total: number; passed: number } {
 		const qs = getModuleMaterials(mod).filter((m) => normalizeMaterialType(m.type) === 'kuis');
@@ -68,9 +66,7 @@
 			for (const q of qs) if (quizPassedByMat[q.id]) passed++;
 			return { total: qs.length, passed };
 		}
-		let passed = 0;
-		for (const q of qs) if (getQuizResult(q.id)?.passed) passed++;
-		return { total: qs.length, passed };
+		return { total: qs.length, passed: 0 };
 	}
 
 	/**
@@ -127,7 +123,6 @@
 		Record<string, { eligible: boolean; code: string | null; failReasons: string[] }>
 	>({});
 	let loadSeq = 0;
-	let hydratedFor: number | null = null;
 
 	/**
 	 * Peta kebutuhan API halaman ini → backend (semua sudah ada):
@@ -149,10 +144,9 @@
 			]);
 			if (my !== loadSeq) return;
 			course = { ...toCourseView(detail), modules: tree };
-			if (hydratedFor !== id) {
-				hydratedFor = id;
-				for (const mid of doneIds) doneMaterials.add(String(mid));
-			}
+			// Cermin progres server setiap kali muat (aditif) — kembali dari
+			// halaman materi langsung terlihat tanpa reload penuh.
+			syncServerProgress(doneIds);
 			serverHasAccess = access.hasAccess || access.isManager;
 			serverUpcoming = serverHasAccess && detail.period === 'upcoming';
 			mode = 'server';
@@ -629,7 +623,7 @@
 					</div>
 					<p class="mt-2 text-[11px] text-slate-500" role="status" aria-live="polite">
 						{#if prog.percent === 100}
-							🎉 Semua {stats.moduleCount} modul selesai! Sertifikatmu siap diunduh.
+							<i class="fa-solid fa-circle-check text-emerald-600" aria-hidden="true"></i> Semua {stats.moduleCount} modul selesai! Sertifikatmu siap diunduh.
 						{:else if resume}
 							Lanjut: Modul {resume.moduleIndex + 1} · {resume.material.title}
 						{:else}
@@ -877,7 +871,7 @@
 										</li>
 										{#if qStat.total > 0}
 											<li>
-												Kuis: {qStat.passed}/{qStat.total} lulus {#if mode === 'server'}(nilai terbaik).{:else}(acuan percobaan terakhir, bukan nilai terbaik).{/if}
+												Kuis: {qStat.passed}/{qStat.total} lulus {#if mode === 'server'}(nilai terbaik).{:else}(hanya tersedia untuk materi server).{/if}
 											</li>
 										{:else}
 											<li>Tidak ada kuis di modul ini.</li>
@@ -913,39 +907,7 @@
 										{@const sProg = subModuleProgress(sub, (id) => doneMaterials.has(id))}
 										{@const subOpen = searching ? true : openSubs.has(sub.id)}
 										{@const subComplete = sProg.done === sProg.total && sProg.total > 0}
-										{@const subLocked = isSubModuleLocked(
-											course.modules,
-											moduleIndex,
-											subIndex,
-											(id) => doneMaterials.has(id)
-										)}
-										{@const flat = getModuleMaterials(mod)}
 										<div class="overflow-hidden rounded-xl border border-slate-200 bg-white">
-											{#if subLocked && !searching}
-												<div
-													class="flex w-full cursor-not-allowed items-center gap-3 p-3 opacity-70 sm:px-4"
-													title="Selesaikan sub-modul sebelumnya untuk membuka"
-													aria-label={`Terkunci: Sub-modul ${moduleIndex + 1}.${subIndex + 1}: ${sub.title}`}
-												>
-													<span
-														class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-200 text-[11px] font-extrabold text-slate-400"
-														aria-hidden="true"
-													>
-														<i class="fa-solid fa-lock text-[10px]"></i>
-													</span>
-													<span class="min-w-0 flex-1">
-														<span class="block truncate text-[13px] font-bold text-slate-400">
-															{moduleIndex + 1}.{subIndex + 1} · {sub.title}
-														</span>
-														<span class="block truncate text-[11px] text-slate-400"
-															>{sub.description}</span
-														>
-														<span class="mt-0.5 block text-[11px] font-semibold text-slate-400">
-															Terkunci · {sProg.done}/{sProg.total} materi
-														</span>
-													</span>
-												</div>
-											{:else}
 												<button
 													type="button"
 													onclick={() => toggleSub(sub.id)}
@@ -998,9 +960,8 @@
 														aria-hidden="true"
 													></i>
 												</button>
-											{/if}
 
-											{#if subOpen && (!subLocked || searching)}
+											{#if subOpen}
 												<div id={`sub-panel-${sub.id}`} class="border-t border-violet-100/70">
 													<p class="px-4 pt-2 text-[11px] text-slate-400" aria-hidden="true">
 														Modul {moduleIndex + 1} · Sub-modul {subIndex + 1} · {mats.length} materi
@@ -1013,14 +974,11 @@
 														<ol class="divide-y divide-slate-100">
 															{#each mats as mat (mat.id)}
 																{@const done = doneMaterials.has(mat.id)}
-																{@const flatIndex = flat.findIndex((f) => f.id === mat.id)}
+																{@const subIdx = sub.materials.findIndex((m) => m.id === mat.id)}
 																{@const locked =
 																	!searching &&
-																	(subLocked ||
-																		(flatIndex >= 0 &&
-																			isMaterialLocked(flat, flatIndex, (id) =>
-																				doneMaterials.has(id)
-																			)))}
+																	subIdx >= 0 &&
+																	isMaterialLocked(sub.materials, subIdx, (id) => doneMaterials.has(id))}
 																<li>
 																	<div
 																		class={`flex items-center gap-3 px-4 py-2.5 transition-colors sm:px-5 ${done ? 'bg-emerald-50/40' : locked ? 'bg-slate-50/60' : 'hover:bg-slate-50/70'}`}
