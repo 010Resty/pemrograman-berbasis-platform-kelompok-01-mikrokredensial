@@ -64,8 +64,8 @@ Wajib tulis: file yang berubah dan alasannya, pengujian dan hasil nyata, risiko 
 
 ## 11. Precedence skill (ARISTOTELES, 2026-11-04)
 
-1. File ini + `backend/AGENTS.md` + `docs/01,04,06,07,09` selalu menang atas skill mana pun. Jika skill menyuruh hal berlawanan (install/migrate/build/ganti stack), ikuti file ini.
+1. File ini + `../backend/AGENTS.md` + `docs/01,04,06,07,09` selalu menang atas skill mana pun. Jika skill menyuruh hal berlawanan (install/migrate/build/ganti stack), ikuti file ini.
 2. Svelte: `svelte5-best-practices` adalah panduan utama. `svelte-code-writer` hanya alat opsional; klausul `MUST` dan `Always validate` TIDAK berlaku tanpa persetujuan eksplisit untuk `npx @sveltejs/mcp`.
 3. UI: `ui-ux-pro-max` hanya untuk tugas desain eksplisit, default `--stack svelte`, tanpa `--persist`/`--output-dir` tanpa diminta. `design`, `frontend-design`, `ui-styling`, `banner-design`, `slides`, `design-system`, `brand` hanya referensi; jangan eksekusi `pip install`/`npx shadcn`/`export GEMINI_API_KEY`/fetch network tanpa diminta eksplisit.
-4. Backend di repo frontend: `nodejs-backend-patterns` dan `nodejs-best-practices` di `frontend/.agents/` OUT-OF-SCOPE (tidak ada JWT/DB di frontend). Jangan scaffolding server/JWT/DB dari frontend.
+4. Backend di repo frontend: `nodejs-backend-patterns` dan `nodejs-best-practices` di `.agents/` OUT-OF-SCOPE (tidak ada JWT/DB di frontend). Jangan scaffolding server/JWT/DB dari frontend.
 5. Dilarang tanpa persetujuan eksplisit: `npm install`, `npx`, `vite build`, `lighthouse`, `python http.server`, script `*.py/*.cjs/*.sh` di skill, perubahan `vite.config.ts`/`tailwind` config/`package.json`.

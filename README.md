@@ -15,15 +15,17 @@ ARISTOTELES adalah platform pembelajaran mikrokredensial: katalog pelatihan publ
 portal belajar peserta, pengelolaan kursus instruktur, dan administrasi (pengguna,
 instruktur, kursus, voucher, undangan, sertifikat). Aturan bisnis K-01–K-08 disepakati
 2026-10-24 (diperbarui 2026-11-02); status implementasi per fitur lihat
-`frontend/docs/04-inventaris-fitur.md` — keputusan bukan bukti sudah selesai di kode.
+`frontend/web/docs/04-inventaris-fitur.md` — keputusan bukan bukti sudah selesai di kode.
 
 # STRUKTUR REPO
 
 | Direktori | Isi |
 |---|---|
-| `frontend/` | SvelteKit 2 + Svelte 5 + TypeScript + Tailwind CSS 4. Lihat `frontend/README.md`. |
+| `frontend/web/` | SvelteKit 2 + Svelte 5 + TypeScript + Tailwind CSS 4 (aplikasi web). Lihat `frontend/web/README.md`. |
+| `frontend/shared/` | (berikutnya, Tahap 2 multi-platform) Kontrak API + skenario uji dipakai bersama web + Android. |
+| `frontend/android/` | (berikutnya, Tahap 3+ multi-platform) Aplikasi Flutter, login-first tanpa landing page. |
 | `backend/` | Express + TypeScript + Drizzle ORM + MySQL, prefix API `/api/v1`. Lihat `backend/README.md`. |
-| `frontend/docs/` | Dokumentasi proyek: ringkasan (`01`), rute (`02`), arsitektur (`03`), status fitur (`04`), kebutuhan backend (`05`), aturan bisnis K-01–K-08 (`06`), risiko (`07`), keputusan (`09`). |
+| `frontend/web/docs/` | Dokumentasi proyek: ringkasan (`01`), rute (`02`), arsitektur (`03`), status fitur (`04`), kebutuhan backend (`05`), aturan bisnis K-01–K-08 (`06`), risiko (`07`), keputusan (`09`). |
 
 # CARA MENJALANKAN (RINGKAS)
 
@@ -37,8 +39,8 @@ npm install
 npm run db:migrate
 npm run dev            # http://localhost:3000
 
-# 2) Frontend (terminal lain)
-cd frontend
+# 2) Frontend web (terminal lain)
+cd frontend/web
 npm install
 npm run dev            # http://localhost:5173
 npm run check          # type-check + validasi Svelte
@@ -51,8 +53,8 @@ tanpa SMTP, email OTP/undangan hanya tercatat di log konsol backend (`MAIL_PROVI
 
 - Autentikasi nyata via backend (JWT + OTP email + undangan instruktur). Tidak ada akun
   demo di bundle; pendaftaran publik selalu peran student (K-01).
-- Pembayaran masih **simulasi lokal** tanpa gateway (`frontend/src/routes/user/pembayaran/`);
+- Pembayaran masih **manual QRIS + verifikasi admin** tanpa gateway (`frontend/web/src/routes/user/pembayaran/`);
   akses resmi tetap lewat enrollment/voucher/hibah server. Gateway belum diputuskan
   (`backend/src/modules/payments/README.md`).
 - Detail per fitur (sudah jalan / sebagian / mock / belum ada) dan skenario uji K-01–K-08:
-  `frontend/docs/04-inventaris-fitur.md` dan `frontend/docs/07-risiko-dan-validasi.md`.
+  `frontend/web/docs/04-inventaris-fitur.md` dan `frontend/web/docs/07-risiko-dan-validasi.md`.
