@@ -1,101 +1,29 @@
 import { z } from "zod";
-import { eq, asc } from "drizzle-orm";
+import { and, asc, desc, eq } from "drizzle-orm";
 import { db } from "../../db";
-import { courses, modules, subModules, materials } from "../../db/schema";
+import { auditLogs, courses, modules, subModules, materials, users } from "../../db/schema";
 import { canManageCourse } from "./course.service";
+import { assertValidTiptap, MAX_CONTENT_CHARS } from "../../utils/tiptap-guard";
 
-// ---------- Validasi konten Tiptap ----------
+type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
-const MAX_CONTENT_CHARS = 1_000_000;
-
-const ALLOWED_NODES = new Set([
-  "doc", "paragraph", "text", "heading", "bulletList", "orderedList",
-  "listItem", "blockquote", "codeBlock", "horizontalRule", "hardBreak",
-  "image", "videoEmbed", "audioEmbed", "pdfAttachment",
-]);
-
-const ALLOWED_MARKS = new Set([
-  "bold", "italic", "underline", "strike", "code", "link",
-]);
-
-interface TiptapNode {
-  type?: unknown;
-  attrs?: Record<string, unknown>;
-  marks?: Array<{ type?: unknown; attrs?: Record<string, unknown> }>;
-  content?: TiptapNode[];
-  text?: unknown;
-}
-
-function assertSafeUrl(value: unknown, field: string): void {
-  if (value == null) return;
-  if (typeof value !== "string") {
-    throw new Error(`Atribut ${field} harus berupa string`);
+const writeCurriculaAudit = async (
+  tx: DbTx,
+  entry: {
+    actorUserId: number | null;
+    action: string;
+    targetIdInt?: number | null;
+    metadata?: Record<string, unknown>;
   }
-  const v = value.trim().toLowerCase();
-  if (v.startsWith("data:")) {
-    throw new Error(
-      `Atribut ${field} tidak boleh dataURL/base64 — unggah berkas via /api/v1/uploads`
-    );
-  }
-  if (
-    !(
-      v.startsWith("http://") ||
-      v.startsWith("https://") ||
-      v.startsWith("/") ||
-      v === "" ||
-      v === "#"
-    )
-  ) {
-    throw new Error(`Atribut ${field} harus URL http(s) atau path /api/...`);
-  }
-  if (v.startsWith("javascript:")) {
-    throw new Error(`Atribut ${field} tidak valid`);
-  }
-}
-
-function walkNode(node: TiptapNode, depth: number): void {
-  if (depth > 50 || typeof node !== "object" || node === null) {
-    throw new Error("Struktur dokumen tidak valid");
-  }
-  if (typeof node.type !== "string" || !ALLOWED_NODES.has(node.type)) {
-    throw new Error(`Tipe node tidak diizinkan: ${String(node.type)}`);
-  }
-  if (Array.isArray(node.marks)) {
-    for (const m of node.marks) {
-      if (!m || typeof m !== "object" || typeof m.type !== "string" || !ALLOWED_MARKS.has(m.type)) {
-        throw new Error(`Tipe mark tidak diizinkan: ${String((m as { type?: unknown })?.type)}`);
-      }
-      if (m.type === "link") {
-        assertSafeUrl((m.attrs as Record<string, unknown> | undefined)?.href, "link.href");
-      }
-    }
-  }
-  const attrs = node.attrs ?? {};
-  if (node.type === "image") assertSafeUrl(attrs.src, "image.src");
-  if (node.type === "videoEmbed") assertSafeUrl(attrs.src, "videoEmbed.src");
-  if (node.type === "audioEmbed") assertSafeUrl(attrs.src, "audioEmbed.src");
-  if (node.type === "pdfAttachment") assertSafeUrl(attrs.url, "pdfAttachment.url");
-  if (Array.isArray(node.content)) {
-    for (const child of node.content) walkNode(child, depth + 1);
-  }
-}
-
-/** Validasi string JSON Tiptap; melempar Error deskriptif bila tidak valid. */
-export function assertValidTiptap(content: string): void {
-  if (content.length > MAX_CONTENT_CHARS) {
-    throw new Error("Dokumen melebihi 1 MB — perkecil gambar/media atau pecah materi");
-  }
-  let doc: unknown;
-  try {
-    doc = JSON.parse(content);
-  } catch {
-    throw new Error("Konten harus JSON Tiptap yang valid");
-  }
-  if (typeof doc !== "object" || doc === null) {
-    throw new Error("Dokumen harus berupa objek doc Tiptap");
-  }
-  walkNode(doc as TiptapNode, 0);
-}
+) => {
+  await tx.insert(auditLogs).values({
+    actorUserId: entry.actorUserId,
+    action: entry.action,
+    targetType: "curriculum",
+    targetIdInt: entry.targetIdInt ?? null,
+    metadata: entry.metadata ?? null,
+  });
+};
 
 // ---------- Skema input ----------
 
@@ -138,10 +66,28 @@ export const materialInputSchema = z.object({
   position: z.number().int().min(0).max(10000),
 });
 
-export const materialPatchSchema = materialInputSchema.partial().refine(
+export const materialPatchSchema = materialInputSchema.partial().extend({
+  // Optimistic concurrency (K-08): tolak timpa diam-diam bila materi berubah
+  // sejak editor memuatnya. Nilai = `updatedAt` yang diterima saat buka editor.
+  expectedUpdatedAt: z.string().trim().min(1).max(64).optional(),
+  // Klasifikasi perubahan K-08 (diputus instruktur pemilik; ringan = typo/
+  // format/sampul/judul, penting = isi kuis/tugas/ambang lulus atau hapus materi).
+  changeSignificance: z.enum(["ringan", "penting"]).optional(),
+  changeReason: z.string().trim().max(500).optional(),
+}).refine(
   (v) => Object.keys(v).length > 0,
   { message: "Tidak ada field yang diubah" }
 );
+
+/** Dilempar bila materi berubah sejak `expectedUpdatedAt` (tulis ulang = 409). */
+export class MaterialConflictError extends Error {
+  readonly currentUpdatedAt: string | null;
+  constructor(currentUpdatedAt: string | null) {
+    super("Materi berubah sejak Anda membukanya. Muat ulang sebelum menyimpan.");
+    this.name = "MaterialConflictError";
+    this.currentUpdatedAt = currentUpdatedAt;
+  }
+}
 
 // ---------- Resolusi kepemilikan ----------
 
@@ -201,18 +147,27 @@ export const canReadCourseTree = async (
 
 export const createModule = async (
   courseId: number,
-  input: z.infer<typeof moduleInputSchema>
+  input: z.infer<typeof moduleInputSchema>,
+  actorId: number | null = null
 ) => {
-  const [header] = await db.insert(modules).values({
-    courseId,
-    title: input.title,
-    description: input.description ?? null,
-    type: input.type,
-    position: input.position,
+  return db.transaction(async (tx) => {
+    const [header] = await tx.insert(modules).values({
+      courseId,
+      title: input.title,
+      description: input.description ?? null,
+      type: input.type,
+      position: input.position,
+    });
+    const id = Number((header as unknown as { insertId: number }).insertId);
+    await writeCurriculaAudit(tx, {
+      actorUserId: actorId,
+      action: "curriculum.module.create",
+      targetIdInt: id,
+      metadata: { moduleId: id, courseId, title: input.title },
+    });
+    const rows = await tx.select().from(modules).where(eq(modules.id, id)).limit(1);
+    return rows[0] ?? null;
   });
-  const id = Number((header as unknown as { insertId: number }).insertId);
-  const rows = await db.select().from(modules).where(eq(modules.id, id)).limit(1);
-  return rows[0] ?? null;
 };
 
 export const listModules = async (courseId: number) =>
@@ -223,28 +178,62 @@ export const getModule = async (moduleId: number) => {
   return rows[0] ?? null;
 };
 
-export const patchModule = async (moduleId: number, input: Record<string, unknown>) => {
-  await db.update(modules).set(input).where(eq(modules.id, moduleId));
+export const patchModule = async (
+  moduleId: number,
+  input: z.infer<typeof modulePatchSchema>,
+  actorId: number | null = null
+) => {
+  const patch: Partial<typeof modules.$inferInsert> = {};
+  if (input.title !== undefined) patch.title = input.title;
+  if (input.description !== undefined) patch.description = input.description;
+  if (input.type !== undefined) patch.type = input.type;
+  if (input.position !== undefined) patch.position = input.position;
+  await db.transaction(async (tx) => {
+    await tx.update(modules).set(patch).where(eq(modules.id, moduleId));
+    await writeCurriculaAudit(tx, {
+      actorUserId: actorId,
+      action: "curriculum.module.update",
+      targetIdInt: moduleId,
+      metadata: { moduleId, changed: Object.keys(patch) },
+    });
+  });
   return getModule(moduleId);
 };
 
-export const deleteModule = async (moduleId: number) => {
-  await db.delete(modules).where(eq(modules.id, moduleId));
+export const deleteModule = async (moduleId: number, actorId: number | null = null) => {
+  await db.transaction(async (tx) => {
+    await writeCurriculaAudit(tx, {
+      actorUserId: actorId,
+      action: "curriculum.module.delete",
+      targetIdInt: moduleId,
+      metadata: { moduleId },
+    });
+    await tx.delete(modules).where(eq(modules.id, moduleId));
+  });
 };
 
 export const createSubModule = async (
   moduleId: number,
-  input: z.infer<typeof subModuleInputSchema>
+  input: z.infer<typeof subModuleInputSchema>,
+  actorId: number | null = null
 ) => {
-  const [header] = await db.insert(subModules).values({
-    moduleId,
-    title: input.title,
-    description: input.description ?? null,
-    position: input.position,
+  return db.transaction(async (tx) => {
+    const [header] = await tx.insert(subModules).values({
+      moduleId,
+      title: input.title,
+      description: input.description ?? null,
+      position: input.position,
+    });
+    const id = Number((header as unknown as { insertId: number }).insertId);
+    await writeCurriculaAudit(tx, {
+      actorUserId: actorId,
+      action: "curriculum.submodule.create",
+      targetIdInt: id,
+      metadata: { subModuleId: id, moduleId, title: input.title },
+    });
+    const rows = await tx.select().from(subModules).where(eq(subModules.id, id)).limit(1);
+    return rows[0] ?? null;
   });
-  const id = Number((header as unknown as { insertId: number }).insertId);
-  const rows = await db.select().from(subModules).where(eq(subModules.id, id)).limit(1);
-  return rows[0] ?? null;
 };
 
 export const listSubModules = async (moduleId: number) =>
@@ -255,12 +244,28 @@ export const getSubModule = async (subId: number) => {
   return rows[0] ?? null;
 };
 
-export const patchSubModule = async (subId: number, input: Record<string, unknown>) => {
-  await db.update(subModules).set(input).where(eq(subModules.id, subId));
+export const patchSubModule = async (
+  subId: number,
+  input: z.infer<typeof subModulePatchSchema>,
+  actorId: number | null = null
+) => {
+  const patch: Partial<typeof subModules.$inferInsert> = {};
+  if (input.title !== undefined) patch.title = input.title;
+  if (input.description !== undefined) patch.description = input.description;
+  if (input.position !== undefined) patch.position = input.position;
+  await db.transaction(async (tx) => {
+    await tx.update(subModules).set(patch).where(eq(subModules.id, subId));
+    await writeCurriculaAudit(tx, {
+      actorUserId: actorId,
+      action: "curriculum.submodule.update",
+      targetIdInt: subId,
+      metadata: { subModuleId: subId, changed: Object.keys(patch) },
+    });
+  });
   return getSubModule(subId);
 };
 
-export const deleteSubModule = async (subId: number) => {
+export const deleteSubModule = async (subId: number, actorId: number | null = null) => {
   // Hapus materi di dalamnya dulu agar sesuai janji UI
   // ("beserta N materi di dalamnya akan dihapus").
   // Baris progres/kuis/pengumpulan ikut terhapus via FK cascade.
@@ -269,32 +274,49 @@ export const deleteSubModule = async (subId: number) => {
     .from(materials)
     .where(eq(materials.subModuleId, subId));
   for (const k of kids) {
-    await deleteMaterial(k.id);
+    await deleteMaterial(k.id, actorId);
   }
-  await db.delete(subModules).where(eq(subModules.id, subId));
+  await db.transaction(async (tx) => {
+    await writeCurriculaAudit(tx, {
+      actorUserId: actorId,
+      action: "curriculum.submodule.delete",
+      targetIdInt: subId,
+      metadata: { subModuleId: subId, materialCount: kids.length },
+    });
+    await tx.delete(subModules).where(eq(subModules.id, subId));
+  });
 };
 
 export const createMaterial = async (
   subId: number | null,
   moduleId: number,
-  input: z.infer<typeof materialInputSchema>
+  input: z.infer<typeof materialInputSchema>,
+  actorId: number | null = null
 ) => {
   assertValidTiptap(input.content);
-  const [header] = await db.insert(materials).values({
-    moduleId,
-    subModuleId: subId,
-    title: input.title,
-    type: input.type,
-    duration: input.duration ?? null,
-    content: input.content,
-    contentSchemaVersion: input.contentSchemaVersion ?? 1,
-    // Ambang kuis; default 70 selaras default database bila tidak diisi.
-    passScore: input.passScore ?? 70,
-    position: input.position,
+  return db.transaction(async (tx) => {
+    const [header] = await tx.insert(materials).values({
+      moduleId,
+      subModuleId: subId,
+      title: input.title,
+      type: input.type,
+      duration: input.duration ?? null,
+      content: input.content,
+      contentSchemaVersion: input.contentSchemaVersion ?? 1,
+      // Ambang kuis; default 70 selaras default database bila tidak diisi.
+      passScore: input.passScore ?? 70,
+      position: input.position,
+    });
+    const id = Number((header as unknown as { insertId: number }).insertId);
+    await writeCurriculaAudit(tx, {
+      actorUserId: actorId,
+      action: "curriculum.material.create",
+      targetIdInt: id,
+      metadata: { materialId: id, moduleId, subModuleId: subId, type: input.type },
+    });
+    const rows = await tx.select().from(materials).where(eq(materials.id, id)).limit(1);
+    return rows[0] ?? null;
   });
-  const id = Number((header as unknown as { insertId: number }).insertId);
-  const rows = await db.select().from(materials).where(eq(materials.id, id)).limit(1);
-  return rows[0] ?? null;
 };
 
 export const listMaterialsBySub = async (subId: number) =>
@@ -308,12 +330,87 @@ export const getMaterial = async (materialId: number) => {
   return rows[0] ?? null;
 };
 
-export const patchMaterial = async (materialId: number, input: Record<string, unknown>) => {
+export const patchMaterial = async (
+  materialId: number,
+  input: z.infer<typeof materialPatchSchema>,
+  actorId: number | null = null
+) => {
   if (typeof input.content === "string") assertValidTiptap(input.content);
-  await db.update(materials).set(input).where(eq(materials.id, materialId));
+  const { expectedUpdatedAt, changeSignificance, changeReason, ...rest } = input;
+  // Allowlist eksplisit: cegah mass-assignment (mis. moduleId/subModuleId liar).
+  const patch: Partial<typeof materials.$inferInsert> = {};
+  if (rest.title !== undefined) patch.title = rest.title;
+  if (rest.type !== undefined) patch.type = rest.type;
+  if (rest.duration !== undefined) patch.duration = rest.duration;
+  if (rest.content !== undefined) patch.content = rest.content;
+  if (rest.contentSchemaVersion !== undefined) patch.contentSchemaVersion = rest.contentSchemaVersion;
+  if (rest.passScore !== undefined) patch.passScore = rest.passScore;
+  if (rest.position !== undefined) patch.position = rest.position;
+  const current = await getMaterial(materialId);
+  if (expectedUpdatedAt !== undefined && current) {
+    const clientTs = Math.floor(new Date(expectedUpdatedAt).getTime() / 1000);
+    const serverTs = Math.floor(new Date(current.updatedAt as unknown as string).getTime() / 1000);
+    if (!Number.isFinite(clientTs) || clientTs !== serverTs) {
+      throw new MaterialConflictError(
+        current.updatedAt ? new Date(current.updatedAt as unknown as string).toISOString() : null
+      );
+    }
+  }
+  await db.transaction(async (tx) => {
+    if (Object.keys(patch).length > 0) {
+      await tx.update(materials).set(patch).where(eq(materials.id, materialId));
+      await writeCurriculaAudit(tx, {
+        actorUserId: actorId,
+        action: "curriculum.material.update",
+        targetIdInt: materialId,
+        metadata: {
+          materialId,
+          changed: Object.keys(patch),
+          ...(changeSignificance !== undefined ? { significance: changeSignificance } : {}),
+          ...(changeReason !== undefined && changeReason !== "" ? { reason: changeReason } : {}),
+        },
+      });
+    }
+  });
   return getMaterial(materialId);
 };
 
-export const deleteMaterial = async (materialId: number) => {
-  await db.delete(materials).where(eq(materials.id, materialId));
+/**
+ * Riwayat perubahan satu materi dari audit resmi (K-08).
+ * Tanpa migrasi: memakai baris audit `curriculum.*` yang menarget materi ini.
+ */
+export const listMaterialChanges = async (
+  materialId: number,
+  limit = 20
+) => {
+  const lim = Math.min(Math.max(limit, 1), 100);
+  const rows = await db
+    .select({
+      id: auditLogs.id,
+      action: auditLogs.action,
+      actorUserId: auditLogs.actorUserId,
+      actorName: users.name,
+      metadata: auditLogs.metadata,
+      createdAt: auditLogs.createdAt,
+    })
+    .from(auditLogs)
+    .leftJoin(users, eq(users.id, auditLogs.actorUserId))
+    .where(
+      and(eq(auditLogs.targetType, "curriculum"), eq(auditLogs.targetIdInt, materialId))
+    )
+    .orderBy(desc(auditLogs.id))
+    .limit(lim);
+  return rows;
+};
+
+export const deleteMaterial = async (materialId: number, actorId: number | null = null) => {
+  await db.transaction(async (tx) => {
+    await writeCurriculaAudit(tx, {
+      actorUserId: actorId,
+      action: "curriculum.material.delete",
+      targetIdInt: materialId,
+      metadata: { materialId },
+    });
+    await tx.delete(materials).where(eq(materials.id, materialId));
+  });
 };

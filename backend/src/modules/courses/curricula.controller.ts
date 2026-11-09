@@ -27,9 +27,12 @@ import {
   getCourseOfSubModule,
   getCourseOfMaterial,
   canReadCourseTree,
+  listMaterialChanges,
+  MaterialConflictError,
 } from "./curricula.service";
+import { TiptapValidationError } from "../../utils/tiptap-guard";
 import { canManageCourse } from "./course.service";
-import { hasCourseAccess } from "../enrollments/enrollment.service";
+import { hasCourseAccess, isPeriodLockedForLearning } from "../enrollments/enrollment.service";
 
 const toFieldErrors = (
   issues: Array<{ path: Array<string | number>; message: string }>
@@ -41,14 +44,17 @@ const stripMaterialContent = <T extends { content?: unknown }>(mat: T): T => ({
   content: null,
 });
 
-/** Hak akses belajar peminta untuk satu kursus (admin/pengelola/enrollment aktif). */
+/** Hak akses belajar peminta untuk satu kursus (admin/pengelola/enrollment aktif),
+ * ditambah batch sudah berjalan (upcoming hanya pratinjau pengelola). */
 const checkLearningAccess = async (
   req: AuthenticatedRequest,
   courseId: number
 ): Promise<boolean> => {
   const userId = uid(req);
   if (userId === null) return false;
-  return hasCourseAccess(userId, req.user?.role ?? "", courseId);
+  const role = req.user?.role ?? "";
+  if (!(await hasCourseAccess(userId, role, courseId))) return false;
+  return !(await isPeriodLockedForLearning(userId, role, courseId));
 };
 
 /** 403 terstandar untuk peminta terautentikasi tanpa hak akses kursus. */
@@ -113,13 +119,14 @@ export const createModuleHandler = async (req: AuthenticatedRequest, res: Respon
   try {
     const courseId = Number(req.params.courseId);
     if (!Number.isInteger(courseId) || courseId <= 0) return fail(res, "not-found");
-    if ((await guardWrite(req, res, courseId)) === null) return;
+    const actorId = await guardWrite(req, res, courseId);
+    if (actorId === null) return;
     const parsed = moduleInputSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ status: "error", message: "Data modul tidak valid", errors: toFieldErrors(parsed.error.issues), data: null });
       return;
     }
-    const mod = await createModule(courseId, parsed.data);
+    const mod = await createModule(courseId, parsed.data, actorId);
     res.status(201).json({ status: "success", message: "Modul dibuat", data: mod });
   } catch (e) { next(e); }
 };
@@ -150,13 +157,14 @@ export const patchModuleHandler = async (req: AuthenticatedRequest, res: Respons
     const mid = Number(req.params.mid);
     if (!Number.isInteger(mid) || mid <= 0) return fail(res, "not-found");
     const courseId = await getCourseOfModule(mid);
-    if ((await guardWrite(req, res, courseId)) === null) return;
+    const actorId = await guardWrite(req, res, courseId);
+    if (actorId === null) return;
     const parsed = modulePatchSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ status: "error", message: "Data modul tidak valid", errors: toFieldErrors(parsed.error.issues), data: null });
       return;
     }
-    res.status(200).json({ status: "success", message: "Modul diubah", data: await patchModule(mid, parsed.data) });
+    res.status(200).json({ status: "success", message: "Modul diubah", data: await patchModule(mid, parsed.data, actorId) });
   } catch (e) { next(e); }
 };
 
@@ -165,8 +173,9 @@ export const deleteModuleHandler = async (req: AuthenticatedRequest, res: Respon
     const mid = Number(req.params.mid);
     if (!Number.isInteger(mid) || mid <= 0) return fail(res, "not-found");
     const courseId = await getCourseOfModule(mid);
-    if ((await guardWrite(req, res, courseId)) === null) return;
-    await deleteModule(mid);
+    const actorId = await guardWrite(req, res, courseId);
+    if (actorId === null) return;
+    await deleteModule(mid, actorId);
     res.status(200).json({ status: "success", message: "Modul dihapus", data: null });
   } catch (e) { next(e); }
 };
@@ -177,14 +186,15 @@ export const createSubModuleHandler = async (req: AuthenticatedRequest, res: Res
     const mid = Number(req.params.mid);
     if (!Number.isInteger(mid) || mid <= 0) return fail(res, "not-found");
     const courseId = await getCourseOfModule(mid);
-    if ((await guardWrite(req, res, courseId)) === null) return;
+    const actorId = await guardWrite(req, res, courseId);
+    if (actorId === null) return;
     if (!(await getModule(mid))) return fail(res, "not-found");
     const parsed = subModuleInputSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ status: "error", message: "Data sub-modul tidak valid", errors: toFieldErrors(parsed.error.issues), data: null });
       return;
     }
-    const sub = await createSubModule(mid, parsed.data);
+    const sub = await createSubModule(mid, parsed.data, actorId);
     res.status(201).json({ status: "success", message: "Sub-modul dibuat", data: sub });
   } catch (e) { next(e); }
 };
@@ -216,13 +226,14 @@ export const patchSubModuleHandler = async (req: AuthenticatedRequest, res: Resp
     const sid = Number(req.params.sid);
     if (!Number.isInteger(sid) || sid <= 0) return fail(res, "not-found");
     const courseId = await getCourseOfSubModule(sid);
-    if ((await guardWrite(req, res, courseId)) === null) return;
+    const actorId = await guardWrite(req, res, courseId);
+    if (actorId === null) return;
     const parsed = subModulePatchSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ status: "error", message: "Data sub-modul tidak valid", errors: toFieldErrors(parsed.error.issues), data: null });
       return;
     }
-    res.status(200).json({ status: "success", message: "Sub-modul diubah", data: await patchSubModule(sid, parsed.data) });
+    res.status(200).json({ status: "success", message: "Sub-modul diubah", data: await patchSubModule(sid, parsed.data, actorId) });
   } catch (e) { next(e); }
 };
 
@@ -231,8 +242,9 @@ export const deleteSubModuleHandler = async (req: AuthenticatedRequest, res: Res
     const sid = Number(req.params.sid);
     if (!Number.isInteger(sid) || sid <= 0) return fail(res, "not-found");
     const courseId = await getCourseOfSubModule(sid);
-    if ((await guardWrite(req, res, courseId)) === null) return;
-    await deleteSubModule(sid);
+    const actorId = await guardWrite(req, res, courseId);
+    if (actorId === null) return;
+    await deleteSubModule(sid, actorId);
     res.status(200).json({ status: "success", message: "Sub-modul dihapus", data: null });
   } catch (e) { next(e); }
 };
@@ -243,7 +255,8 @@ export const createMaterialHandler = async (req: AuthenticatedRequest, res: Resp
     const sid = Number(req.params.sid);
     if (!Number.isInteger(sid) || sid <= 0) return fail(res, "not-found");
     const courseId = await getCourseOfSubModule(sid);
-    if ((await guardWrite(req, res, courseId)) === null) return;
+    const actorId = await guardWrite(req, res, courseId);
+    if (actorId === null) return;
     const sub = await getSubModule(sid);
     if (!sub) return fail(res, "not-found");
     const parsed = materialInputSchema.safeParse(req.body);
@@ -252,10 +265,10 @@ export const createMaterialHandler = async (req: AuthenticatedRequest, res: Resp
       return;
     }
     try {
-      const mat = await createMaterial(sid, sub.moduleId, parsed.data);
+      const mat = await createMaterial(sid, sub.moduleId, parsed.data, actorId);
       res.status(201).json({ status: "success", message: "Materi dibuat", data: mat });
     } catch (err) {
-      if (err instanceof Error && /Tiptap|dokumen|base64|URL|node|mark|MB/i.test(err.message)) {
+      if (err instanceof TiptapValidationError) {
         res.status(400).json({ status: "error", message: err.message, data: null });
         return;
       }
@@ -321,18 +334,28 @@ export const patchMaterialHandler = async (req: AuthenticatedRequest, res: Respo
     const matId = Number(req.params.matId);
     if (!Number.isInteger(matId) || matId <= 0) return fail(res, "not-found");
     const courseId = await getCourseOfMaterial(matId);
-    if ((await guardWrite(req, res, courseId)) === null) return;
+    const actorId = await guardWrite(req, res, courseId);
+    if (actorId === null) return;
     const parsed = materialPatchSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ status: "error", message: "Data materi tidak valid", errors: toFieldErrors(parsed.error.issues), data: null });
       return;
     }
     try {
-      const mat = await patchMaterial(matId, parsed.data as Record<string, unknown>);
+      const mat = await patchMaterial(matId, parsed.data, actorId);
       res.status(200).json({ status: "success", message: "Materi diubah", data: mat });
     } catch (err) {
-      if (err instanceof Error && /Tiptap|dokumen|base64|URL|node|mark|MB/i.test(err.message)) {
+      if (err instanceof TiptapValidationError) {
         res.status(400).json({ status: "error", message: err.message, data: null });
+        return;
+      }
+      if (err instanceof MaterialConflictError) {
+        res.status(409).json({
+          status: "error",
+          message: err.message,
+          code: "MATERIAL_CONFLICT",
+          data: { currentUpdatedAt: err.currentUpdatedAt },
+        });
         return;
       }
       throw err;
@@ -345,8 +368,27 @@ export const deleteMaterialHandler = async (req: AuthenticatedRequest, res: Resp
     const matId = Number(req.params.matId);
     if (!Number.isInteger(matId) || matId <= 0) return fail(res, "not-found");
     const courseId = await getCourseOfMaterial(matId);
-    if ((await guardWrite(req, res, courseId)) === null) return;
-    await deleteMaterial(matId);
+    const actorId = await guardWrite(req, res, courseId);
+    if (actorId === null) return;
+    await deleteMaterial(matId, actorId);
     res.status(200).json({ status: "success", message: "Materi dihapus", data: null });
+  } catch (e) { next(e); }
+};
+
+// Riwayat perubahan resmi satu materi dari audit (K-08) — pengelola kursus saja.
+export const listMaterialChangesHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const matId = Number(req.params.matId);
+    if (!Number.isInteger(matId) || matId <= 0) return fail(res, "not-found");
+    const courseId = await getCourseOfMaterial(matId);
+    const actorId = await guardWrite(req, res, courseId);
+    if (actorId === null) return;
+    const q = req.query;
+    const limit = typeof q.limit === "string" && /^\d+$/.test(q.limit) ? Number(q.limit) : undefined;
+    res.status(200).json({
+      status: "success",
+      message: "Riwayat perubahan materi",
+      data: await listMaterialChanges(matId, limit),
+    });
   } catch (e) { next(e); }
 };
