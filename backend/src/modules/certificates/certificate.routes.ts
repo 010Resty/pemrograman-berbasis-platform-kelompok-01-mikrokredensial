@@ -2,6 +2,7 @@ import { Router } from "express";
 import { authenticate, requireRole } from "../../middlewares/auth.middleware";
 import { authOtpLimiter, publicReadLimiter } from "../../middlewares/rate-limit.middleware";
 import {
+  claimCourseHandler,
   downloadHandler,
   eligibilityHandler,
   globalEligibilityDetailHandler,
@@ -12,8 +13,11 @@ import {
   issueHandler,
   moduleCertificateStatusHandler,
   myCertificatesHandler,
+  mySignatureHandler,
   myStatusHandler,
+  removeSignatureHandler,
   revokeHandler,
+  setSignatureHandler,
   verifyHandler,
   verifyQrHandler,
 } from "./certificate.controller";
@@ -23,6 +27,7 @@ const manage = [authenticate, requireRole("teacher", "admin")];
 
 // Penerbitan + milik sendiri (peserta berhak akses).
 router.post("/modules/:id/certificate", authenticate, issueHandler);
+router.post("/courses/:id/certificate", authenticate, claimCourseHandler);
 router.get("/me/certificates", authenticate, myCertificatesHandler);
 router.get("/me/certificates/:id/download", authenticate, downloadHandler);
 router.get("/me/modules/:id/certificate-status", authenticate, myStatusHandler);
@@ -40,6 +45,10 @@ router.get("/instructor/certificates/summary", ...manage, instructorSummaryHandl
 router.get("/instructor/certificates", ...manage, instructorListHandler);
 router.get("/instructor/certificates/:certId", ...manage, instructorDetailHandler);
 router.post("/instructor/certificates/:certId/revoke", ...manage, revokeHandler);
+// Tanda tangan milik sendiri (instruktur/admin).
+router.get("/instructor/signature", ...manage, mySignatureHandler);
+router.post("/instructor/signature", ...manage, setSignatureHandler);
+router.delete("/instructor/signature", ...manage, removeSignatureHandler);
 router.get("/instructor/eligibility", ...manage, globalEligibilityHandler);
 router.get("/instructor/eligibility/:id", ...manage, globalEligibilityDetailHandler);
 router.get("/instructor/modules/:id/certificate-status", ...manage, moduleCertificateStatusHandler);

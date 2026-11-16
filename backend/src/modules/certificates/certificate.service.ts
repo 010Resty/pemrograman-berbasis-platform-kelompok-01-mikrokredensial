@@ -34,6 +34,7 @@ import { getBest } from "../quiz/quiz.service";
 import { getProgress } from "../progress/progress.service";
 import { getTaskStatus } from "../submissions/submission.service";
 import { hasCourseAccess } from "../enrollments/enrollment.service";
+import { getSignerSignaturePng, signatureUrlForCourse, signatureUrlsByCourse } from "./signature.service";
 
 // ---------- Skema input ----------
 
@@ -103,6 +104,8 @@ export interface PublicCertificate {
   moduleTitle: string | null;
   /** Nama instruktur utama kursus (untuk blok tanda tangan). Opsional. */
   instructorName?: string | null;
+  /** URL gambar tanda tangan instruktur utama (null = fallback nama diketik). */
+  signatureUrl?: string | null;
   /** issued | revoked | superseded (digantikan sertifikat kursus). */
   status: string;
   issuedAt: Date;
@@ -144,7 +147,10 @@ const certWithTitles = async (certId: number): Promise<PublicCertificate | null>
     .leftJoin(modules, eq(modules.id, certificates.moduleId))
     .where(eq(certificates.id, certId))
     .limit(1);
-  return rows[0] ? toPublicCertificate(rows[0]) : null;
+  if (!rows[0]) return null;
+  const cert = toPublicCertificate(rows[0]);
+  cert.signatureUrl = await signatureUrlForCourse(cert.courseId);
+  return cert;
 };
 
 // ---------- Kelayakan ----------
@@ -693,6 +699,97 @@ export const tryAutoIssueCourse = async (
   }
 };
 
+/**
+ * Klaim manual sertifikat kursus (POST /courses/:id/certificate).
+ * Idempoten: sudah ada (non-revoked) → 200 istniej; revoked → 409.
+ * Belum layak → 403 NOT_ELIGIBLE + failReasons per modul (tidak ditelan).
+ * Dipakai memulihkan kasus sertifikat kursus tak terbit (mis. auto-issue
+ * lama gagal diam-diam sebelum perbaikan pemicu).
+ */
+export const claimCourseCertificate = async (
+  userId: number,
+  role: string,
+  courseId: number
+): Promise<IssueResult> => {
+  const courseRows = await db
+    .select({ id: courses.id })
+    .from(courses)
+    .where(eq(courses.id, courseId))
+    .limit(1);
+  if (!courseRows[0]) {
+    throw new CertificateError(404, "COURSE_NOT_FOUND", "Kursus tidak ditemukan");
+  }
+  const verdict = await canReadCourseTree(userId, role, courseId);
+  if (verdict !== "ok") {
+    throw new CertificateError(404, "COURSE_NOT_FOUND", "Kursus tidak ditemukan");
+  }
+  if (!(await hasCourseAccess(userId, role, courseId))) {
+    throw new CertificateError(403, "NO_ACCESS", "Anda tidak memiliki akses ke kursus ini");
+  }
+  const existing = await findCourseCert(userId, courseId);
+  if (existing && existing.status !== "revoked") {
+    const cert = await certWithTitles(existing.id);
+    if (!cert) throw new CertificateError(404, "CERT_NOT_FOUND", "Sertifikat tidak ditemukan");
+    return { certificate: cert, created: false };
+  }
+  if (existing && existing.status === "revoked") {
+    throw new CertificateError(
+      409,
+      "CERT_REVOKED",
+      "Sertifikat kursus ini telah dicabut dan tidak dapat diterbitkan ulang"
+    );
+  }
+  const mods = await db
+    .select({ id: modules.id, title: modules.title })
+    .from(modules)
+    .where(eq(modules.courseId, courseId));
+  const certifiable: Array<{ id: number; title: string }> = [];
+  for (const m of mods) {
+    const mats = await listMaterialsByModule(m.id);
+    if (mats.length > 0) certifiable.push(m);
+  }
+  if (certifiable.length === 0) {
+    throw new CertificateError(403, "NOT_ELIGIBLE", "Kursus ini belum memiliki modul bermateri", {
+      failReasons: ["Kursus belum memiliki modul bermateri"],
+      requirements: [],
+    });
+  }
+  const certRows = await db
+    .select({ moduleId: certificates.moduleId })
+    .from(certificates)
+    .where(
+      and(
+        eq(certificates.userId, userId),
+        eq(certificates.courseId, courseId),
+        isNotNull(certificates.moduleId),
+        eq(certificates.status, "issued")
+      )
+    );
+  const issuedSet = new Set(certRows.map((c) => c.moduleId));
+  const missing = certifiable.filter((m) => !issuedSet.has(m.id));
+  if (missing.length > 0) {
+    const failReasons = missing.map((m) => `Modul belum bersertifikat: ${m.title}`);
+    throw new CertificateError(
+      403,
+      "NOT_ELIGIBLE",
+      `Belum memenuhi syarat sertifikat kursus: ${failReasons[0]}`,
+      { failReasons, requirements: missing.map((m) => ({ moduleId: m.id, title: m.title })) }
+    );
+  }
+  const auto = await tryAutoIssueCourse(userId, courseId);
+  const finalCert = await findCourseCert(userId, courseId);
+  if (!finalCert) {
+    throw new CertificateError(
+      500,
+      "ISSUE_FAILED",
+      "Penerbitan sertifikat kursus gagal. Coba lagi atau hubungi admin."
+    );
+  }
+  const cert = await certWithTitles(finalCert.id);
+  if (!cert) throw new CertificateError(404, "CERT_NOT_FOUND", "Sertifikat tidak ditemukan");
+  return { certificate: cert, created: auto.issued };
+};
+
 // ---------- Daftar milik sendiri ----------
 
 export const listMyCertificates = async (
@@ -722,9 +819,13 @@ export const listMyCertificates = async (
     )
     .orderBy(desc(certificates.issuedAt), desc(certificates.id));
   const certs = rows.map(toPublicCertificate);
-  // Nama instruktur per kursus (batch per courseId, bukan N+1 per baris).
+  // Nama instruktur + URL tanda tangan per kursus (batch per courseId, bukan N+1 per baris).
   const names = await instructorNamesByCourse([...new Set(certs.map((c) => c.courseId))]);
-  for (const c of certs) c.instructorName = names.get(c.courseId) ?? null;
+  const sigUrls = await signatureUrlsByCourse(certs.map((c) => c.courseId));
+  for (const c of certs) {
+    c.instructorName = names.get(c.courseId) ?? null;
+    c.signatureUrl = sigUrls.get(c.courseId) ?? null;
+  }
   return certs;
 };
 
@@ -829,13 +930,14 @@ export const downloadCertificatePdf = async (
   if (!cert) {
     throw new CertificateError(404, "CERT_NOT_FOUND", "Sertifikat tidak ditemukan");
   }
-  const [holder, instructorName] = await Promise.all([
+  const [holder, instructorName, signaturePng] = await Promise.all([
     db
       .select({ email: users.email })
       .from(users)
       .where(eq(users.id, row.userId))
       .limit(1),
     primaryInstructorName(row.courseId),
+    getSignerSignaturePng(row.courseId),
   ]);
   const data: CertificatePdfData = {
     code: cert.code,
@@ -844,6 +946,7 @@ export const downloadCertificatePdf = async (
     courseTitle: cert.courseTitle,
     moduleTitle: cert.moduleTitle,
     instructorName,
+    signaturePng,
     issuedAt: cert.issuedAt,
     verifyUrl: verifyUrlFor(cert.code),
   };
@@ -864,6 +967,8 @@ export interface PublicVerification {
   moduleTitle: string | null;
   /** Nama instruktur utama kursus (untuk blok tanda tangan). */
   instructorName: string | null;
+  /** URL gambar tanda tangan instruktur utama (null = fallback nama diketik). */
+  signatureUrl: string | null;
   /** issued | revoked | superseded (lihat revokeReason untuk pengganti). */
   status: string;
   issuedAt: Date;
@@ -906,6 +1011,7 @@ export const verifyCertificate = async (
     courseTitle: row.courseTitle,
     moduleTitle: row.moduleTitle,
     instructorName: await primaryInstructorName(row.courseId),
+    signatureUrl: await signatureUrlForCourse(row.courseId),
     status: row.status,
     issuedAt: row.issuedAt,
     revokedAt: row.revokedAt,
@@ -967,6 +1073,8 @@ export interface InstructorCertificateItem {
   id: number;
   code: string;
   studentName: string;
+  /** URL foto profil peserta atau null (relatif server, publik). */
+  studentAvatarUrl: string | null;
   printedName: string;
   /** Nama snapshot (kompatibel lama). */
   recipientName: string;
@@ -986,6 +1094,7 @@ const toInstructorItem = (row: {
   code: string;
   recipientName: string;
   studentName: string;
+  studentAvatarFileId?: number | null;
   courseId: number;
   courseTitle: string;
   moduleId: number | null;
@@ -998,6 +1107,9 @@ const toInstructorItem = (row: {
   id: row.id,
   code: row.code,
   studentName: row.studentName,
+  studentAvatarUrl: row.studentAvatarFileId
+    ? `/api/v1/files/${row.studentAvatarFileId}/content`
+    : null,
   printedName: row.recipientName,
   recipientName: row.recipientName,
   courseId: row.courseId,
@@ -1103,6 +1215,7 @@ export const listCertificates = async (
       code: certificates.code,
       recipientName: certificates.recipientName,
       studentName: users.name,
+      studentAvatarFileId: users.avatarFileId,
       courseId: certificates.courseId,
       courseTitle: courses.title,
       moduleId: certificates.moduleId,
@@ -1167,6 +1280,7 @@ export const getCertificateDetail = async (
       code: certificates.code,
       recipientName: certificates.recipientName,
       studentName: users.name,
+      studentAvatarFileId: users.avatarFileId,
       courseId: certificates.courseId,
       courseTitle: courses.title,
       moduleId: certificates.moduleId,
@@ -1257,6 +1371,7 @@ export const revokeCertificate = async (
       code: certificates.code,
       recipientName: certificates.recipientName,
       studentName: users.name,
+      studentAvatarFileId: users.avatarFileId,
       courseId: certificates.courseId,
       courseTitle: courses.title,
       moduleId: certificates.moduleId,
@@ -1287,6 +1402,8 @@ export type ParticipantEligibilityStatus =
 export interface ParticipantEligibility {
   userId: number;
   studentName: string;
+  /** URL foto profil peserta atau null (relatif server, publik). */
+  studentAvatarUrl: string | null;
   email: string;
   status: ParticipantEligibilityStatus;
   certStatus: string | null;
@@ -1325,6 +1442,7 @@ export const listModuleEligibility = async (
       status: enrollments.status,
       name: users.name,
       email: users.email,
+      avatarFileId: users.avatarFileId,
     })
     .from(enrollments)
     .innerJoin(users, eq(users.id, enrollments.userId))
@@ -1469,6 +1587,7 @@ export const listModuleEligibility = async (
     out.push({
       userId: p.userId,
       studentName: p.name,
+      studentAvatarUrl: p.avatarFileId ? `/api/v1/files/${p.avatarFileId}/content` : null,
       email: p.email,
       status,
       certStatus,
@@ -1498,6 +1617,8 @@ export interface SummaryCourseRow {
 export interface RecentlyEligible {
   eligibilityId: string;
   studentName: string;
+  /** URL foto profil peserta atau null (relatif server, publik). */
+  studentAvatarUrl: string | null;
   courseTitle: string;
   moduleTitle: string;
 }
@@ -1624,6 +1745,7 @@ export const getCertificateSummary = async (
           recent.push({
             eligibilityId: `${m.id}:${e.userId}`,
             studentName: e.studentName,
+            studentAvatarUrl: e.studentAvatarUrl,
             courseTitle: titleByCourse.get(m.courseId) ?? "",
             moduleTitle: m.title,
           });
@@ -1724,6 +1846,8 @@ export type FrontendEligibilityStatus =
 export interface FrontendEligibilityEntry {
   id: string;
   studentName: string;
+  /** URL foto profil peserta atau null (relatif server, publik). */
+  studentAvatarUrl: string | null;
   nim: string | null;
   courseId: number;
   courseTitle: string;
@@ -1839,6 +1963,7 @@ export const listGlobalEligibility = async (
       out.push({
         id: `${m.id}:${e.userId}`,
         studentName: e.studentName,
+        studentAvatarUrl: e.studentAvatarUrl,
         nim: nimByUser.get(e.userId) ?? null,
         courseId: m.courseId,
         courseTitle: titleByCourse.get(m.courseId) ?? "",
@@ -1880,7 +2005,7 @@ export const getGlobalEligibilityDetail = async (
     throw new CertificateError(403, "NOT_MANAGER", "Bukan pengelola kursus tersebut");
   }
   const targetRows = await db
-    .select({ id: users.id, name: users.name })
+    .select({ id: users.id, name: users.name, avatarFileId: users.avatarFileId })
     .from(users)
     .where(eq(users.id, targetUserId))
     .limit(1);
@@ -1983,6 +2108,9 @@ export const getGlobalEligibilityDetail = async (
   return {
     id: `${moduleId}:${targetUserId}`,
     studentName: targetRows[0].name,
+    studentAvatarUrl: targetRows[0].avatarFileId
+      ? `/api/v1/files/${targetRows[0].avatarFileId}/content`
+      : null,
     nim: nimByUser.get(targetUserId) ?? null,
     courseId: mod.courseId,
     courseTitle: courseRows[0]?.title ?? "",

@@ -134,6 +134,43 @@ export function createUnauthorizedCoordinator() {
 	};
 }
 
+/** Pasangan token hasil refresh sesi. */
+export interface RefreshedTokens {
+	accessToken: string;
+	refreshToken: string;
+}
+
+/**
+ * Koordinator refresh sesi single-flight — murni dan testable.
+ * N pemanggil bersamaan berbagi satu Promise; gagal → null (tanpa melempar).
+ *
+ * Dipakai agar N respons 401 bersamaan hanya memicu SATU POST /auth/refresh:
+ * refresh token sekali pakai + deteksi pakai-ulang server akan mencabut
+ * semua sesi bila token yang sama dipakai dua kali.
+ */
+export function createRefreshCoordinator(
+	refreshFn: () => Promise<RefreshedTokens>
+): { refresh: () => Promise<RefreshedTokens | null> } {
+	let inFlight: Promise<RefreshedTokens | null> | null = null;
+	return {
+		refresh(): Promise<RefreshedTokens | null> {
+			if (inFlight) return inFlight;
+			const p: Promise<RefreshedTokens | null> = (async () => {
+				try {
+					return await refreshFn();
+				} catch {
+					return null;
+				}
+			})();
+			inFlight = p;
+			void p.finally(() => {
+				if (inFlight === p) inFlight = null;
+			});
+			return inFlight;
+		}
+	};
+}
+
 /** Jenis mutasi kursus untuk keputusan invalidasi cache. */
 export type CourseMutationKind =
 	| 'create-course'

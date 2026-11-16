@@ -1,5 +1,6 @@
 import authRoutes from "./modules/auth/auth.routes";
 import courseRoutes, { instructorRouter } from "./modules/courses/course.routes";
+import categoryRoutes from "./modules/categories/category.routes";
 import curriculaRoutes from "./modules/courses/curricula.routes";
 import progressRoutes from "./modules/progress/progress.routes";
 import quizRoutes from "./modules/quiz/quiz.routes";
@@ -67,7 +68,16 @@ app.use(morgan(":method :redacted-url :status :response-time ms - :res[content-l
 
 // Body parsing (batas JSON dinaikkan untuk transport unggahan base64;
 // validasi ukuran per-jenis tetap ditegakkan di modul uploads).
-app.use(express.json({ limit: "15mb" }));
+// `verify` menyimpan salinan byte mentah (dipakai verifikasi signature
+// webhook DOKU) tanpa mengubah perilaku parsing JSON yang sudah ada.
+app.use(
+  express.json({
+    limit: "15mb",
+    verify: (req, _res, buf) => {
+      (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+    },
+  })
+);
 app.use(express.urlencoded({ extended: true }));
 
 // Health check endpoint
@@ -85,6 +95,8 @@ app.use("/api/v1/auth", authRoutes);
 // Course catalog & management
 app.use("/api/v1/courses", courseRoutes);
 app.use("/api/v1/instructor/courses", instructorRouter);
+// Kategori kursus (publik: daftar aktif; admin: kelola)
+app.use("/api/v1", categoryRoutes);
 // Dashboard ringkasan instruktur (agregat database, tanpa data contoh)
 app.use("/api/v1/instructor/dashboard", dashboardRoutes);
 // Curriculum tree (modules / sub-modules / materials)

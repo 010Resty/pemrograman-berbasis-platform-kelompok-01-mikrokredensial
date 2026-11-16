@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import UiStatCard from '$lib/components/ui/StatCard.svelte';
+	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import { getCurrentUser } from '$lib/stores/auth.svelte';
 	import {
 		fetchInstructorDashboard,
@@ -261,9 +262,11 @@
 									href={`/instruktur/penilaian/${review.courseId}/${review.materialId}`}
 									class="flex items-center gap-3 px-6 py-4 transition-colors duration-200 ease-smooth hover:bg-slate-50/50 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600"
 								>
-									<div class="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-amber-50">
-										<i class="fa-solid fa-pen-to-square text-amber-600" aria-hidden="true"></i>
-									</div>
+									<UserAvatar
+										name={review.studentName}
+										avatarUrl={review.studentAvatarUrl ?? null}
+										rounded="rounded-xl"
+									/>
 									<div class="min-w-0 flex-1">
 										<h3 class="truncate text-sm font-semibold text-slate-800">{review.materialTitle}</h3>
 										<p class="mt-0.5 truncate text-xs text-slate-500">{review.studentName} · {review.courseTitle}</p>

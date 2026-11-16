@@ -3,6 +3,7 @@ import { z } from "zod";
 import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import {
   CertificateError,
+  claimCourseCertificate,
   downloadCertificatePdf,
   getCertificateDetail,
   getCertificateQr,
@@ -21,6 +22,14 @@ import {
   verifyCertificate,
   type ParticipantEligibilityStatus,
 } from "./certificate.service";
+import {
+  SignatureError,
+  getMySignature,
+  removeMySignature,
+  setMySignature,
+  setSignatureSchema,
+} from "./signature.service";
+import { SubmissionError } from "../submissions/submission.service";
 
 const uid = (req: AuthenticatedRequest): number | null => {
   const id = Number(req.user?.id);
@@ -41,7 +50,11 @@ const needAuth = (req: AuthenticatedRequest, res: Response): number | null => {
 };
 
 const certError = (res: Response, e: unknown): boolean => {
-  if (e instanceof CertificateError) {
+  if (
+    e instanceof CertificateError ||
+    e instanceof SignatureError ||
+    e instanceof SubmissionError
+  ) {
     const body: Record<string, unknown> = {
       status: "error",
       message: e.message,
@@ -49,10 +62,11 @@ const certError = (res: Response, e: unknown): boolean => {
       data: null,
     };
     if (e.http === 403 && e.code === "NOT_ELIGIBLE") {
-      body.failReasons =
-        (e.details as { failReasons?: string[] } | undefined)?.failReasons ?? [];
-      body.requirements =
-        (e.details as { requirements?: unknown } | undefined)?.requirements ?? [];
+      const details = (e as CertificateError).details as
+        | { failReasons?: string[]; requirements?: unknown }
+        | undefined;
+      body.failReasons = details?.failReasons ?? [];
+      body.requirements = details?.requirements ?? [];
     }
     res.status(e.http).json(body);
     return true;
@@ -648,6 +662,122 @@ export const globalEligibilityDetailHandler = async (
           req.user?.role ?? "",
           decodeURIComponent(id)
         ),
+      });
+    } catch (e) {
+      if (!certError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// GET /api/v1/instructor/signature — tanda tangan milik sendiri.
+export const mySignatureHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    try {
+      res.status(200).json({
+        status: "success",
+        message: "Tanda tangan saya",
+        data: await getMySignature(userId),
+      });
+    } catch (e) {
+      if (!certError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// POST /api/v1/instructor/signature — pasang/ganti tanda tangan ({fileId}).
+export const setSignatureHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    const parsed = setSignatureSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        status: "error",
+        message: "Data tanda tangan tidak valid",
+        errors: toFieldErrors(parsed.error.issues),
+        data: null,
+      });
+      return;
+    }
+    try {
+      const result = await setMySignature(userId, parsed.data.fileId);
+      res.status(200).json({
+        status: "success",
+        message: "Tanda tangan tersimpan.",
+        data: result,
+      });
+    } catch (e) {
+      if (!certError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// DELETE /api/v1/instructor/signature — lepas tanda tangan.
+export const removeSignatureHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    try {
+      res.status(200).json({
+        status: "success",
+        message: "Tanda tangan dilepas.",
+        data: await removeMySignature(userId),
+      });
+    } catch (e) {
+      if (!certError(res, e)) throw e;
+    }
+  } catch (e) {
+    next(e);
+  }
+};
+
+// POST /api/v1/courses/:id/certificate — klaim sertifikat kursus (idempoten).
+export const claimCourseHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    const courseId = Number(req.params.id);
+    if (!Number.isInteger(courseId) || courseId <= 0) {
+      res.status(404).json({
+        status: "error",
+        message: "Kursus tidak ditemukan",
+        code: "COURSE_NOT_FOUND",
+        data: null,
+      });
+      return;
+    }
+    try {
+      const result = await claimCourseCertificate(userId, req.user?.role ?? "", courseId);
+      res.status(result.created ? 201 : 200).json({
+        status: "success",
+        message: result.created
+          ? "Sertifikat kursus diterbitkan."
+          : "Sertifikat kursus sudah ada.",
+        data: result.certificate,
       });
     } catch (e) {
       if (!certError(res, e)) throw e;

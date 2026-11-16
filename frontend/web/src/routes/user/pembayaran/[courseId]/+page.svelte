@@ -1,33 +1,34 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
+	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import { env } from '$env/dynamic/public';
 	import { getCourseById } from '$lib/data/courses';
 	import { getCourseMeta } from '$lib/data/course-meta';
 	import { getTrainingStats } from '$lib/data/training';
 	import { formatIDR, parsePrice } from '$lib/data/payment';
-	import { canAccessCourse, isCoursePaid, syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
-	import { fetchCourseAccess } from '$lib/api/courses';
-	import { getAccessToken, getCurrentUser } from '$lib/stores/auth.svelte';
+	import { canAccessCourse, isCoursePaid, setServerCourseFlags, syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
+	import { fetchCourseAccess, fetchCourseDetail, type BackendCourse } from '$lib/api/courses';
+	import { getCurrentUser } from '$lib/stores/auth.svelte';
 	import {
-		attachPaymentProof,
+		cancelPayment,
 		createPayment,
 		fetchMyPayment,
+		fetchPaymentQr,
+		markMyPaymentsSeen,
+		refreshDokuQr,
 		validateDiscountVoucher,
 		type MyPayment
 	} from '$lib/api/payments';
 	import { fetchCoursePromo, type CoursePromoQuote } from '$lib/api/promos';
+	import WarningModal from '$lib/components/WarningModal.svelte';
 
 	const courseId = $derived(Number(page.params.courseId));
 	const course = $derived(getCourseById(courseId));
 	const meta = $derived(course ? getCourseMeta(course.id) : undefined);
 	const stats = $derived(course ? getTrainingStats(course) : undefined);
 
-	/** QRIS statis platform (dikonfigurasi via env `PUBLIC_QRIS_IMAGE_URL`). */
-	const qrisUrl = (env.PUBLIC_QRIS_IMAGE_URL ?? '').trim();
-
-	type Stage = 'checkout' | 'instruction' | 'verifying' | 'success';
+	type Stage = 'checkout' | 'instruction' | 'success';
 	let stage = $state<Stage>('checkout');
 
 	// Data peserta (terisi otomatis dari sesi login — WCAG 3.3.7 hindari entri berulang)
@@ -53,12 +54,15 @@
 	let creatingPayment = $state(false);
 	let lastRejection = $state<{ reason: string } | null>(null);
 
-	// Bukti bayar (gambar saja, maks 5 MB — sesuai backend)
-	let proofFile = $state<File | null>(null);
-	let proofPreview = $state<string | null>(null);
-	let uploadingProof = $state(false);
-	let proofError = $state('');
+	// QRIS dinamis DOKU (PNG dari server, nominal tampil otomatis saat dipindai)
+	let qrUrl = $state<string | null>(null);
+	let qrLoading = $state(false);
+	let qrError = $state('');
+	let refreshingQr = $state(false);
+	// Detik berjalan untuk hitung mundur kedaluwarsa QR.
+	let nowTs = $state(Date.now());
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
+	let tickTimer: ReturnType<typeof setInterval> | null = null;
 
 	// Status akses menurut server — null = belum diperiksa.
 	let serverAccess = $state<boolean | null>(null);
@@ -66,7 +70,13 @@
 
 	let headingEl = $state<HTMLElement | null>(null);
 
-	const price = $derived(meta ? parsePrice(meta.price) : 0);
+	/** Detail kursus dari server (sumber kebenaran harga; fallback ke meta statis bila offline). */
+	let serverCourse = $state<BackendCourse | null>(null);
+
+	/** Harga: utamakan `priceNominal` server; meta statis hanya fallback. */
+	const price = $derived(
+		serverCourse ? Math.max(0, serverCourse.priceNominal ?? 0) : meta ? parsePrice(meta.price) : 0
+	);
 	const voucherDiscount = $derived(appliedVoucher?.discountAmount ?? 0);
 	const promoDiscount = $derived(
 		promoQuote ? Math.min(price, Math.floor((price * promoQuote.discountPercent) / 100)) : 0
@@ -78,7 +88,10 @@
 	/** Total otoritatif: pakai server setelah antrean dibuat (mencerminkan promo/voucher pemenang). */
 	const displayTotal = $derived(payment ? payment.amountExpected : total);
 	const paid = $derived(course ? canAccessCourse(course.id) : false);
-	const isPaidCourse = $derived(course ? isCoursePaid(course.id) : false);
+	/** Berbayar: utamakan `priceNominal` server agar selaras dengan katalog; meta statis hanya fallback. */
+	const isPaidCourse = $derived(
+		serverCourse ? (serverCourse.priceNominal ?? 0) > 0 : course ? isCoursePaid(course.id) : false
+	);
 	const invoice = $derived(payment?.invoice ?? '');
 	/** Waktu pembayaran: verifikasi admin bila sudah lunas, sonst pengajuan. */
 	const paidAt = $derived(
@@ -108,6 +121,16 @@
 		void fetchCoursePromo(course.id).then((q) => {
 			promoQuote = q;
 		});
+		// Harga server sebagai kebenaran (perbaiki total 0 bila meta statis GRATIS tapi server berbayar).
+		void fetchCourseDetail(course.id)
+			.then((d) => {
+				serverCourse = d;
+				setServerCourseFlags(course.id, {
+					paid: (d.priceNominal ?? 0) > 0,
+					upcoming: d.period === 'upcoming'
+				});
+			})
+			.catch(() => {});
 	});
 
 	async function restorePayment(): Promise<void> {
@@ -121,16 +144,29 @@
 			if (existing.status === 'diverifikasi') {
 				stage = 'success';
 				void refreshServerAccess();
+				void dismissPaymentNotice();
 			} else if (existing.status === 'ditolak') {
-				lastRejection = { reason: existing.rejectReason ?? 'Pengajuan ditolak.' };
+				lastRejection = { reason: existing.rejectReason ?? 'Pembayaran ditolak.' };
 				payment = null;
 				stage = 'checkout';
+				void dismissPaymentNotice();
 			} else {
-				stage = existing.proofFileId ? 'verifying' : 'instruction';
-				if (existing.proofFileId) startPolling();
+				stage = 'instruction';
+				void loadQr(false);
+				startPolling();
 			}
 		} catch {
 			// Abaikan: pengguna mulai dari checkout seperti biasa.
+		}
+	}
+
+	/** Keputusan yang dibaca di sini hilang dari bell (tidak menumpuk). */
+	async function dismissPaymentNotice(): Promise<void> {
+		try {
+			await markMyPaymentsSeen(courseId);
+			window.dispatchEvent(new CustomEvent('user:notif-refresh'));
+		} catch {
+			// Abaikan: bell disegarkan saat navigasi/interval berikutnya.
 		}
 	}
 
@@ -153,6 +189,10 @@
 			clearInterval(pollTimer);
 			pollTimer = null;
 		}
+		if (tickTimer !== null) {
+			clearInterval(tickTimer);
+			tickTimer = null;
+		}
 	}
 
 	function startPolling(): void {
@@ -160,11 +200,14 @@
 		pollTimer = setInterval(() => {
 			void checkPaymentStatus(false);
 		}, 5000);
+		tickTimer = setInterval(() => {
+			nowTs = Date.now();
+		}, 1000);
 	}
 
 	$effect(() => {
 		if (!browser) return;
-		if (stage === 'verifying') startPolling();
+		if (stage === 'instruction') startPolling();
 		else stopPolling();
 		return () => stopPolling();
 	});
@@ -177,13 +220,77 @@
 			payment = latest;
 			if (latest.status === 'diverifikasi') {
 				stopPolling();
+				revokeQrUrl();
 				stage = 'success';
 				void refreshServerAccess();
+				void dismissPaymentNotice();
+			} else if (latest.status === 'ditolak') {
+				stopPolling();
+				revokeQrUrl();
+				lastRejection = { reason: latest.rejectReason ?? 'Pembayaran ditolak.' };
+				payment = null;
+				stage = 'checkout';
+				void dismissPaymentNotice();
 			}
 		} catch {
 			if (manual) formError = 'Gagal memeriksa status. Coba lagi.';
 		}
 	}
+
+	function revokeQrUrl(): void {
+		if (qrUrl) URL.revokeObjectURL(qrUrl);
+		qrUrl = null;
+	}
+
+	/** Unduh PNG QR DOKU dari server → object URL untuk <img>. */
+	async function loadQr(silent: boolean): Promise<void> {
+		if (!payment || payment.status !== 'menunggu') return;
+		revokeQrUrl();
+		qrError = '';
+		qrLoading = true;
+		try {
+			const blob = await fetchPaymentQr(payment.id);
+			if (!browser) return;
+			revokeQrUrl();
+			qrUrl = URL.createObjectURL(blob);
+		} catch (e) {
+			qrError = e instanceof Error ? e.message : 'Gagal memuat QR. Coba lagi.';
+			if (!silent) formError = qrError;
+		} finally {
+			qrLoading = false;
+		}
+	}
+
+	/** Minta QR baru (kedaluwarsa/hilang) lalu muat ulang gambarnya. */
+	async function refreshQr(): Promise<void> {
+		if (!payment || refreshingQr) return;
+		refreshingQr = true;
+		qrError = '';
+		try {
+			payment = await refreshDokuQr(payment.id);
+			nowTs = Date.now();
+			await loadQr(true);
+		} catch (e) {
+			qrError = e instanceof Error ? e.message : 'Gagal memperbarui QR. Coba lagi.';
+		} finally {
+			refreshingQr = false;
+		}
+	}
+
+	/** Sisa waktu QR (dari dokuExpiresAt server). Null = tak diketahui. */
+	const qrRemainingMs = $derived.by(() => {
+		if (!payment?.dokuExpiresAt) return null;
+		const left = new Date(payment.dokuExpiresAt).getTime() - nowTs;
+		return left > 0 ? left : 0;
+	});
+	const qrRemainingLabel = $derived.by(() => {
+		if (qrRemainingMs === null) return '';
+		const s = Math.ceil(qrRemainingMs / 1000);
+		const m = Math.floor(s / 60);
+		const r = s % 60;
+		return `${String(m).padStart(2, '0')}:${String(r).padStart(2, '0')}`;
+	});
+	const qrExpired = $derived(qrRemainingMs !== null && qrRemainingMs <= 0);
 
 	async function applyVoucher(): Promise<void> {
 		voucherError = '';
@@ -237,10 +344,14 @@
 		creatingPayment = true;
 		try {
 			payment = await createPayment(course.id, {
+				gateway: 'doku',
 				voucherCode: appliedVoucher?.code
 			});
 			lastRejection = null;
+			qrError = '';
 			stage = 'instruction';
+			nowTs = Date.now();
+			void loadQr(false);
 		} catch (e) {
 			if (e instanceof Error && /voucher/i.test(e.message)) appliedVoucher = null;
 			formError = e instanceof Error ? e.message : 'Gagal membuat pengajuan pembayaran.';
@@ -249,82 +360,36 @@
 		}
 	}
 
-	function pickProof(file: File | undefined): void {
-		proofError = '';
-		if (proofPreview) URL.revokeObjectURL(proofPreview);
-		proofPreview = null;
-		proofFile = null;
-		if (!file) return;
-		const okType = ['image/jpeg', 'image/png', 'image/webp'].includes(file.type);
-		const okExt = /\.(jpe?g|png|webp)$/i.test(file.name);
-		if (!okType && !okExt) {
-			proofError = 'Bukti harus berupa gambar (JPG/PNG/WebP).';
-			return;
-		}
-		if (file.size > 5 * 1024 * 1024) {
-			proofError = 'Ukuran gambar melebihi 5 MB.';
-			return;
-		}
-		if (file.size === 0) {
-			proofError = 'Berkas kosong.';
-			return;
-		}
-		proofFile = file;
-		proofPreview = URL.createObjectURL(file);
-	}
-
-	async function uploadProof(file: File): Promise<{ id: number }> {
-		const fd = new FormData();
-		fd.append('file', file, file.name);
-		const token = getAccessToken();
-		const res = await fetch('/api/payments/proof', {
-			method: 'POST',
-			headers: token ? { Authorization: `Bearer ${token}` } : {},
-			body: fd
-		});
-		const json = (await res.json().catch(() => null)) as {
-			status?: boolean;
-			message?: string;
-			data?: { id: number };
-		} | null;
-		if (!res.ok || !json?.status || typeof json.data?.id !== 'number') {
-			throw new Error(json?.message ?? `Unggahan gagal (HTTP ${res.status}).`);
-		}
-		return { id: json.data.id };
-	}
-
-	async function submitProof(): Promise<void> {
-		proofError = '';
-		formError = '';
-		if (!payment) {
-			formError = 'Buat pengajuan pembayaran dulu.';
-			return;
-		}
-		if (!proofFile) {
-			proofError = 'Pilih foto/screenshot bukti bayar dulu.';
-			return;
-		}
-		uploadingProof = true;
-		try {
-			const up = await uploadProof(proofFile);
-			payment = await attachPaymentProof(payment.id, up.id);
-			stage = 'verifying';
-		} catch (e) {
-			proofError = e instanceof Error ? e.message : 'Gagal mengunggah bukti. Coba lagi.';
-		} finally {
-			uploadingProof = false;
-		}
-	}
-
 	async function restartPayment(): Promise<void> {
 		stopPolling();
 		payment = null;
-		if (proofPreview) URL.revokeObjectURL(proofPreview);
-		proofPreview = null;
-		proofFile = null;
-		proofError = '';
+		revokeQrUrl();
+		qrError = '';
 		lastRejection = null;
 		stage = 'checkout';
+	}
+
+	// Pembatalan antrean (hard delete di server — baris hilang total).
+	let cancelOpen = $state(false);
+	let cancelling = $state(false);
+	let cancelError = $state('');
+
+	async function confirmCancel(): Promise<void> {
+		if (!payment || cancelling) return;
+		cancelling = true;
+		cancelError = '';
+		try {
+			await cancelPayment(payment.id);
+			cancelOpen = false;
+			stopPolling();
+			payment = null;
+			revokeQrUrl();
+			await goto(resolve('/user/pembayaran'));
+		} catch (e) {
+			cancelError = e instanceof Error ? e.message : 'Gagal membatalkan. Coba lagi.';
+		} finally {
+			cancelling = false;
+		}
 	}
 
 	function escapeReceiptHtml(s: string): string {
@@ -354,7 +419,7 @@
 		];
 		const accessLine = serverAccess
 			? 'Akses kursus terkonfirmasi server.'
-			: 'Menunggu verifikasi admin — akses dibuka setelah pembayaran disetujui. Simpan kwitansi ini sebagai arsip.';
+			: 'Menunggu konfirmasi DOKU — akses dibuka otomatis setelah bayar. Simpan kwitansi ini sebagai arsip.';
 		const html = `<!doctype html><html lang="id"><head><meta charset="utf-8"><title>Kwitansi ${e(invoice)} — ARISTOTELES</title><style>body{font-family:Arial,Helvetica,sans-serif;color:#0f172a;max-width:640px;margin:32px auto;padding:0 16px}h1{font-size:20px}p.sub{color:#64748b;font-size:13px}table{width:100%;border-collapse:collapse;margin-top:16px;font-size:14px}td{padding:8px;border-bottom:1px solid #e2e8f0}td:first-child{color:#64748b;width:40%}.total td{font-weight:bold}.note{margin-top:16px;font-size:12px;color:#64748b;background:#f8fafc;padding:12px;border-radius:8px}</style></head><body><h1>Kwitansi Pembayaran — ARISTOTELES</h1><p class="sub">Platform Mikrokredensial · simpan sebagai arsip pembayaran Anda.</p><table>${rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join('')}</table><p class="note">${e(accessLine)}</p></body></html>`;
 		try {
 			const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
@@ -374,8 +439,8 @@
 	function instructionSteps(): string[] {
 		return [
 			'Buka m-banking atau e-wallet apa pun, pilih Scan QRIS.',
-			'Pindai kode QR di bawah dan bayar PERSIS sebesar total (lebih boleh, kurang ditolak).',
-			'Screenshot bukti bayar, lalu unggah di bawah untuk diverifikasi admin.'
+			'Pindai kode QR di bawah — nominal tampil otomatis, bayar PERSIS sebesar total.',
+			'Tunggu: akses kursus dibuka otomatis setelah DOKU mengonfirmasi (tanpa unggah bukti).'
 		];
 	}
 </script>
@@ -384,7 +449,7 @@
 	<title>Pembayaran {course?.title ?? 'Pelatihan'} — Aristoteles Platform</title>
 	<meta
 		name="description"
-		content="Bayar pelatihan Aristoteles via QRIS: pindai kode, unggah bukti, lalu admin verifikasi dan akses dibuka."
+		content="Bayar pelatihan Aristoteles via QRIS dinamis DOKU: pindai kode, nominal tampil otomatis, akses dibuka otomatis."
 	/>
 	<meta name="robots" content="noindex,nofollow" />
 </svelte:head>
@@ -459,6 +524,10 @@
 				Semua Kursus
 			</a>
 			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
+			<a href={resolve('/user/pembayaran')} class="rounded font-medium text-slate-600 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600">
+				Riwayat Pembayaran
+			</a>
+			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
 			<a href={resolve(`/user/semua-kursus/${course.id}`)} class="max-w-56 truncate rounded font-medium text-slate-600 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600">
 				{course.title}
 			</a>
@@ -483,15 +552,15 @@
 				</h1>
 				<p class="mt-1 max-w-xl text-sm text-slate-500">
 					{#if stage === 'success'}
-						Pembayaran disetujui admin — kwitansi di bawah dapat diunduh sebagai arsip.
+						Pembayaran terverifikasi DOKU — kwitansi di bawah dapat diunduh sebagai arsip.
 					{:else if stage === 'instruction'}
-						Ikuti instruksi QRIS di bawah, lalu unggah bukti bayar.
+						Pindai QRIS dinamis di bawah — nominal tampil otomatis, tanpa unggah bukti.
 					{:else}
-						Satu langkah lagi menuju akses penuh: cek rincian, buat pengajuan, bayar QRIS.
+						Satu langkah lagi menuju akses penuh: cek rincian, buat QR bayar, pindai.
 					{/if}
 				</p>
-				<p class="mt-2 max-w-xl text-[11px] font-semibold text-amber-700">
-					Pembayaran manual via QRIS — akses dibuka setelah admin memverifikasi bukti (maks 1×24 jam).
+				<p class="mt-2 max-w-xl text-[11px] font-semibold text-emerald-700">
+					Pembayaran QRIS dinamis via DOKU — akses dibuka otomatis setelah terkonfirmasi.
 				</p>
 			</div>
 			<ol aria-label="Langkah pembayaran" class="flex items-center gap-1.5 text-[11px] font-bold">
@@ -530,7 +599,7 @@
 						</span>
 						<h2 id="sukses-judul" class="mt-4 text-xl font-extrabold sm:text-2xl">Lunas! Selamat belajar, {fullName.split(' ')[0]}.</h2>
 						<p class="mt-1 text-sm text-emerald-100">
-							{course.title} · QRIS · {paidAt}
+							{course.title} · QRIS dinamis · {paidAt}
 						</p>
 					</div>
 					<div class="border-b border-slate-100 px-6 py-4 sm:px-8" role="status" aria-live="polite">
@@ -634,13 +703,13 @@
 					</a>
 				</aside>
 			</div>
-		{:else if stage === 'instruction' || stage === 'verifying'}
+		{:else if stage === 'instruction'}
 			<!-- INSTRUKSI BAYAR -->
 			<div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
 				<section aria-labelledby="instruksi-judul" class="rounded-2xl border border-slate-200/70 bg-white p-6 sm:p-8">
 					<div class="flex flex-wrap items-center justify-between gap-3">
 						<h2 id="instruksi-judul" class="text-lg font-extrabold text-slate-900">
-							Bayar via QRIS
+							Bayar via QRIS dinamis
 						</h2>
 						<span class="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1.5 font-mono text-[11px] font-bold text-slate-600">
 							<i class="fa-solid fa-file-invoice" aria-hidden="true"></i> {invoice || '…'}
@@ -648,20 +717,53 @@
 					</div>
 
 					<div class="mt-5 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6">
-						{#if qrisUrl}
+						{#if qrLoading}
+							<p class="flex h-44 w-44 items-center justify-center rounded-xl bg-white shadow-inner" role="status">
+								<i class="fa-solid fa-circle-notch fa-spin text-2xl text-slate-400" aria-hidden="true"></i>
+								<span class="sr-only">Memuat QR…</span>
+							</p>
+						{:else if qrUrl}
 							<img
-								src={qrisUrl}
-								alt={`Kode QRIS ARISTOTELES sebesar ${formatIDR(displayTotal)}`}
+								src={qrUrl}
+								alt={`Kode QRIS dinamis sebesar ${formatIDR(displayTotal)} — pindai, nominal tampil otomatis`}
 								class="h-44 w-44 rounded-xl bg-white object-contain p-2 shadow-inner"
 								loading="eager"
 							/>
 						{:else}
-							<p role="note" class="max-w-sm text-center text-xs font-semibold text-amber-800">
-								QRIS platform belum dikonfigurasi. Hubungi admin untuk mendapatkan kode bayar sebelum melanjutkan.
+							<p role="alert" class="max-w-sm text-center text-xs font-semibold text-red-700">
+								{qrError || 'QR belum tersedia.'}
 							</p>
+							<button
+								type="button"
+								onclick={() => void (payment ? loadQr(false) : null)}
+								class="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+							>
+								<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Muat ulang QR
+							</button>
 						{/if}
 						<p class="text-2xl font-black text-slate-900">{formatIDR(displayTotal)}</p>
-						<p class="text-xs text-slate-500">QRIS · {invoice || '…'} · a.n. Aristoteles Platform</p>
+						<p class="text-xs text-slate-500">QRIS dinamis · {invoice || '…'} · a.n. Aristoteles Platform</p>
+						{#if qrRemainingMs !== null && !qrExpired}
+							<p class="inline-flex items-center gap-1.5 rounded-full bg-blue-100 px-3 py-1 text-[11px] font-bold text-blue-800">
+								<i class="fa-solid fa-hourglass-half" aria-hidden="true"></i> QR berlaku {qrRemainingLabel}
+							</p>
+						{:else if qrExpired}
+							<p class="inline-flex items-center gap-1.5 rounded-full bg-red-100 px-3 py-1 text-[11px] font-bold text-red-700">
+								<i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i> QR kedaluwarsa
+							</p>
+							<button
+								type="button"
+								onclick={() => void refreshQr()}
+								disabled={refreshingQr}
+								class="inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-blue-600"
+							>
+								{#if refreshingQr}
+									<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memperbarui…
+								{:else}
+									<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Buat QR baru
+								{/if}
+							</button>
+						{/if}
 						<button
 							type="button"
 							onclick={() => copyText(String(displayTotal), 'nominal')}
@@ -670,7 +772,7 @@
 							<i class="fa-regular fa-copy" aria-hidden="true"></i>
 							{copied === 'nominal' ? 'Nominal tersalin!' : 'Salin nominal'}
 						</button>
-						<p class="text-center text-[11px] font-semibold text-amber-800">Bayar PERSIS sebesar total (lebih boleh, kurang ditolak saat verifikasi).</p>
+						<p class="text-center text-[11px] font-semibold text-amber-800">Nominal tampil otomatis saat dipindai — cukup bayar sesuai yang tertera.</p>
 					</div>
 
 					<ol class="mt-5 space-y-2.5" aria-label="Langkah penyelesaian pembayaran">
@@ -682,72 +784,31 @@
 						{/each}
 					</ol>
 
-					{#if stage === 'instruction'}
-						<div class="mt-5 rounded-2xl border border-slate-200 bg-white p-4">
-							<h3 class="text-sm font-extrabold text-slate-900">Unggah bukti bayar</h3>
-							<p class="mt-0.5 text-xs text-slate-500">Foto/screenshot bukti transfer (JPG/PNG/WebP, maks 5 MB). Hanya gambar yang diterima.</p>
-							<label for="pay-proof" class="mt-3 flex min-h-[44px] cursor-pointer items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-within:ring-4 focus-within:ring-blue-500/10">
-								<i class="fa-solid fa-upload" aria-hidden="true"></i>
-								{proofFile ? proofFile.name : 'Pilih gambar bukti bayar'}
-							</label>
-							<input
-								id="pay-proof"
-								type="file"
-								accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
-								class="sr-only"
-								onchange={(e) => pickProof(e.currentTarget.files?.[0])}
-								aria-describedby={proofError ? 'proof-err' : undefined}
-							/>
-							{#if proofPreview}
-								<img src={proofPreview} alt="Pratinjau bukti bayar" class="mx-auto mt-3 max-h-56 rounded-xl border border-slate-200 object-contain" />
-							{/if}
-							{#if proofError}
-								<p id="proof-err" role="alert" class="mt-2 text-xs font-semibold text-red-600">{proofError}</p>
-							{/if}
-							<div class="mt-4 flex flex-col gap-2.5 sm:flex-row">
-								<button
-									type="button"
-									onclick={submitProof}
-									disabled={uploadingProof || !proofFile}
-									class="inline-flex min-h-[48px] flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 text-sm font-bold text-white shadow-lg shadow-blue-600/25 transition-all hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-blue-600"
-								>
-									{#if uploadingProof}
-										<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Mengunggah…
-									{:else}
-										<i class="fa-solid fa-check-double" aria-hidden="true"></i> Kirim bukti & ajukan verifikasi
-									{/if}
-								</button>
-								<button
-									type="button"
-									onclick={() => (stage = 'checkout')}
-									class="inline-flex min-h-[48px] items-center justify-center gap-2 rounded-xl border border-slate-200 px-5 text-sm font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
-								>
-									<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Kembali
-								</button>
-							</div>
-						</div>
-					{:else if payment?.status === 'ditolak'}
+					{#if payment?.status === 'ditolak'}
 						<div role="alert" class="mt-5 rounded-2xl border border-red-200 bg-red-50 p-5">
 							<p class="flex items-start gap-2 text-sm font-bold text-red-700">
 								<i class="fa-solid fa-circle-xmark mt-0.5" aria-hidden="true"></i>
-								<span>Pembayaran ditolak{payment.rejectReason ? `: ${payment.rejectReason}` : '.'}</span>
+								<span>Pembayaran gagal{payment.rejectReason ? `: ${payment.rejectReason}` : '.'}</span>
 							</p>
 							<button
 								type="button"
 								onclick={restartPayment}
 								class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-red-600"
 							>
-								<i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Ajukan ulang pembayaran
+								<i class="fa-solid fa-rotate-left" aria-hidden="true"></i> Buat QR baru
 							</button>
 						</div>
 					{:else}
 						<div role="status" class="mt-5 rounded-2xl border border-amber-200 bg-amber-50 p-5 text-center">
 							<p class="flex items-center justify-center gap-2.5 text-sm font-bold text-amber-800">
 								<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
-								Menunggu verifikasi admin (maks 1×24 jam).
+								Menunggu pembayaran DOKU — akses dibuka otomatis.
 							</p>
 							<p class="mx-auto mt-1 max-w-md text-xs text-amber-700">
-								Bukti sudah kami terima. Akses kursus dibuka otomatis setelah disetujui. Halaman ini memeriksa status tiap beberapa detik.
+								Tidak perlu unggah bukti. Halaman ini memeriksa status tiap beberapa detik.
+								{#if qrExpired}
+									QR kedaluwarsa — buat QR baru di atas.
+								{/if}
 							</p>
 							<button
 								type="button"
@@ -756,6 +817,20 @@
 							>
 								<i class="fa-solid fa-rotate" aria-hidden="true"></i> Periksa sekarang
 							</button>
+						</div>
+					{/if}
+					{#if stage === 'instruction' && payment?.status === 'menunggu'}
+						<div class="mt-4 text-center">
+							<button
+								type="button"
+								onclick={() => (cancelOpen = true)}
+								class="inline-flex min-h-10 items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-600"
+							>
+								<i class="fa-solid fa-trash-can" aria-hidden="true"></i> Batalkan pengajuan ini
+							</button>
+							{#if cancelError}
+								<p role="alert" class="mx-auto mt-2 max-w-md text-xs font-semibold text-red-600">{cancelError}</p>
+							{/if}
 						</div>
 					{/if}
 				</section>
@@ -798,53 +873,9 @@
 			<!-- CHECKOUT -->
 			<div class="grid items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
 				<div class="min-w-0 space-y-6">
-					<!-- 01 Data peserta -->
-					<section aria-labelledby="h-peserta" class="rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6">
-						<h2 id="h-peserta" class="flex items-center gap-2.5 text-base font-extrabold text-slate-900">
-							<span class="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-xs font-black text-white">01</span>
-							Data peserta
-						</h2>
-						<p class="mt-1 mb-4 text-xs text-slate-500">
-							Terisi otomatis dari akunmu — atas nama inilah sertifikat diterbitkan.
-						</p>
-						<div class="grid gap-3 sm:grid-cols-2">
-							<div>
-								<label for="pay-nama" class="mb-1.5 block text-xs font-bold text-slate-700">Nama lengkap</label>
-								<input
-									id="pay-nama"
-									type="text"
-									bind:value={fullName}
-									autocomplete="name"
-									class="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
-								/>
-							</div>
-							<div>
-								<label for="pay-nim" class="mb-1.5 block text-xs font-bold text-slate-700">NIM / ID <span class="font-normal text-slate-400">(opsional)</span></label>
-								<input
-									id="pay-nim"
-									type="text"
-									bind:value={nim}
-									autocomplete="off"
-									class="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
-								/>
-							</div>
-							<div class="sm:col-span-2">
-								<label for="pay-email" class="mb-1.5 block text-xs font-bold text-slate-700">Email kwitansi</label>
-								<input
-									id="pay-email"
-									type="email"
-									bind:value={email}
-									autocomplete="email"
-									class="w-full rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-800 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
-								/>
-							</div>
-						</div>
-					</section>
-
-					<!-- 02 Metode -->
+					<!-- 01 Metode -->
 					<section aria-labelledby="h-metode" class="rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6">
-						<h2 id="h-metode" class="flex items-center gap-2.5 text-base font-extrabold text-slate-900">
-							<span class="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-xs font-black text-white">02</span>
+						<h2 id="h-metode" class="text-base font-extrabold text-slate-900">
 							Metode pembayaran
 						</h2>
 						<div class="mt-3 flex items-center gap-3 rounded-xl border border-blue-600 bg-blue-50/60 px-4 py-3">
@@ -853,95 +884,50 @@
 							</span>
 							<span class="min-w-0 flex-1">
 								<span class="block text-sm font-bold text-slate-900">
-									QRIS
-									<span class="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 uppercase">Tersedia</span>
+									QRIS dinamis
+									<span class="ml-1 rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-700 uppercase">Otomatis</span>
 								</span>
-								<span class="block text-xs text-slate-500">Scan dari m-banking atau e-wallet apa pun, lalu unggah bukti bayar.</span>
+								<span class="block text-xs text-slate-500">Scan dari m-banking atau e-wallet apa pun — nominal tampil otomatis, tanpa unggah bukti.</span>
 							</span>
 							<span class="text-xs font-bold text-slate-500">Tanpa biaya tambahan</span>
 						</div>
 						<p class="mt-2.5 text-[11px] text-slate-500">
-							Metode lain (VA, e-wallet, kartu, gerai) segera hadir. Saat ini pembayaran terverifikasi hanya via QRIS.
+							QRIS dinamis via DOKU — nominal tampil otomatis saat dipindai. Pilihan lain segera hadir.
 						</p>
+						<div class="mt-3 grid gap-2" role="group" aria-label="Metode pembayaran lain (segera hadir)">
+							{#each [{ icon: 'fa-building-columns', label: 'Transfer Bank (VA)', desc: 'BRI · BCA · Mandiri · BNI' }, { icon: 'fa-wallet', label: 'E-Wallet', desc: 'GoPay · OVO · DANA · ShopeePay' }, { icon: 'fa-credit-card', label: 'Kartu Kredit / Debit', desc: 'Visa · Mastercard · JCB' }, { icon: 'fa-store', label: 'Gerai Retail', desc: 'Indomaret · Alfamart' }] as m (m.label)}
+								<div
+									aria-disabled="true"
+									title={`${m.label} — segera hadir`}
+									class="flex cursor-not-allowed items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 opacity-70"
+								>
+									<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-200 text-slate-500">
+										<i class={`fa-solid ${m.icon}`} aria-hidden="true"></i>
+									</span>
+									<span class="min-w-0 flex-1">
+										<span class="block text-sm font-bold text-slate-500">
+											{m.label}
+											<span class="ml-1 rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-extrabold text-slate-500 uppercase">Segera hadir</span>
+										</span>
+										<span class="block text-xs text-slate-400">{m.desc}</span>
+									</span>
+								</div>
+							{/each}
+						</div>
 					</section>
 
-					<!-- 03 Voucher -->
-					<section aria-labelledby="h-voucher" class="rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6">
-						<h2 id="h-voucher" class="flex items-center gap-2.5 text-base font-extrabold text-slate-900">
-							<span class="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-xs font-black text-white">03</span>
-							Voucher promo
-						</h2>
-						{#if promoQuote}
-							<div class="mt-3 flex items-center justify-between gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3">
-								<p class="text-sm font-bold text-red-800">
-									<i class="fa-solid fa-tags mr-1.5" aria-hidden="true"></i>
-									{promoQuote.badgeLabel ?? promoQuote.title} −{promoQuote.discountPercent}% otomatis
-								</p>
-								<span class="shrink-0 text-xs font-extrabold text-red-700">−{formatIDR(promoDiscount)}</span>
-							</div>
-						{/if}
-						{#if appliedVoucher}
-							<div class="mt-3 flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-								<p class="text-sm font-bold text-emerald-800">
-									<i class="fa-solid fa-ticket mr-1.5" aria-hidden="true"></i>
-									{appliedVoucher.code} · hemat {formatIDR(appliedVoucher.discountAmount)}
-									{#if promoQuote && promoWins}
-										<span class="font-semibold text-emerald-600">(promo lebih besar — yang dipakai promo)</span>
-									{/if}
-								</p>
-								<button
-									type="button"
-									onclick={removeVoucher}
-									class="inline-flex min-h-[36px] items-center rounded-lg px-3 text-xs font-bold text-emerald-700 hover:bg-emerald-100 focus-visible:outline-2 focus-visible:outline-emerald-600"
-									aria-label={`Hapus voucher ${appliedVoucher.code}`}
-								>
-									Hapus
-								</button>
-							</div>
-						{:else}
-							<form class="mt-3 flex gap-2" onsubmit={(e) => { e.preventDefault(); void applyVoucher(); }}>
-								<label for="pay-voucher" class="sr-only">Kode voucher diskon</label>
-								<input
-									id="pay-voucher"
-									type="text"
-									bind:value={voucherCode}
-									placeholder="Punya kode diskon? Masukkan di sini"
-									autocomplete="off"
-									aria-invalid={voucherError.length > 0}
-									aria-describedby={voucherError ? 'voucher-err' : undefined}
-									class="min-w-0 flex-1 rounded-xl border border-slate-200 bg-white px-4 py-2.5 font-mono text-sm uppercase placeholder:font-sans placeholder:normal-case focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
-								/>
-								<button
-									type="submit"
-									disabled={applyingVoucher}
-									class="inline-flex min-h-[44px] shrink-0 items-center rounded-xl bg-blue-600 px-5 text-xs font-bold text-white hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-blue-600"
-								>
-									{#if applyingVoucher}
-										<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Cek…
-									{:else}
-										Pakai
-									{/if}
-								</button>
-							</form>
-							{#if voucherError}
-								<p id="voucher-err" role="alert" class="mt-2 text-xs font-semibold text-red-600">{voucherError}</p>
-							{:else}
-								<p class="mt-2 text-[11px] text-slate-500">Voucher diskon dicek ke server dan baru hangus setelah pembayaran disetujui. Voucher akses penuh (K-03) ditukar di halaman Kursusku, bukan di sini.</p>
-							{/if}
-						{/if}
-					</section>
-
-					<!-- 04 Konfirmasi -->
+					<!-- 02 Konfirmasi -->
 					<section aria-labelledby="h-bayar" class="rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6">
-						<h2 id="h-bayar" class="flex items-center gap-2.5 text-base font-extrabold text-slate-900">
-							<span class="flex h-7 w-7 items-center justify-center rounded-lg bg-blue-600 text-xs font-black text-white">04</span>
+						<h2 id="h-bayar" class="text-base font-extrabold text-slate-900">
 							Konfirmasi & bayar
 						</h2>
 						<label class="mt-3 flex cursor-pointer items-start gap-2.5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
 							<input type="checkbox" bind:checked={agree} class="mt-1 h-5 w-5 shrink-0 accent-blue-600" />
 							<span>
-								Saya menyetujui <span class="font-bold text-slate-800">Syarat & Ketentuan</span> dan
-								<span class="font-bold text-slate-800">Kebijakan Pengembalian 30 hari</span>. Saya paham akses
+								Saya menyetujui
+								<a href={resolve('/syarat-ketentuan')} target="_blank" rel="noopener noreferrer" class="font-bold text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-800 focus-visible:outline-2 focus-visible:outline-blue-600" onclick={(e) => e.stopPropagation()}>Syarat & Ketentuan</a>
+								dan
+								<a href={resolve('/syarat-ketentuan#pengembalian')} target="_blank" rel="noopener noreferrer" class="font-bold text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-800 focus-visible:outline-2 focus-visible:outline-blue-600" onclick={(e) => e.stopPropagation()}>Kebijakan Pengembalian 30 hari</a>. Saya paham akses
 								aktif otomatis setelah pembayaran terverifikasi.
 							</span>
 						</label>
@@ -964,7 +950,7 @@
 							{#if !agree}
 								Centang persetujuan dulu untuk mengaktifkan tombol bayar.
 							{:else}
-								Kamu akan diarahkan ke instruksi bayar QRIS + unggah bukti.
+								Kamu akan diarahkan ke QRIS dinamis — pindai, nominal tampil otomatis.
 							{/if}
 						</p>
 					</section>
@@ -1029,7 +1015,7 @@
 						</dl>
 						<p class="flex items-center justify-center gap-2 text-[11px] font-semibold text-slate-500">
 							<i class="fa-solid fa-shield-halved text-emerald-600" aria-hidden="true"></i>
-							QRIS manual · verifikasi admin maks 1×24 jam
+							QRIS dinamis · verifikasi otomatis DOKU
 						</p>
 					</div>
 				</aside>
@@ -1037,3 +1023,13 @@
 		{/if}
 	{/if}
 </div>
+
+<WarningModal
+	bind:open={cancelOpen}
+	type="danger"
+	title="Batalkan pengajuan ini?"
+	message="Antrean QRIS dinamis ini akan dihapus permanen. Anda bisa membuat QR baru kapan pun."
+	confirmText="Ya, batalkan"
+	loading={cancelling}
+	onconfirm={() => void confirmCancel()}
+/>

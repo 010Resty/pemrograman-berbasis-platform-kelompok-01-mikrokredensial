@@ -9,6 +9,7 @@
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
 	import { fetchInstructorDashboard } from '$lib/api/dashboard';
 	import { fetchCertificateSummary } from '$lib/api/certificates';
+	import { fetchMyPromoProposals } from '$lib/api/promos';
 	import { fileUrl } from '$lib/api/courses';
 	import { untrack } from 'svelte';
 
@@ -53,22 +54,37 @@
 	let sidebarOpen = $state(false);
 	let isCollapsed = $state(false);
 	let showProfileMenu = $state(false);
+	let showNotifMenu = $state(false);
 
-	// Badge sidebar dari backend: kursus aktif + antrean penilaian (dasbor)
-	// + sertifikat aktif terbit (ringkasan sertifikat). Gagal = badge hilang.
+	// Badge sidebar dari backend + antrean bell (hilang otomatis saat dikerjakan):
+	// - penilaian menunggu dinilai (turun saat tugas dinilai)
+	// - keputusan promo yang belum dibaca (hilang saat halaman Promo dibuka)
+	// Gagal = badge hilang.
 	let courseBadge = $state<string | undefined>(undefined);
 	let reviewBadge = $state<string | undefined>(undefined);
 	let certBadge = $state<string | undefined>(undefined);
+	let promoBadge = $state<string | undefined>(undefined);
+	let pendingReviews = $state(0);
+	let promoUnread = $state(0);
+
+	const notifCount = $derived(pendingReviews + promoUnread);
+	const notifLabel = $derived(
+		notifCount > 0 ? `${notifCount} hal perlu perhatian — buka Notifikasi` : 'Notifikasi'
+	);
 
 	async function loadBadges(): Promise<void> {
 		try {
-			const [dashboard, summary] = await Promise.all([
+			const [dashboard, summary, myProposals] = await Promise.all([
 				fetchInstructorDashboard(),
-				fetchCertificateSummary()
+				fetchCertificateSummary(),
+				fetchMyPromoProposals().catch((): [] => [])
 			]);
 			courseBadge = String(dashboard.totals.activeCourses);
 			reviewBadge = String(dashboard.totals.pendingReviews);
+			pendingReviews = dashboard.totals.pendingReviews;
 			certBadge = String(summary.issuedActiveCount);
+			promoUnread = myProposals.filter((p) => p.status !== 'pending' && !p.seenAt).length;
+			promoBadge = promoUnread > 0 ? String(promoUnread) : undefined;
 		} catch {
 			// Abaikan: navigasi tetap jalan tanpa badge.
 		}
@@ -76,24 +92,57 @@
 
 	// Shell sama persis dengan portal user, hanya menu + identitas yang berbeda.
 	const navItems = $derived<NavItem[]>([
-		{ label: 'Dashboard', icon: 'fa-house', href: '/instruktur' },
-		{ label: 'Kursusku', icon: 'fa-book-open', href: '/instruktur/kursusku', badge: courseBadge },
-		{ label: 'Penilaian', icon: 'fa-clipboard-check', href: '/instruktur/penilaian', badge: reviewBadge },
-		{ label: 'Pendapatan', icon: 'fa-wallet', href: '/instruktur/pendapatan' },
-		{ label: 'Sertifikat', icon: 'fa-award', href: '/instruktur/sertifikat', badge: certBadge },
-		{ label: 'Profil', icon: 'fa-user', href: '/instruktur/profile' }
+		{
+			label: 'Mengajar',
+			icon: 'fa-person-chalkboard',
+			href: '/instruktur',
+			children: [
+				{ label: 'Dashboard', icon: 'fa-house', href: '/instruktur' },
+				{ label: 'Kursusku', icon: 'fa-book-open', href: '/instruktur/kursusku', badge: courseBadge },
+				{ label: 'Promo', icon: 'fa-tags', href: '/instruktur/promo', badge: promoBadge },
+				{ label: 'Penilaian', icon: 'fa-clipboard-check', href: '/instruktur/penilaian', badge: reviewBadge }
+			]
+		},
+		{
+			label: 'Hasil',
+			icon: 'fa-chart-line',
+			href: '/instruktur/pendapatan',
+			children: [
+				{ label: 'Pendapatan', icon: 'fa-wallet', href: '/instruktur/pendapatan' },
+				{ label: 'Sertifikat', icon: 'fa-award', href: '/instruktur/sertifikat', badge: certBadge }
+			]
+		},
+		{
+			label: 'Akun',
+			icon: 'fa-circle-user',
+			href: '/instruktur/profile',
+			children: [{ label: 'Profil', icon: 'fa-user', href: '/instruktur/profile' }]
+		}
 	]);
 
 	function toggleProfileMenu() {
 		showProfileMenu = !showProfileMenu;
+		if (showProfileMenu) showNotifMenu = false;
 	}
 
 	function closeProfileMenu() {
 		showProfileMenu = false;
 	}
 
+	function toggleNotifMenu() {
+		showNotifMenu = !showNotifMenu;
+		if (showNotifMenu) showProfileMenu = false;
+	}
+
+	function closeNotifMenu() {
+		showNotifMenu = false;
+	}
+
 	function handleWindowKeydown(e: KeyboardEvent) {
-		if (e.key === 'Escape') closeProfileMenu();
+		if (e.key === 'Escape') {
+			closeProfileMenu();
+			closeNotifMenu();
+		}
 	}
 
 	// Profil dari sesi auth (bukan data dummy): nama/email milik akun yang login.
@@ -167,16 +216,79 @@
 		>
 			<div class="flex items-center justify-end gap-4">
 				<div class="flex items-center gap-3">
-					<a
-						href={resolve('/instruktur/penilaian')}
-						class="relative hidden min-h-11 min-w-11 items-center justify-center rounded-xl p-2.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 sm:flex"
-						aria-label={reviewBadge ? `${reviewBadge} tugas menunggu dinilai — buka Penilaian` : 'Buka Penilaian'}
-					>
-						<i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
-						{#if reviewBadge && reviewBadge !== '0'}
-							<span class="absolute top-1 right-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold text-white" aria-hidden="true">{reviewBadge}</span>
+					<!-- Notifikasi -->
+					<div class="relative hidden sm:block">
+						<button
+							type="button"
+							class="relative flex min-h-11 min-w-11 items-center justify-center rounded-xl p-2.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
+							onclick={toggleNotifMenu}
+							aria-label={notifLabel}
+							aria-expanded={showNotifMenu}
+							aria-haspopup="menu"
+						>
+							<i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
+							{#if notifCount > 0}
+								<span class="absolute top-1 right-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold text-white" aria-hidden="true">{notifCount > 9 ? '9+' : notifCount}</span>
+							{/if}
+						</button>
+
+						{#if showNotifMenu}
+							<div
+								role="menu"
+								aria-label="Notifikasi"
+								class="absolute top-full right-0 z-50 mt-2 w-80 overflow-hidden rounded-2xl border border-slate-200/60 bg-white shadow-xl"
+							>
+								<div class="flex items-center justify-between border-b border-slate-100 px-4 py-3">
+									<div>
+										<div class="text-sm font-semibold text-slate-800">Notifikasi</div>
+										<div class="text-xs text-slate-500">Perlu perhatian Anda</div>
+									</div>
+									<button
+										type="button"
+										class="flex min-h-9 min-w-9 items-center justify-center rounded-lg p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-blue-600"
+										onclick={() => void loadBadges()}
+										aria-label="Muat ulang notifikasi"
+										title="Muat ulang"
+									>
+										<i class="fa-solid fa-rotate-right text-xs" aria-hidden="true"></i>
+									</button>
+								</div>
+								<div class="p-1.5" role="none">
+									{#if pendingReviews > 0}
+										<a
+											role="menuitem"
+											href={resolve('/instruktur/penilaian')}
+											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+											onclick={closeNotifMenu}
+										>
+											<i class="fa-solid fa-clipboard-check mt-0.5 w-4 text-center text-amber-500" aria-hidden="true"></i>
+											<span>
+												<span class="block font-semibold text-slate-800">{pendingReviews} tugas menunggu dinilai</span>
+												<span class="block text-xs text-slate-500">Nilai di halaman Penilaian — hilang setelah dinilai.</span>
+											</span>
+										</a>
+									{/if}
+									{#if promoUnread > 0}
+										<a
+											role="menuitem"
+											href={resolve('/instruktur/promo')}
+											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+											onclick={closeNotifMenu}
+										>
+											<i class="fa-solid fa-tags mt-0.5 w-4 text-center text-violet-500" aria-hidden="true"></i>
+											<span>
+												<span class="block font-semibold text-slate-800">{promoUnread} keputusan promo baru</span>
+												<span class="block text-xs text-slate-500">Lihat di halaman Promo — hilang setelah dibuka.</span>
+											</span>
+										</a>
+									{/if}
+									{#if notifCount === 0}
+										<p class="px-3 py-4 text-center text-xs text-slate-500">Semua beres, tidak ada yang perlu perhatian.</p>
+									{/if}
+								</div>
+							</div>
 						{/if}
-					</a>
+					</div>
 
 					<div class="relative">
 						<button

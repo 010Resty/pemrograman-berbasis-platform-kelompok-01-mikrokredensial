@@ -15,6 +15,8 @@
 	} from '$lib/api/courses';
 	import { fetchPromos, type PromoCampaign } from '$lib/api/promos';
 	import { formatIDR } from '$lib/data/payment';
+	import { fileUrl } from '$lib/api/courses';
+	import { buildSrcSet } from '$lib/api/responsive';
 
 	const COVER_FALLBACK =
 		'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80';
@@ -113,6 +115,17 @@
 		const member = new Set(patunganMemberIds);
 		return katalog.filter((c) => (c.priceNominal ?? 0) > 0 && member.has(c.id));
 	});
+	const patunganPrices = $derived.by((): Record<number, number> => {
+		const map: Record<number, number> = {};
+		for (const camp of patunganCampaigns) {
+			for (const m of camp.courses) {
+				if (m.patunganPrice !== null && m.patunganPrice !== undefined) {
+					map[m.courseId] = m.patunganPrice;
+				}
+			}
+		}
+		return map;
+	});
 
 	function formatTanggal(value: string | null): string {
 		if (!value) return '—';
@@ -206,9 +219,6 @@
 						harga merah adalah harga bayar.
 					</p>
 				</div>
-				<a href={resolve('/pelatihan')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-royal transition-colors duration-200 hover:text-royal-hover">
-					Lihat semua pelatihan <i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
-				</a>
 			</div>
 
 			{#if promoLoading}
@@ -247,18 +257,21 @@
 					<div class="mt-10">
 						<div use:reveal class="flex flex-wrap items-center gap-3 rounded-2xl border border-red-100 bg-red-50/60 px-5 py-4">
 							<span class="rounded-lg bg-red-600 px-3 py-1 font-heading text-xs font-bold text-white">−{camp.discountPercent ?? 0}%</span>
-							<div class="min-w-0">
+							<div class="min-w-0 flex-1">
 								<h3 class="truncate font-heading text-base font-bold text-abyss">{camp.title}</h3>
 								<p class="text-xs text-slate-500">
 									Berakhir {formatTanggal(camp.endsAt)} · {camp.courses.length} pelatihan
 								</p>
 							</div>
+							<a href={resolve(`/promo/${camp.slug}`)} class="inline-flex min-h-[40px] items-center gap-2 rounded-xl bg-abyss px-4 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-red-600 focus-visible:outline-2 focus-visible:outline-red-600">
+								Halaman promo <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
+							</a>
 						</div>
 						<div class="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2 lg:grid-cols-3">
 							{#each camp.courses as m, i (m.courseId)}
 								<article use:reveal={{ delay: (i % 3) * 80 }} class="group relative flex flex-col overflow-hidden rounded-2xl border border-mist bg-white transition-all duration-200 hover:-translate-y-1 hover:border-red-300 hover:shadow-xl hover:shadow-red-900/10">
 									<div class="relative overflow-hidden" aria-hidden="true">
-										<img src={m.image || COVER_FALLBACK} alt={`Pelatihan ${m.title} — promo harga spesial`} loading="lazy" class="h-48 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+										<img src={m.image || COVER_FALLBACK} srcset={m.image ? (buildSrcSet(fileUrl(m.image), [400, 800]) ?? undefined) : undefined} sizes="(max-width: 768px) 100vw, 50vw" alt={`Pelatihan ${m.title} — promo harga spesial`} loading="lazy" class="h-48 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
 										<span class="absolute top-3 left-3 rounded-lg bg-abyss px-3 py-1 font-heading text-xs font-bold text-white">−{m.discountPercent ?? camp.discountPercent ?? 0}%</span>
 										{#if m.badgeLabel ?? camp.badgeLabel}
 											<span class="absolute top-3 right-3 rounded-lg bg-red-600 px-3 py-1 font-heading text-[11px] font-bold text-white uppercase">{m.badgeLabel ?? camp.badgeLabel}</span>
@@ -313,9 +326,6 @@
 						Kurasi khusus dari tim Aristoteles. Bila belum ada kurasi, tampilkan yang terbaru.
 					</p>
 				</div>
-				<a href={resolve('/pelatihan')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-royal transition-colors duration-200 hover:text-royal-hover">
-					Lihat semua pelatihan <i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
-				</a>
 			</div>
 
 			{#if promoLoading || katalogLoading}
@@ -351,16 +361,19 @@
 							<span class="flex h-10 w-10 items-center justify-center rounded-xl bg-royal text-sm text-white" aria-hidden="true">
 								<i class="fa-solid fa-award"></i>
 							</span>
-							<div class="min-w-0">
+							<div class="min-w-0 flex-1">
 								<h3 class="truncate font-heading text-base font-bold text-abyss">{camp.title}</h3>
 								<p class="text-xs text-slate-500">{camp.courses.length} pelatihan pilihan editor</p>
 							</div>
+							<a href={resolve(`/promo/${camp.slug}`)} class="inline-flex min-h-[40px] items-center gap-2 rounded-xl bg-abyss px-4 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal focus-visible:outline-2 focus-visible:outline-royal">
+								Halaman promo <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
+							</a>
 						</div>
 						<ol class="mt-5 grid grid-cols-1 gap-5 md:grid-cols-2">
 							{#each camp.courses as m, i (m.courseId)}
 								<li use:reveal={{ delay: (i % 2) * 80 }} class="group relative flex gap-5 overflow-hidden rounded-2xl border border-mist bg-white p-5 transition-all duration-200 hover:-translate-y-1 hover:border-royal/40 hover:shadow-xl hover:shadow-slate-900/10">
 									<span class="font-heading text-3xl font-extrabold text-ice transition-colors duration-200 group-hover:text-royal/30" aria-hidden="true">{String(i + 1).padStart(2, '0')}</span>
-									<img src={m.image || COVER_FALLBACK} alt="" aria-hidden="true" loading="lazy" class="h-24 w-28 shrink-0 rounded-xl object-cover" />
+									<img src={m.image || COVER_FALLBACK} srcset={m.image ? (buildSrcSet(fileUrl(m.image), [224, 448]) ?? undefined) : undefined} sizes="112px" alt="" aria-hidden="true" loading="lazy" class="h-24 w-28 shrink-0 rounded-xl object-cover" />
 									<div class="flex min-w-0 flex-1 flex-col justify-between gap-3">
 										<div class="min-w-0">
 											{#if m.badgeLabel ?? camp.badgeLabel}
@@ -390,7 +403,7 @@
 					{#each unggulanFallback as course, i (course.id)}
 						<article use:reveal={{ delay: (i % 3) * 80 }} class="group relative flex flex-col overflow-hidden rounded-2xl border border-mist bg-white transition-all duration-200 hover:-translate-y-1 hover:border-royal/40 hover:shadow-xl hover:shadow-slate-900/10">
 							<div class="relative overflow-hidden" aria-hidden="true">
-								<img src={course.image || COVER_FALLBACK} alt={`Pelatihan terbaru: ${course.title}`} loading="lazy" class="h-44 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
+								<img src={course.image || COVER_FALLBACK} srcset={course.image ? (buildSrcSet(fileUrl(course.image), [400, 800]) ?? undefined) : undefined} sizes="(max-width: 768px) 100vw, 33vw" alt={`Pelatihan terbaru: ${course.title}`} loading="lazy" class="h-44 w-full object-cover transition duration-500 group-hover:scale-[1.03]" />
 								<span class="absolute top-3 left-3 rounded-lg bg-royal px-3 py-1 font-heading text-[11px] font-bold text-white uppercase">Terbaru</span>
 							</div>
 							<div class="flex flex-1 flex-col justify-between space-y-4 p-6">
@@ -484,6 +497,9 @@
 							<a href={resolve('/patungan/saya')} class="mt-4 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-abyss px-4 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-teal focus-visible:outline-2 focus-visible:outline-teal">
 								Grup patunganku <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
 							</a>
+							<a href={resolve(`/promo/${camp.slug}`)} class="mt-2 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-teal/40 px-4 py-2.5 font-heading text-xs font-bold text-teal transition-colors duration-200 hover:bg-teal/10 focus-visible:outline-2 focus-visible:outline-teal">
+								Halaman promo ini <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
+							</a>
 						</div>
 					{/each}
 				</div>
@@ -492,7 +508,7 @@
 	</section>
 
 	{#if patunganCampaigns.length > 0}
-		<PatunganSection courses={patunganCourses} loading={promoLoading || katalogLoading} />
+		<PatunganSection courses={patunganCourses} patunganPrices={patunganPrices} loading={promoLoading || katalogLoading} />
 	{/if}
 </main>
 

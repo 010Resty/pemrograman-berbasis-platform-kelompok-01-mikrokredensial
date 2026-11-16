@@ -26,6 +26,18 @@ class PublicCourse {
 
   bool get isFree => priceNominal <= 0;
 
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'title': title,
+        'description': description,
+        'category': category,
+        'level': level,
+        'image': image,
+        'priceLabel': priceLabel,
+        'priceNominal': priceNominal,
+        'period': period,
+      };
+
   factory PublicCourse.fromJson(Object? json) {
     final m = (json as Map?)?.cast<String, Object?>() ?? {};
     int asInt(Object? v) => v is int ? v : int.tryParse('$v') ?? 0;

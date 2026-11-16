@@ -3,11 +3,15 @@
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import {
 		fetchCertificateSummary as apiSummary,
 		fetchModuleCertificateStatus as apiModuleStatus,
 		fetchEligibility as apiEligibility,
 		fetchCertificates as apiCertificates,
+		fetchMySignature,
+		setMySignature,
+		removeMySignature,
 		eligibilityLabel,
 		certificateStatusLabel,
 		type CertificateRecord,
@@ -17,7 +21,9 @@
 		type ModuleCertificateStatus,
 		type CertificateStatus
 	} from '$lib/api/certificates';
-	import { fetchMyCourses, fetchModules } from '$lib/api/courses';
+	import { fetchMyCourses, fetchModules, fileUrl } from '$lib/api/courses';
+	import { uploadFile } from '$lib/api/uploads';
+	import WarningModal from '$lib/components/WarningModal.svelte';
 
 	/**
 	 * Menu Sertifikat instruktur — 4 tab: ringkasan, kursus, kelayakan, riwayat.
@@ -28,17 +34,20 @@
 	 * (TIDAK ada sukses palsu, TIDAK ada data contoh).
 	 */
 
-	type TabId = 'ringkasan' | 'kursus' | 'kelayakan' | 'riwayat';
+	type TabId = 'ringkasan' | 'kursus' | 'kelayakan' | 'riwayat' | 'tandatangan';
 	const TABS: { id: TabId; label: string; icon: string }[] = [
 		{ id: 'ringkasan', label: 'Ringkasan', icon: 'fa-gauge-high' },
 		{ id: 'kursus', label: 'Per Kursus & Modul', icon: 'fa-layer-group' },
 		{ id: 'kelayakan', label: 'Kelayakan Peserta', icon: 'fa-user-check' },
-		{ id: 'riwayat', label: 'Riwayat Sertifikat', icon: 'fa-clock-rotate-left' }
+		{ id: 'riwayat', label: 'Riwayat Sertifikat', icon: 'fa-clock-rotate-left' },
+		{ id: 'tandatangan', label: 'Tanda tangan', icon: 'fa-signature' }
 	];
 
 	const tab = $derived.by((): TabId => {
 		const t = page.url.searchParams.get('tab');
-		return t === 'kursus' || t === 'kelayakan' || t === 'riwayat' ? t : 'ringkasan';
+		return t === 'kursus' || t === 'kelayakan' || t === 'riwayat' || t === 'tandatangan'
+			? t
+			: 'ringkasan';
 	});
 
 	function switchTab(id: TabId, extra: Record<string, string> = {}): void {
@@ -71,7 +80,8 @@
 		ringkasan: false,
 		kursus: false,
 		kelayakan: false,
-		riwayat: false
+		riwayat: false,
+		tandatangan: false
 	});
 
 	// ---------- Data kursus & modul milik instruktur ----------
@@ -280,6 +290,89 @@
 		}
 	}
 
+	// ---------- Tanda tangan (dipakai blok tanda tangan PDF sertifikat) ----------
+	let sigUrl = $state<string | null>(null);
+	let sigPhase = $state<'idle' | 'loading' | 'error' | 'ready'>('idle');
+	let sigError = $state('');
+	let sigFile = $state<File | null>(null);
+	let sigPreview = $state<string | null>(null);
+	let sigBusy = $state(false);
+	let sigNotice = $state('');
+	let sigRemoveOpen = $state(false);
+
+	async function loadSignature(): Promise<void> {
+		sigPhase = 'loading';
+		sigError = '';
+		try {
+			const s = await fetchMySignature();
+			sigUrl = s.url ? fileUrl(s.url) : null;
+			sigPhase = 'ready';
+		} catch (e) {
+			sigError = e instanceof Error ? e.message : 'Gagal memuat tanda tangan.';
+			sigPhase = 'error';
+		}
+	}
+
+	function pickSignature(file: File | undefined): void {
+		sigNotice = '';
+		if (sigPreview) URL.revokeObjectURL(sigPreview);
+		sigPreview = null;
+		sigFile = null;
+		if (!file) return;
+		const okType = ['image/jpeg', 'image/png', 'image/webp'].includes(file.type);
+		const okExt = /\.(jpe?g|png|webp)$/i.test(file.name);
+		if (!okType && !okExt) {
+			sigError = 'Tanda tangan harus berupa gambar (JPG/PNG/WebP).';
+			return;
+		}
+		if (file.size > 2 * 1024 * 1024) {
+			sigError = 'Ukuran gambar melebihi 2 MB.';
+			return;
+		}
+		if (file.size === 0) {
+			sigError = 'Berkas kosong.';
+			return;
+		}
+		sigError = '';
+		sigFile = file;
+		sigPreview = URL.createObjectURL(file);
+	}
+
+	async function saveSignature(): Promise<void> {
+		if (!sigFile || sigBusy) return;
+		sigBusy = true;
+		sigNotice = '';
+		try {
+			const up = await uploadFile(sigFile, 'signature');
+			const res = await setMySignature(up.id);
+			sigUrl = fileUrl(res.url);
+			if (sigPreview) URL.revokeObjectURL(sigPreview);
+			sigPreview = null;
+			sigFile = null;
+			sigNotice =
+				`Tanda tangan tersimpan.${res.clearedPdfs > 0 ? ` ${res.clearedPdfs} PDF lama ikut diperbarui.` : ''} Unduhan sertifikat berikutnya memakai tanda tangan baru.`;
+		} catch (e) {
+			sigError = e instanceof Error ? e.message : 'Gagal menyimpan tanda tangan.';
+		} finally {
+			sigBusy = false;
+		}
+	}
+
+	async function confirmRemoveSignature(): Promise<void> {
+		if (sigBusy) return;
+		sigBusy = true;
+		try {
+			await removeMySignature();
+			sigUrl = null;
+			sigRemoveOpen = false;
+			sigNotice = 'Tanda tangan dilepas. PDF berikutnya kembali memakai nama diketik.';
+		} catch (e) {
+			sigError = e instanceof Error ? e.message : 'Gagal melepas tanda tangan.';
+		} finally {
+			sigBusy = false;
+		}
+	}
+
 	async function ensureLoaded(t: TabId): Promise<void> {
 		if (loadedTabs[t]) return;
 		loadedTabs[t] = true;
@@ -297,6 +390,9 @@
 		}
 		if (t === 'riwayat') {
 			await Promise.all([loadCourses(), loadHistory()]);
+		}
+		if (t === 'tandatangan') {
+			await loadSignature();
 		}
 	}
 
@@ -532,11 +628,14 @@
 						{:else}
 							<ul class="divide-y divide-slate-100">
 								{#each s.recentlyEligible as r (r.eligibilityId)}
-									<li class="px-5 py-3.5">
-										<p class="text-sm font-bold text-slate-900">{r.studentName}</p>
-										<p class="mt-0.5 text-[11px] text-slate-500">
-											{r.courseTitle} · {r.moduleTitle}
-										</p>
+									<li class="flex items-center gap-2.5 px-5 py-3.5">
+										<UserAvatar name={r.studentName} avatarUrl={r.studentAvatarUrl ?? null} size="h-8 w-8" />
+										<div class="min-w-0">
+											<p class="text-sm font-bold text-slate-900">{r.studentName}</p>
+											<p class="mt-0.5 text-[11px] text-slate-500">
+												{r.courseTitle} · {r.moduleTitle}
+											</p>
+										</div>
 									</li>
 								{/each}
 							</ul>
@@ -939,8 +1038,17 @@
 							{#each eligibility.data as row (row.id)}
 								<tr class="transition-colors hover:bg-blue-50/50">
 									<td class="px-5 py-4">
-										<p class="font-bold text-slate-900">{row.studentName}</p>
-										<p class="text-[11px] text-slate-500">{row.nim ?? '—'} · {row.courseTitle}</p>
+										<div class="flex items-center gap-2.5">
+											<UserAvatar
+												name={row.studentName}
+												avatarUrl={row.studentAvatarUrl ?? null}
+												size="h-9 w-9"
+											/>
+											<div class="min-w-0">
+												<p class="font-bold text-slate-900">{row.studentName}</p>
+												<p class="text-[11px] text-slate-500">{row.nim ?? '—'} · {row.courseTitle}</p>
+											</div>
+										</div>
 									</td>
 									<td class="max-w-56 px-4 py-4 text-[13px] font-semibold text-slate-600">{row.moduleTitle}</td>
 									<td class="px-4 py-4 text-center text-[13px] font-bold tabular-nums text-slate-700">
@@ -979,9 +1087,16 @@
 					{#each eligibility.data ?? [] as row (row.id)}
 						<li class="rounded-2xl border border-slate-200 bg-white p-4">
 							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0">
-									<p class="text-sm font-bold text-slate-900">{row.studentName}</p>
-									<p class="mt-0.5 text-[11px] text-slate-500">{row.moduleTitle}</p>
+								<div class="flex min-w-0 items-center gap-2.5">
+									<UserAvatar
+										name={row.studentName}
+										avatarUrl={row.studentAvatarUrl ?? null}
+										size="h-9 w-9"
+									/>
+									<div class="min-w-0">
+										<p class="text-sm font-bold text-slate-900">{row.studentName}</p>
+										<p class="mt-0.5 text-[11px] text-slate-500">{row.moduleTitle}</p>
+									</div>
 								</div>
 								<span class="inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[10px] font-bold whitespace-nowrap {eligibilityBadge(row.status)}">
 									{eligibilityLabel(row.status)}
@@ -1167,8 +1282,17 @@
 								<tr class="transition-colors hover:bg-blue-50/50">
 									<td class="px-5 py-4 font-mono text-xs font-bold text-slate-800">{row.code}</td>
 									<td class="px-4 py-4">
-										<p class="font-bold text-slate-900">{row.studentName}</p>
-										<p class="text-[11px] text-slate-500">Tercetak: {row.printedName}</p>
+										<div class="flex items-center gap-2.5">
+											<UserAvatar
+												name={row.studentName}
+												avatarUrl={row.studentAvatarUrl ?? null}
+												size="h-9 w-9"
+											/>
+											<div class="min-w-0">
+												<p class="font-bold text-slate-900">{row.studentName}</p>
+												<p class="text-[11px] text-slate-500">Tercetak: {row.printedName}</p>
+											</div>
+										</div>
 									</td>
 									<td class="max-w-56 px-4 py-4 text-[13px] text-slate-600">
 										{row.courseTitle}
@@ -1198,10 +1322,17 @@
 					{#each history.data ?? [] as row (row.id)}
 						<li class="rounded-2xl border border-slate-200 bg-white p-4">
 							<div class="flex items-start justify-between gap-2">
-								<div class="min-w-0">
-									<p class="font-mono text-xs font-bold text-slate-800">{row.code}</p>
-									<p class="mt-0.5 truncate text-sm font-bold text-slate-900">{row.studentName}</p>
-									<p class="mt-0.5 text-[11px] text-slate-500">{row.courseTitle} · {row.moduleTitle ?? 'Sertifikat kursus'}</p>
+								<div class="flex min-w-0 items-center gap-2.5">
+									<UserAvatar
+										name={row.studentName}
+										avatarUrl={row.studentAvatarUrl ?? null}
+										size="h-9 w-9"
+									/>
+									<div class="min-w-0">
+										<p class="font-mono text-xs font-bold text-slate-800">{row.code}</p>
+										<p class="mt-0.5 truncate text-sm font-bold text-slate-900">{row.studentName}</p>
+										<p class="mt-0.5 text-[11px] text-slate-500">{row.courseTitle} · {row.moduleTitle ?? 'Sertifikat kursus'}</p>
+									</div>
 								</div>
 								<span class="inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[10px] font-bold whitespace-nowrap {certBadge(row.status)}">
 									{certificateStatusLabel(row.status)}
@@ -1220,4 +1351,105 @@
 			{/if}
 		</div>
 	{/if}
+
+	{#if tab === 'tandatangan'}
+		<div role="tabpanel" id="panel-tandatangan" aria-labelledby="tab-tandatangan" class="space-y-4">
+			<section aria-labelledby="sig-title" class="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+				<h2 id="sig-title" class="text-base font-extrabold text-slate-900">Tanda tangan sertifikat</h2>
+				<p class="mt-1 text-xs text-slate-500">
+					Tanda tangan ini tercetak di seluruh PDF sertifikat kursus yang Anda tandatangani sebagai
+					instruktur utama. Tanpa tanda tangan, PDF memakai nama diketik.
+				</p>
+
+				{#if sigPhase === 'loading' || sigPhase === 'idle'}
+					<div class="mt-4 animate-pulse rounded-2xl border border-slate-200 bg-slate-50 p-8" aria-label="Memuat tanda tangan">
+						<div class="mx-auto h-16 w-48 rounded bg-slate-200"></div>
+					</div>
+				{:else if sigPhase === 'error' && !sigUrl && !sigPreview}
+					<div role="alert" class="mt-4 rounded-2xl border border-red-200 bg-red-50 p-5 text-center">
+						<p class="text-sm font-bold text-red-700">Tanda tangan belum dapat dimuat</p>
+						<p class="mx-auto mt-1 max-w-md text-xs text-red-600">{sigError}</p>
+						<button
+							type="button"
+							onclick={() => void loadSignature()}
+							class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl bg-red-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-red-600"
+						>
+							<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+						</button>
+					</div>
+				{:else}
+					<div class="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_240px]">
+						<div class="rounded-2xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center">
+							{#if sigPreview}
+								<img src={sigPreview} alt="Pratinjau tanda tangan baru" class="mx-auto max-h-40 object-contain" />
+							{:else if sigUrl}
+								<img src={sigUrl} alt="Tanda tangan tersimpan" class="mx-auto max-h-40 object-contain" />
+							{:else}
+								<p class="text-xs font-semibold text-slate-400">Belum ada tanda tangan — PDF memakai nama diketik.</p>
+							{/if}
+							<label for="sig-file" class="mt-4 inline-flex min-h-11 cursor-pointer items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-100 focus-within:ring-4 focus-within:ring-blue-500/10">
+								<i class="fa-solid fa-upload" aria-hidden="true"></i>
+								{sigFile ? sigFile.name : 'Pilih gambar (JPG/PNG/WebP, maks 2 MB)'}
+							</label>
+							<input
+								id="sig-file"
+								type="file"
+								accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+								class="sr-only"
+								onchange={(e) => pickSignature(e.currentTarget.files?.[0])}
+							/>
+							{#if sigError}
+								<p role="alert" class="mt-2 text-xs font-semibold text-red-600">{sigError}</p>
+							{/if}
+							<div class="mt-3 flex flex-col gap-2 sm:flex-row sm:justify-center">
+								<button
+									type="button"
+									onclick={() => void saveSignature()}
+									disabled={sigBusy || !sigFile}
+									class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white transition hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-blue-600"
+								>
+									{#if sigBusy}
+										<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Menyimpan…
+									{:else}
+										<i class="fa-solid fa-check" aria-hidden="true"></i> Simpan tanda tangan
+									{/if}
+								</button>
+								{#if sigUrl}
+									<button
+										type="button"
+										onclick={() => (sigRemoveOpen = true)}
+										disabled={sigBusy}
+										class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-red-200 px-5 py-2.5 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-red-600"
+									>
+										<i class="fa-solid fa-trash-can" aria-hidden="true"></i> Lepas
+									</button>
+								{/if}
+							</div>
+						</div>
+						<div class="rounded-2xl bg-slate-900 p-4 text-[11px] leading-relaxed text-slate-300">
+							<p class="font-bold text-white">Tips tanda tangan terbaca</p>
+							<ul class="mt-2 list-disc space-y-1 pl-4">
+								<li>Tinta gelap di atas kertas putih, foto/scan lurus.</li>
+								<li>Latar transparan (PNG) memberi hasil paling rapi.</li>
+								<li>Mengganti tanda tangan otomatis memperbarui PDF lama saat diunduh ulang.</li>
+							</ul>
+						</div>
+					</div>
+					{#if sigNotice}
+						<p role="status" class="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">{sigNotice}</p>
+					{/if}
+				{/if}
+			</section>
+		</div>
+	{/if}
 </div>
+
+<WarningModal
+	bind:open={sigRemoveOpen}
+	type="danger"
+	title="Lepas tanda tangan?"
+	message="PDF sertifikat berikutnya kembali memakai nama diketik. Tanda tangan yang tersimpan dihapus permanen."
+	confirmText="Ya, lepas"
+	loading={sigBusy}
+	onconfirm={() => void confirmRemoveSignature()}
+/>

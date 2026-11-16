@@ -6,6 +6,7 @@
 		eligibilityLabel,
 		type EligibilityDetail
 	} from '$lib/api/certificates';
+	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 
 	/**
 	 * Detail kelayakan satu peserta pada satu modul: rincian materi/kuis/tugas
@@ -98,14 +99,21 @@
 	{:else if detail}
 		<div class="mb-4 rounded-2xl border border-slate-200 bg-white p-5">
 			<div class="flex flex-wrap items-start justify-between gap-3">
-				<div>
-					<h2 class="text-lg font-extrabold text-slate-900">{detail.studentName}</h2>
-					<p class="mt-0.5 text-xs text-slate-500">
-						{detail.nim ?? '—'} · {detail.courseTitle} · {detail.moduleTitle}
-					</p>
-					<p class="mt-1 text-xs tabular-nums text-slate-600">
-						Materi wajib {detail.materialDone}/{detail.materialTotal} selesai
-					</p>
+				<div class="flex min-w-0 items-center gap-3">
+					<UserAvatar
+						name={detail.studentName}
+						avatarUrl={detail.studentAvatarUrl ?? null}
+						size="h-11 w-11"
+					/>
+					<div class="min-w-0">
+						<h2 class="text-lg font-extrabold text-slate-900">{detail.studentName}</h2>
+						<p class="mt-0.5 text-xs text-slate-500">
+							{detail.nim ?? '—'} · {detail.courseTitle} · {detail.moduleTitle}
+						</p>
+						<p class="mt-1 text-xs tabular-nums text-slate-600">
+							Materi wajib {detail.materialDone}/{detail.materialTotal} selesai
+						</p>
+					</div>
 				</div>
 				<span
 					class="inline-flex items-center rounded-full px-3 py-1.5 text-[11px] font-bold whitespace-nowrap {detail.status === 'sudah_terbit' || detail.status === 'memenuhi'

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
+import '../../core/file_url.dart';
 import '../../shared_ui.dart';
 import 'admin_api.dart';
 
@@ -60,11 +61,18 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                           itemCount: _rows.length,
                           itemBuilder: (context, i) {
                             final u = _rows[i];
+                            final avatar =
+                                resolveAvatarUrl(u.avatarUrl, widget.api.baseUrl);
                             return ListTile(
                               leading: CircleAvatar(
-                                  child: Text(u.name.isEmpty
-                                      ? '?'
-                                      : u.name[0].toUpperCase())),
+                                  backgroundImage: avatar != null
+                                      ? NetworkImage(avatar)
+                                      : null,
+                                  child: avatar != null
+                                      ? null
+                                      : Text(u.name.isEmpty
+                                          ? '?'
+                                          : u.name[0].toUpperCase())),
                               title: Text(u.name),
                               subtitle: Text(
                                   '${u.email} · ${u.isActive ? 'aktif' : 'nonaktif'}'),

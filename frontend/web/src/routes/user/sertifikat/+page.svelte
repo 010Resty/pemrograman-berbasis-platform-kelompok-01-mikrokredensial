@@ -5,6 +5,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	
 	import { downloadMyCertificatePdf, fetchMyCertificates, type MyCertificate } from '$lib/api/progress';
+	import { fileUrl } from '$lib/api/courses';
 	import CertificateCover from '$lib/components/training/molecules/CertificateCover.svelte';
 
 	/**
@@ -190,6 +191,7 @@
 							code={cert.code}
 							recipientName={cert.recipientName}
 							instructorName={cert.instructorName ?? null}
+							signatureUrl={cert.signatureUrl ? fileUrl(cert.signatureUrl) : null}
 							courseTitle={cert.courseTitle}
 							moduleTitle={cert.moduleTitle}
 							issuedLabel={formatDate(cert.issuedAt)}

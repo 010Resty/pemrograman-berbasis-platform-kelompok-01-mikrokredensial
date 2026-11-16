@@ -76,8 +76,7 @@
 	/** Sorotan utama hero: kursus terbit pertama dari katalog nyata. */
 	const featuredCourse = $derived(spotCourses[0] ?? null);
 
-	const keunggulan = [
-		{
+	const keunggulan = [		{
 			icon: 'fa-list-check',
 			title: 'Pembelajaran terstruktur',
 			desc: 'Materi, kuis, dan tugas tersusun per modul dengan alur yang jelas dari awal hingga akhir.'
@@ -98,6 +97,39 @@
 			desc: 'Sertifikat per modul diterbitkan setelah seluruh persyaratan wajib terpenuhi dan terverifikasi.'
 		}
 	];
+
+	/** FAQ beranda: jawaban faktual mengikuti alur produk yang benar ada. */
+	const faqs = [
+		{
+			q: 'Bagaimana cara belajar di ARISTOTELES?',
+			a: 'Pilih kursus di katalog, pelajari materi modul demi modul, kerjakan kuis dan tugas yang diberikan, lalu terima sertifikat setelah seluruh persyaratan terpenuhi dan terverifikasi.'
+		},
+		{
+			q: 'Apakah sertifikat langsung terbit setelah mendaftar?',
+			a: 'Tidak. Sertifikat per modul hanya diterbitkan setelah seluruh materi wajib selesai, kuis wajib lulus, dan tugas memenuhi syarat penilaian instruktur.'
+		},
+		{
+			q: 'Apakah ada kelas gratis?',
+			a: 'Ya. Katalog memuat kelas tanpa biaya. Kamu mungkin perlu membuat akun dan mendaftar agar progres belajarmu terlacak dan sertifikat bisa diterbitkan.'
+		},
+		{
+			q: 'Bagaimana cara mendaftar akun?',
+			a: 'Buka halaman pendaftaran, isi nama, username, email, dan kata sandi, lalu masuk dengan akunmu. Setelah masuk, pilih pelatihan di katalog untuk mulai belajar.'
+		},
+		{
+			q: 'Bagaimana cara membayar kelas berbayar?',
+			a: 'Pilih pelatihan berbayar, buat pengajuan pembayaran QRIS, lalu unggah bukti bayarmu. Akses kursus dibuka otomatis setelah pembayaran disetujui admin. Bila ada promo patungan atau voucher, harganya dihitung otomatis dari server.'
+		},
+		{
+			q: 'Bagaimana cara memastikan sertifikat itu asli?',
+			a: 'Buka halaman Verifikasi dan masukkan kode sertifikat yang tertera pada sertifikat. Sistem akan menampilkan status keaslian beserta identitas pemiliknya.'
+		}
+	];
+	let openFaq = $state<number | null>(0);
+
+	function toggleFaq(i: number): void {
+		openFaq = openFaq === i ? null : i;
+	}
 
 	/** Structured data: klaim faktual tentang platform saja, tanpa angka fiktif. */
 	const homeJsonLd = $derived([
@@ -120,32 +152,11 @@
 		{
 			'@context': 'https://schema.org',
 			'@type': 'FAQPage',
-			mainEntity: [
-				{
-					'@type': 'Question',
-					name: 'Bagaimana cara belajar di ARISTOTELES?',
-					acceptedAnswer: {
-						'@type': 'Answer',
-						text: 'Pilih kursus di katalog, pelajari materi modul demi modul, kerjakan kuis dan tugas, lalu terima sertifikat setelah seluruh persyaratan terpenuhi dan terverifikasi.'
-					}
-				},
-				{
-					'@type': 'Question',
-					name: 'Apakah sertifikat langsung terbit setelah mendaftar?',
-					acceptedAnswer: {
-						'@type': 'Answer',
-						text: 'Tidak. Sertifikat per modul hanya diterbitkan setelah seluruh materi wajib selesai, kuis wajib lulus, dan tugas memenuhi syarat.'
-					}
-				},
-				{
-					'@type': 'Question',
-					name: 'Apakah ada kelas gratis?',
-					acceptedAnswer: {
-						'@type': 'Answer',
-						text: `Ya. Katalog memuat kelas tanpa biaya di ${canonicalPath('/pelatihan', data.origin)} — pendaftaran akun mungkin diperlukan untuk melacak progres dan menerbitkan sertifikat.`
-					}
-				}
-			]
+			mainEntity: faqs.map((f) => ({
+				'@type': 'Question',
+				name: f.q,
+				acceptedAnswer: { '@type': 'Answer', text: f.a }
+			}))
 		}
 	]);
 </script>
@@ -339,6 +350,55 @@
 					</li>
 				{/each}
 			</ul>
+		</div>
+	</section>
+
+	<!-- FAQ -->
+	<section aria-labelledby="faq-heading" class="border-y border-mist bg-white">
+		<div class="mx-auto max-w-4xl px-4 py-16 sm:px-6 lg:px-8 lg:py-20">
+			<div use:reveal class="text-center">
+				<p class="flex items-center justify-center gap-3 font-heading text-xs font-bold tracking-[0.18em] text-royal uppercase">
+					<span class="h-px w-8 bg-royal" aria-hidden="true"></span>
+					Butuh Bantuan
+					<span class="h-px w-8 bg-royal" aria-hidden="true"></span>
+				</p>
+				<h2 id="faq-heading" class="mt-3 font-heading text-3xl font-extrabold tracking-tight text-abyss sm:text-4xl">
+					Pertanyaan yang sering ditanyakan
+				</h2>
+				<p class="mx-auto mt-2 max-w-xl text-sm leading-relaxed text-slate-600 sm:text-base">
+					Belum menemukan jawabanmu? Jelajahi katalog atau hubungi tim dukungan kami.
+				</p>
+			</div>
+			<div class="mt-10 space-y-3">
+				{#each faqs as faq, i (faq.q)}
+					<div
+						use:reveal={{ delay: i * 50 }}
+						class={`overflow-hidden rounded-2xl border transition-colors duration-200 ${openFaq === i ? 'border-royal/40 bg-ice/40' : 'border-mist bg-white hover:border-royal/40'}`}
+					>
+						<button
+							type="button"
+							onclick={() => toggleFaq(i)}
+							aria-expanded={openFaq === i}
+							aria-controls={`faq-panel-${i}`}
+							id={`faq-button-${i}`}
+							class="flex min-h-[56px] w-full items-center justify-between gap-4 px-5 py-4 text-left focus-visible:outline-2 focus-visible:outline-royal"
+						>
+							<span class="font-heading text-sm font-bold text-abyss sm:text-base">{faq.q}</span>
+							<span
+								class={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl transition-all duration-200 ${openFaq === i ? 'rotate-180 bg-royal text-white' : 'bg-ice text-royal'}`}
+								aria-hidden="true"
+							>
+								<i class="fa-solid fa-chevron-down text-xs"></i>
+							</span>
+						</button>
+						{#if openFaq === i}
+							<p id={`faq-panel-${i}`} role="region" aria-labelledby={`faq-button-${i}`} class="px-5 pb-5 text-sm leading-relaxed text-slate-600">
+								{faq.a}
+							</p>
+						{/if}
+					</div>
+				{/each}
+			</div>
 		</div>
 	</section>
 

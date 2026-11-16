@@ -9,6 +9,7 @@
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
 	import { fetchAdminOverview } from '$lib/api/admin';
 	import { fetchAdminPayments } from '$lib/api/payments';
+	import { fetchAdminPromoProposals } from '$lib/api/promos';
 	import { listApplicationsRequest } from '$lib/api/applications';
 	import { fileUrl } from '$lib/api/courses';
 	import { untrack } from 'svelte';
@@ -62,12 +63,15 @@
 	let teacherBadge = $state<string | undefined>(undefined);
 	let courseBadge = $state<string | undefined>(undefined);
 	// Antrean perlu tindakan (bell menyala hanya bila >0).
+	// Dihitung dari status backend: yang sudah diputus (disetujui/ditolak/
+	// diverifikasi) otomatis hilang dari hitungan agar tidak menumpuk.
 	let pendingPayments = $state(0);
 	let pendingApplications = $state(0);
+	let pendingPromoProposals = $state(0);
 
 	const fmtCount = (n: number): string => n.toLocaleString('id-ID');
 
-	const notifCount = $derived(pendingPayments + pendingApplications);
+	const notifCount = $derived(pendingPayments + pendingApplications + pendingPromoProposals);
 	const notifLabel = $derived(
 		notifCount > 0 ? `${notifCount} antrean perlu tindakan — buka Notifikasi` : 'Notifikasi'
 	);
@@ -98,6 +102,12 @@
 			pendingApplications = submitted.total + underReview.total;
 		} catch {
 			// Abaikan: bell cukup tidak menyala.
+		}
+		try {
+			const proposals = await fetchAdminPromoProposals('pending');
+			pendingPromoProposals = proposals.length;
+		} catch {
+			// Abaikan: bell cukup tidak menyala.
 		} finally {
 			refreshing = false;
 		}
@@ -123,14 +133,21 @@
 		const onFocus = () => {
 			if (phase === 'ready') void loadBadges();
 		};
+		// Keputusan dari halaman kelola (mis. setujui/tolak pengajuan promo)
+		// langsung menyegarkan bell tanpa menunggu interval/navigasi.
+		const onDecided = () => {
+			if (phase === 'ready') void loadBadges();
+		};
 		document.addEventListener('visibilitychange', onVisible);
 		window.addEventListener('focus', onFocus);
+		window.addEventListener('admin:notif-refresh', onDecided);
 		const timer = setInterval(() => {
 			if (phase === 'ready') void loadBadges();
 		}, 60000);
 		return () => {
 			document.removeEventListener('visibilitychange', onVisible);
 			window.removeEventListener('focus', onFocus);
+			window.removeEventListener('admin:notif-refresh', onDecided);
 			clearInterval(timer);
 		};
 	});
@@ -146,16 +163,49 @@
 	const avatarSrc = $derived(session?.avatarUrl ? fileUrl(session.avatarUrl) : null);
 
 	const navItems = $derived<NavItem[]>([
-		{ label: 'Dasbor', icon: 'fa-house', href: '/admin' },
-		{ label: 'Peserta', icon: 'fa-users', href: '/admin/peserta', badge: studentBadge },
-		{ label: 'Pengajuan', icon: 'fa-user-plus', href: '/admin/pengajuan-instruktur' },
-		{ label: 'Undangan', icon: 'fa-envelope-open-text', href: '/admin/invitations' },
-		{ label: 'Instruktur', icon: 'fa-chalkboard-user', href: '/admin/instrukturs', badge: teacherBadge },
-		{ label: 'Kursus', icon: 'fa-layer-group', href: '/admin/courses', badge: courseBadge },
-		{ label: 'Voucher', icon: 'fa-ticket', href: '/admin/vouchers' },
-		{ label: 'Promo', icon: 'fa-tags', href: '/admin/promos' },
-		{ label: 'Pembayaran', icon: 'fa-money-bill-transfer', href: '/admin/pembayaran' },
-		{ label: 'Profil', icon: 'fa-user', href: '/admin/profile' }
+		{
+			label: 'Ringkasan',
+			icon: 'fa-gauge-high',
+			href: '/admin',
+			children: [
+				{ label: 'Dasbor', icon: 'fa-house', href: '/admin' },
+				{ label: 'Laporan', icon: 'fa-chart-line', href: '/admin/laporan' }
+			]
+		},
+		{
+			label: 'Pengguna',
+			icon: 'fa-user-group',
+			href: '/admin/peserta',
+			children: [
+				{ label: 'Peserta', icon: 'fa-users', href: '/admin/peserta', badge: studentBadge },
+				{ label: 'Instruktur', icon: 'fa-chalkboard-user', href: '/admin/instrukturs', badge: teacherBadge },
+				{ label: 'Pengajuan', icon: 'fa-user-plus', href: '/admin/pengajuan-instruktur' },
+				{ label: 'Undangan', icon: 'fa-envelope-open-text', href: '/admin/invitations' }
+			]
+		},
+		{
+			label: 'Katalog',
+			icon: 'fa-cubes',
+			href: '/admin/courses',
+			children: [
+				{ label: 'Kursus', icon: 'fa-layer-group', href: '/admin/courses', badge: courseBadge },
+				{ label: 'Kategori', icon: 'fa-list', href: '/admin/kategori' },
+				{ label: 'Voucher', icon: 'fa-ticket', href: '/admin/vouchers' },
+				{
+					label: 'Promo',
+					icon: 'fa-tags',
+					href: '/admin/promos',
+					badge: pendingPromoProposals > 0 ? fmtCount(pendingPromoProposals) : undefined
+				},
+				{ label: 'Pembayaran', icon: 'fa-money-bill-transfer', href: '/admin/pembayaran' }
+			]
+		},
+		{
+			label: 'Akun',
+			icon: 'fa-circle-user',
+			href: '/admin/profile',
+			children: [{ label: 'Profil', icon: 'fa-user', href: '/admin/profile' }]
+		}
 	]);
 
 	function toggleProfileMenu() {
@@ -304,6 +354,20 @@
 											<span>
 												<span class="block font-semibold text-slate-800">{pendingPayments} pembayaran menunggu</span>
 												<span class="block text-xs text-slate-500">Verifikasi terima/tolak di Pembayaran.</span>
+											</span>
+										</a>
+									{/if}
+									{#if pendingPromoProposals > 0}
+										<a
+											role="menuitem"
+											href="/admin/promos#pengajuan-promo"
+											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+											onclick={closeNotifMenu}
+										>
+											<i class="fa-solid fa-tags mt-0.5 w-4 text-center text-violet-500" aria-hidden="true"></i>
+											<span>
+												<span class="block font-semibold text-slate-800">{pendingPromoProposals} pengajuan promo</span>
+												<span class="block text-xs text-slate-500">Setujui/tolak di Promo.</span>
 											</span>
 										</a>
 									{/if}

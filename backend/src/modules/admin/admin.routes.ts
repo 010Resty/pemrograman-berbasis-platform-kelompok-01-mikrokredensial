@@ -5,6 +5,7 @@ import {
   createTeacherHandler,
   listUsersHandler,
   overviewHandler,
+  reportsHandler,
   unassignHandler,
   updateUserHandler,
   userDetailHandler,
@@ -15,6 +16,9 @@ const admin = [authenticate, requireRole("admin")];
 
 // Ringkasan badge sidebar (4 agregat ringan, tanpa daftar).
 router.get("/admin/overview", ...admin, overviewHandler);
+
+// Laporan agregat read-only (ringkasan + per kursus + filter tanggal).
+router.get("/admin/reports", ...admin, reportsHandler);
 
 // Manajemen pengguna.
 router.get("/admin/users", ...admin, listUsersHandler);

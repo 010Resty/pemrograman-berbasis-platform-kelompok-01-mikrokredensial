@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import { tick } from 'svelte';
 	import { getCourseById, type Course, type CourseModule } from '$lib/data/courses';
@@ -27,6 +28,7 @@
 		fetchCourseDetail
 	} from '$lib/api/courses';
 	import { uploadFile } from '$lib/api/uploads';
+	import { fetchCategories, FALLBACK_CATEGORIES } from '$lib/api/categories';
 	import { formatIDR } from '$lib/data/payment';
 	import MonthPicker from '$lib/components/MonthPicker.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
@@ -341,17 +343,16 @@
 	});
 
 	/* ---- Ubah info kursus (server saja, field sama seperti form tambah) ---- */
-	const EDIT_CATEGORIES = [
-		'Pengembangan Web',
-		'Basis Data',
-		'Jaringan',
-		'Keamanan',
-		'AI & Data',
-		'Infrastruktur',
-		'Desain',
-		'Bisnis'
-	];
+	/** Kategori resmi dari server (dikelola admin); fallback bila offline. */
+	let EDIT_CATEGORIES = $state<string[]>([...FALLBACK_CATEGORIES]);
 	const EDIT_LEVELS = ['Pemula', 'Menengah', 'Lanjutan'];
+
+	$effect(() => {
+		if (!browser) return;
+		void fetchCategories().then((names) => {
+			if (names.length > 0) EDIT_CATEGORIES = names;
+		});
+	});
 
 	let editing = $state(false);
 	let editPrefilling = $state(false);
@@ -453,9 +454,9 @@
 		try {
 			const detail = await fetchCourseDetail(courseId);
 			eTitle = detail.title ?? '';
-			// Backend z.enum(CATEGORIES) identik dengan daftar form tambah,
-			// jadi kategori server selalu resmi; bila tidak, kosongkan + tampilkan
-			// nilai lama sebagai hint agar pengguna memilih ulang yang resmi.
+			// Kategori server tervalidasi tabel kelola-admin; bila di luar daftar
+			// aktif (mis. dinonaktifkan setelah kursus dibuat), kosongkan +
+			// tampilkan nilai lama sebagai hint agar pengguna memilih ulang.
 			eCategoryCurrent = detail.category ?? '';
 			eCategory = EDIT_CATEGORIES.includes(eCategoryCurrent) ? eCategoryCurrent : '';
 			eLevel = EDIT_LEVELS.includes(detail.level) ? detail.level : 'Pemula';

@@ -103,7 +103,9 @@ export interface PublicCourseListParams {
 	category?: string;
 	period?: string;
 	status?: 'published' | 'archived';
+	level?: string;
 	limit?: number;
+	page?: number;
 }
 
 /**
@@ -118,7 +120,9 @@ export async function fetchPublicCourseList(
 	if (params.category) sp.set('category', params.category);
 	if (params.period) sp.set('period', params.period);
 	if (params.status) sp.set('status', params.status);
+	if (params.level) sp.set('level', params.level);
 	sp.set('limit', String(params.limit ?? 20));
+	if (params.page !== undefined) sp.set('page', String(params.page));
 	sp.set('sort', 'newest');
 	const data = await apiRequest<{ courses?: BackendCourse[] } | BackendCourse[]>(
 		`/courses?${sp.toString()}`

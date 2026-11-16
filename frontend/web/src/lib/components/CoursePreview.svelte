@@ -11,6 +11,8 @@
 		type BackendCourse,
 		type CourseAccessState
 	} from '$lib/api/courses';
+import { fileUrl } from '$lib/api/courses';
+import { buildSrcSet } from '$lib/api/responsive';
 	import type { CourseModule } from '$lib/data/courses';
 	import { setServerCourseFlags, syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
@@ -200,6 +202,8 @@
 		<div class="relative flex min-h-48 flex-col justify-end overflow-hidden sm:min-h-56">
 			<img
 				src={c.image || COVER_FALLBACK}
+				srcset={c.image ? (buildSrcSet(fileUrl(c.image), [800, 1200]) ?? undefined) : undefined}
+				sizes="100vw"
 				alt=""
 				aria-hidden="true"
 				class="absolute inset-0 h-full w-full object-cover"

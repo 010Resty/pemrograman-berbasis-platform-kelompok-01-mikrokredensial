@@ -79,6 +79,8 @@ export interface PublicSubmission {
   originalName: string | null;
   sizeBytes: number | null;
   studentName: string | null;
+  /** URL foto profil peserta atau null (relatif server, publik). */
+  studentAvatarUrl: string | null;
   studentNim: string | null;
   note: string | null;
   score: number | null;
@@ -99,6 +101,7 @@ const toPublicSubmission = (row: typeof submissions.$inferSelect): PublicSubmiss
   originalName: null,
   sizeBytes: null,
   studentName: row.studentName,
+  studentAvatarUrl: null,
   studentNim: row.studentNim,
   note: row.note,
   score: row.score,
@@ -137,12 +140,28 @@ const withFileMeta = async (
       meta.set(f.id, { originalName: f.originalName, sizeBytes: f.sizeBytes });
     }
   }
+  // Avatar peserta (satu query batch, bukan N+1).
+  const userIds = [...new Set(rows.map((r) => r.userId))];
+  const avatarByUser = new Map<number, string | null>();
+  if (userIds.length > 0) {
+    const urows = await db
+      .select({ id: users.id, avatarFileId: users.avatarFileId })
+      .from(users)
+      .where(inArray(users.id, userIds));
+    for (const u of urows) {
+      avatarByUser.set(
+        u.id,
+        u.avatarFileId ? `/api/v1/files/${u.avatarFileId}/content` : null
+      );
+    }
+  }
   return rows.map((r) => ({
     ...toPublicSubmission(r),
     originalName:
       r.fileId !== null ? (meta.get(r.fileId)?.originalName ?? null) : null,
     sizeBytes:
       r.fileId !== null ? (meta.get(r.fileId)?.sizeBytes ?? null) : null,
+    studentAvatarUrl: avatarByUser.get(r.userId) ?? null,
   }));
 };
 

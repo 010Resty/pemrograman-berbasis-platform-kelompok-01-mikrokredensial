@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
 	import RevokeDialog from '$lib/components/RevokeDialog.svelte';
+	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import { toast } from '$lib/stores/toast.svelte';
 	import {
 		fetchCertificateDetail as apiDetail,
@@ -144,9 +145,16 @@
 					</div>
 				</div>
 				<dl class="space-y-3 p-5 text-sm sm:p-6">
-					<div class="flex justify-between gap-3 border-b border-slate-100 pb-3">
+					<div class="flex items-center justify-between gap-3 border-b border-slate-100 pb-3">
 						<dt class="text-slate-500">Nama peserta</dt>
-						<dd class="text-right font-semibold text-slate-800">{cert.studentName}</dd>
+						<dd class="flex items-center gap-2.5 text-right font-semibold text-slate-800">
+							<UserAvatar
+								name={cert.studentName}
+								avatarUrl={cert.studentAvatarUrl ?? null}
+								size="h-8 w-8"
+							/>
+							{cert.studentName}
+						</dd>
 					</div>
 					<div class="flex justify-between gap-3 border-b border-slate-100 pb-3">
 						<dt class="text-slate-500">Nama tercetak</dt>

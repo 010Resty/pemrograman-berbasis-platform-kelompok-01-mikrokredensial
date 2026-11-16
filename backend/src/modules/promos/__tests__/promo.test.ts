@@ -187,6 +187,58 @@ describe("promo: kelola kampanye (admin-only)", () => {
     assert.equal(anon.http, 401);
   });
 
+  it("sampul promo: simpan saat buat, tampil publik+admin, patch valid", async () => {
+    const created = await api<{ slug: string; coverImage: string | null }>(
+      "POST",
+      "/api/v1/admin/promos",
+      tokens.admin,
+      {
+        slug: "promo-sampul",
+        title: "Promo Sampul Panjang Judul",
+        type: "kurasi",
+        status: "active",
+        coverImage: "https://cdn.contoh.id/promo/sampul.png",
+      }
+    );
+    assert.equal(created.http, 201, JSON.stringify(created.json));
+    assert.equal(created.json.data.coverImage, "https://cdn.contoh.id/promo/sampul.png");
+
+    const pub = await api<{ slug: string; coverImage: string | null }>(
+      "GET",
+      "/api/v1/promos/promo-sampul"
+    );
+    assert.equal(pub.http, 200, JSON.stringify(pub.json));
+    assert.equal(pub.json.data.coverImage, "https://cdn.contoh.id/promo/sampul.png");
+
+    const patched = await api<{ coverImage: string | null }>(
+      "PATCH",
+      "/api/v1/admin/promos/promo-sampul",
+      tokens.admin,
+      { coverImage: "/api/v1/files/9/content" }
+    );
+    assert.equal(patched.http, 200, JSON.stringify(patched.json));
+    assert.equal(patched.json.data.coverImage, "/api/v1/files/9/content");
+
+    const cleared = await api<{ coverImage: string | null }>(
+      "PATCH",
+      "/api/v1/admin/promos/promo-sampul",
+      tokens.admin,
+      { coverImage: null }
+    );
+    assert.equal(cleared.http, 200);
+    assert.equal(cleared.json.data.coverImage, null);
+
+    for (const bad of [{ coverImage: "javascript:alert(1)" }, { coverImage: "ftp://x/y.png" }]) {
+      const r = await api("POST", "/api/v1/admin/promos", tokens.admin, {
+        slug: `promo-sampul-buruk-${Math.random().toString(36).slice(2, 8)}`,
+        title: "Promo Sampul Buruk Panjang Judul",
+        type: "kurasi",
+        ...bad,
+      });
+      assert.equal(r.http, 400, JSON.stringify(r.json));
+    }
+  });
+
   it("tambah/hapus kursus: draft ditolak, ganda 409, hapus idempoten", async () => {
     const add = await api("POST", "/api/v1/admin/promos/promo-akhir-tahun/courses", tokens.admin, {
       courseId: ids.paid,
@@ -392,5 +444,141 @@ describe("promo: diskon real di pembayaran (non-stack)", () => {
       courseId: ids.free,
     });
     assert.equal(freeKurasi.http, 201);
+  });
+
+  it("harga patungan per kursus: simpan + tampil; ditolak di luar tipe patungan", async () => {
+    const camp = await api("POST", "/api/v1/admin/promos", tokens.admin, {
+      slug: "patungan-harga",
+      title: "Patungan Harga Panjang Judul",
+      type: "patungan",
+      status: "active",
+    });
+    assert.equal(camp.http, 201, JSON.stringify(camp.json));
+
+    const add = await api("POST", "/api/v1/admin/promos/patungan-harga/courses", tokens.admin, {
+      courseId: ids.paid2,
+      patunganPrice: 75000,
+    });
+    assert.equal(add.http, 201, JSON.stringify(add.json));
+
+    const detail = await api<{
+      courses: Array<{ courseId: number; patunganPrice: number | null }>;
+    }>("GET", "/api/v1/admin/promos/patungan-harga", tokens.admin);
+    assert.equal(detail.http, 200);
+    const row = detail.json.data.courses.find((c) => c.courseId === ids.paid2);
+    assert.ok(row);
+    assert.equal(row.patunganPrice, 75000);
+
+    const pub = await api<{
+      courses: Array<{ courseId: number; patunganPrice: number | null }>;
+    }>("GET", "/api/v1/promos/patungan-harga");
+    assert.equal(pub.http, 200);
+    const pubRow = pub.json.data.courses.find((c) => c.courseId === ids.paid2);
+    assert.ok(pubRow);
+    assert.equal(pubRow.patunganPrice, 75000);
+
+    // Harga patungan pada promo non-patungan ditolak.
+    const forbidden = await api("POST", "/api/v1/admin/promos/promo-akhir-tahun/courses", tokens.admin, {
+      courseId: ids.paid2,
+      patunganPrice: 50000,
+    });
+    assert.equal(forbidden.http, 400);
+    assert.equal(forbidden.json.code, "PATUNGAN_PRICE_FORBIDDEN");
+
+    // Nilai tak valid ditolak skema.
+    for (const bad of [{ patunganPrice: 0 }, { patunganPrice: -100 }, { patunganPrice: "mahal" }]) {
+      const r = await api("POST", "/api/v1/admin/promos/patungan-harga/courses", tokens.admin, {
+        courseId: ids.paid,
+        ...bad,
+      });
+      assert.equal(r.http, 400, JSON.stringify(bad));
+    }
+  });
+
+  it("hapus promo: draft + anggota ikut terhapus; aktif dipakai ditolak", async () => {
+    const camp = await api("POST", "/api/v1/admin/promos", tokens.admin, {
+      slug: "promo-hapus-saya",
+      title: "Promo Hapus Saya Panjang Judul",
+      type: "kurasi",
+      status: "draft",
+    });
+    assert.equal(camp.http, 201, JSON.stringify(camp.json));
+    const add = await api("POST", "/api/v1/admin/promos/promo-hapus-saya/courses", tokens.admin, {
+      courseId: ids.paid2,
+    });
+    assert.equal(add.http, 201);
+
+    const anon = await api("DELETE", "/api/v1/admin/promos/promo-hapus-saya");
+    assert.equal(anon.http, 401);
+    const teacher = await api("DELETE", "/api/v1/admin/promos/promo-hapus-saya", tokens.teacher);
+    assert.equal(teacher.http, 403);
+
+    const del = await api("DELETE", "/api/v1/admin/promos/promo-hapus-saya", tokens.admin);
+    assert.equal(del.http, 200, JSON.stringify(del.json));
+    const gone = await api("GET", "/api/v1/admin/promos/promo-hapus-saya", tokens.admin);
+    assert.equal(gone.http, 404);
+    const missing = await api("DELETE", "/api/v1/admin/promos/promo-hapus-saya", tokens.admin);
+    assert.equal(missing.http, 404);
+    // Slug bekas pakai bisa dipakai lagi (baris benar-benar hilang).
+    const reuse = await api("POST", "/api/v1/admin/promos", tokens.admin, {
+      slug: "promo-hapus-saya",
+      title: "Promo Hapus Saya Lagi Panjang",
+      type: "kurasi",
+      status: "draft",
+    });
+    assert.equal(reuse.http, 201, JSON.stringify(reuse.json));
+
+    // Kampanye dengan antrean aktif tidak boleh dihapus.
+    const mkPaidCourse = async (title: string) => {
+      const [c] = await db.insert(schema.courses).values({
+        title,
+        description: "Deskripsi kursus antrean promo yang cukup panjang untuk validasi.",
+        category: "Pengembangan Web",
+        level: "Pemula",
+        duration: "4 Bulan",
+        status: "published",
+        priceLabel: "Rp200000",
+        priceNominal: 200000,
+        period: "ongoing",
+        outcomes: ["Hasil belajar pertama yang cukup panjang"],
+        tools: ["Laptop"],
+        createdBy: ids.teacher,
+      });
+      return Number((c as unknown as { insertId: number }).insertId);
+    };
+
+    // Jalur 1: grup patungan pending menunjuk kampanye.
+    const coursePat = await mkPaidCourse("Kursus Patungan Sibuk Panjang Judulnya");
+    const campPat = await api("POST", "/api/v1/admin/promos", tokens.admin, {
+      slug: "patungan-sibuk",
+      title: "Patungan Sibuk Panjang Judul",
+      type: "patungan",
+      status: "active",
+    });
+    assert.equal(campPat.http, 201, JSON.stringify(campPat.json));
+    const addPat = await api("POST", "/api/v1/admin/promos/patungan-sibuk/courses", tokens.admin, {
+      courseId: coursePat,
+    });
+    assert.equal(addPat.http, 201, JSON.stringify(addPat.json));
+    const grp = await api("POST", "/api/v1/patungan/groups", tokens.s1, {
+      courseId: coursePat,
+      usernames: ["s2-t"],
+    });
+    assert.equal(grp.http, 201, JSON.stringify(grp.json));
+    const inUsePat = await api("DELETE", "/api/v1/admin/promos/patungan-sibuk", tokens.admin);
+    assert.equal(inUsePat.http, 409);
+    assert.equal(inUsePat.json.code, "PROMO_IN_USE");
+
+    // Jalur 2: antrean pembayaran menunggu menunjuk kampanye diskon.
+    const antreId = await mkPaidCourse("Kursus Antrean Promo Panjang Judulnya");
+    const addAntre = await api("POST", "/api/v1/admin/promos/promo-akhir-tahun/courses", tokens.admin, {
+      courseId: antreId,
+    });
+    assert.equal(addAntre.http, 201, JSON.stringify(addAntre.json));
+    const pay = await api("POST", `/api/v1/courses/${antreId}/payments`, tokens.s2, {});
+    assert.equal(pay.http, 201, JSON.stringify(pay.json));
+    const inUse = await api("DELETE", "/api/v1/admin/promos/promo-akhir-tahun", tokens.admin);
+    assert.equal(inUse.http, 409);
+    assert.equal(inUse.json.code, "PROMO_IN_USE");
   });
 });

@@ -4,6 +4,7 @@
 	import FeatureFlowCard, { type FeatureFlow } from '$lib/components/FeatureFlowCard.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import UiStatCard from '$lib/components/ui/StatCard.svelte';
+	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import { getCurrentUser } from '$lib/stores/auth.svelte';
 	import {
 		fetchAdminOverview,
@@ -248,7 +249,7 @@
 			<i class="fa-solid fa-plus" aria-hidden="true"></i> Buat Kursus
 		</a>
 		<a
-			href="/segera-hadir?fitur=Laporan"
+			href="/admin/laporan"
 			class="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
 		>
 			<i class="fa-solid fa-chart-line" aria-hidden="true"></i> Lihat Laporan
@@ -277,9 +278,7 @@
 				{:else}
 				{#each recentUsers as u (u.id)}
 					<li class="flex items-center gap-3 px-6 py-3.5">
-						<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-xs font-bold text-slate-600" aria-hidden="true">
-							{u.name.split(' ').map((w) => w[0]).slice(0, 2).join('')}
-						</span>
+						<UserAvatar name={u.name} avatarUrl={u.avatarUrl ?? null} />
 						<span class="min-w-0 flex-1">
 							<span class="block truncate text-sm font-semibold text-slate-800">{u.name}</span>
 							<span class="block truncate text-xs text-slate-500">{u.email} · {roleLabel(u.role)}</span>

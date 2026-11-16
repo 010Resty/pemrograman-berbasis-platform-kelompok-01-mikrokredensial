@@ -11,6 +11,9 @@
 	} from '$lib/api/courses';
 	import { fetchPromos, type PromoCampaign } from '$lib/api/promos';
 	import { fetchMyEnrollments } from '$lib/api/progress';
+	import { buildSrcSet } from '$lib/api/responsive';
+	import { fileUrl } from '$lib/api/courses';
+	import { fetchCategories, FALLBACK_CATEGORIES } from '$lib/api/categories';
 	import { ownedCourses, setServerCourseFlags } from '$lib/stores/enrollment.svelte';
 
 	/**
@@ -23,16 +26,8 @@
 	 * "Berbayar" dari priceNominal baris (> 0).
 	 */
 
-	const CATEGORIES = [
-		'Pengembangan Web',
-		'Basis Data',
-		'Jaringan',
-		'Keamanan',
-		'AI & Data',
-		'Infrastruktur',
-		'Desain',
-		'Bisnis'
-	];
+	/** Kategori resmi dari server (dikelola admin); fallback bila offline. */
+	let CATEGORIES = $state<string[]>([...FALLBACK_CATEGORIES]);
 
 	// Kata kunci awal boleh datang dari header portal (?q=…); alur
 	// debounce + fetch yang sama tetap dipakai setelahnya.
@@ -165,6 +160,13 @@
 			if (debouncedSearch !== q) debouncedSearch = q;
 		}, 400);
 		return () => clearTimeout(t);
+	});
+
+	$effect(() => {
+		if (!browser) return;
+		void fetchCategories().then((names) => {
+			if (names.length > 0) CATEGORIES = names;
+		});
 	});
 
 	$effect(() => {
@@ -375,6 +377,8 @@
 							{#if course.image}
 							<img
 								src={course.image}
+								srcset={buildSrcSet(fileUrl(course.image), [400, 800]) ?? undefined}
+								sizes="(max-width: 768px) 100vw, 50vw"
 								alt={`Sampul kursus ${course.title}`}
 								class="h-48 w-full object-cover transition-transform duration-700 ease-smooth group-hover:scale-105"
 								loading="lazy"

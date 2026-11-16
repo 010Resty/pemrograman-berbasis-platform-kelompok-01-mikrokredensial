@@ -1,7 +1,8 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import '../../../../app.css';
-	import Logo from '$lib/components/Logo.svelte';
+	import PublicHeader from '$lib/components/public/PublicHeader.svelte';
+	import PublicFooter from '$lib/components/public/PublicFooter.svelte';
 	import MaterialTypeIcon from '$lib/components/training/atoms/MaterialTypeIcon.svelte';
 	import { getCourseById, getModuleMaterials } from '$lib/data/courses';
 	import { getCourseMeta } from '$lib/data/course-meta';
@@ -29,8 +30,6 @@
 			: null
 	);
 
-	let menuOpen = $state(false);
-
 	const modulPath = $derived(`/modules/${page.params.courseId}/${page.params.moduleId}`);
 </script>
 
@@ -48,7 +47,7 @@
 			'@type': 'BreadcrumbList',
 			itemListElement: [
 				{ '@type': 'ListItem', position: 1, name: 'Beranda', item: canonicalPath('/') },
-				{ '@type': 'ListItem', position: 2, name: 'Semua Pelatihan', item: canonicalPath('/modules') },
+				{ '@type': 'ListItem', position: 2, name: 'Semua Pelatihan', item: canonicalPath('/pelatihan') },
 				{
 					'@type': 'ListItem',
 					position: 3,
@@ -66,51 +65,7 @@
 	]}
 />
 
-<header class="sticky top-0 z-50 bg-white shadow-sm">
-	<div class="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-		<a href="/" class="flex shrink-0 items-center gap-3 rounded-lg focus-visible:outline-2 focus-visible:outline-blue-600" aria-label="Aristoteles - Beranda">
-			<Logo size="md" showText={true} textSize="xl" />
-		</a>
-		<nav aria-label="Navigasi utama" class="hidden min-w-0 flex-1 items-center justify-center gap-5 font-semibold text-[13px] text-slate-700 lg:flex xl:gap-7">
-			<a href="/" class="whitespace-nowrap hover:text-blue-600">BERANDA</a>
-			<a href="/modules" aria-current="page" class="whitespace-nowrap text-blue-600">PELATIHAN</a>
-			<a href="/peringkat" class="whitespace-nowrap hover:text-blue-600">PERINGKAT</a>
-			<a href="/tentang" class="whitespace-nowrap hover:text-blue-600">TENTANG</a>
-			<a href="/verifikasi" class="whitespace-nowrap hover:text-blue-600">VERIFIKASI</a>
-		</nav>
-		<div class="hidden shrink-0 items-center gap-2.5 sm:flex">
-			<a href="/login" class="inline-flex min-h-[44px] items-center justify-center rounded-full border border-blue-600 px-5 text-xs font-bold text-blue-700 uppercase hover:bg-blue-50">Masuk</a>
-			<a href="/register" class="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 text-xs font-bold text-white uppercase shadow-lg shadow-blue-500/25 hover:bg-blue-700">
-				Mulai Belajar <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
-			</a>
-		</div>
-		<button
-			type="button"
-			onclick={() => (menuOpen = !menuOpen)}
-			aria-expanded={menuOpen}
-			aria-controls="module-mobile-nav"
-			aria-label={menuOpen ? 'Tutup menu' : 'Buka menu'}
-			class="flex min-h-11 min-w-11 items-center justify-center rounded-xl p-2 text-slate-700 hover:bg-slate-100 lg:hidden"
-		>
-			<i class={`fa-solid ${menuOpen ? 'fa-xmark' : 'fa-bars'} text-xl`} aria-hidden="true"></i>
-		</button>
-	</div>
-	{#if menuOpen}
-		<nav id="module-mobile-nav" aria-label="Navigasi seluler" class="border-t border-slate-100 px-4 pt-2 pb-4 lg:hidden">
-			<div class="flex flex-col gap-1 text-sm font-semibold text-slate-700">
-				<a href="/" class="rounded-lg px-3 py-2.5 hover:bg-slate-50" onclick={() => (menuOpen = false)}>Beranda</a>
-				<a href="/modules" aria-current="page" class="rounded-lg bg-blue-50 px-3 py-2.5 text-blue-700" onclick={() => (menuOpen = false)}>Pelatihan</a>
-				<a href="/peringkat" class="rounded-lg px-3 py-2.5 hover:bg-slate-50" onclick={() => (menuOpen = false)}>Peringkat</a>
-				<a href="/tentang" class="rounded-lg px-3 py-2.5 hover:bg-slate-50" onclick={() => (menuOpen = false)}>Tentang</a>
-				<a href="/verifikasi" class="rounded-lg px-3 py-2.5 hover:bg-slate-50" onclick={() => (menuOpen = false)}>Verifikasi</a>
-			</div>
-			<div class="mt-3 flex gap-2 sm:hidden">
-				<a href="/login" class="inline-flex min-h-11 flex-1 items-center justify-center rounded-full border border-blue-600 px-5 text-xs font-bold text-blue-700 uppercase">Masuk</a>
-				<a href="/register" class="inline-flex min-h-11 flex-1 items-center justify-center rounded-full bg-blue-600 px-5 text-xs font-bold text-white uppercase">Mulai Belajar</a>
-			</div>
-		</nav>
-	{/if}
-</header>
+<PublicHeader active="pelatihan" />
 
 <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
 	{#if !course || !module || moduleIndex < 0}
@@ -126,7 +81,7 @@
 		</div>
 	{:else}
 		<nav aria-label="Breadcrumb" class="mb-4 flex flex-wrap items-center gap-2 text-xs text-slate-500">
-			<a href="/modules" class="rounded font-semibold text-blue-600 hover:text-blue-700">Semua Pelatihan</a>
+			<a href="/pelatihan" class="rounded font-semibold text-blue-600 hover:text-blue-700">Semua Pelatihan</a>
 			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
 			<a href={`/modules/${course.id}`} class="rounded font-semibold text-blue-600 hover:text-blue-700">{course.title}</a>
 			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
@@ -275,6 +230,4 @@
 	{/if}
 </main>
 
-<footer class="border-t border-slate-800 bg-slate-900 py-8 text-center text-xs text-slate-500">
-	&copy; 2026 Aristoteles Platform Mikrokredensial. Semua hak dilindungi.
-</footer>
+<PublicFooter />

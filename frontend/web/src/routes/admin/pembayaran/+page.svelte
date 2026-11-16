@@ -3,8 +3,8 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
-	import { getApiBase } from '$lib/api/backend';
 	import {
+		downloadProofFile,
 		fetchAdminPayments,
 		verifyPayment,
 		type AdminPaymentRow,
@@ -29,7 +29,6 @@
 	let loadSeq = 0;
 
 	let verifyId = $state<number | null>(null);
-	let verifyAmount = $state('');
 	let verifyReason = $state('');
 	let verifyDecision = $state<'terima' | 'tolak'>('terima');
 	let verifyBusy = $state(false);
@@ -75,24 +74,53 @@
 		void load();
 	});
 
-	function fileUrl(path: string | null): string | null {
-		if (!path) return null;
-		if (/^https?:\/\//i.test(path)) return path;
-		return `${getApiBase().replace(/\/+$/, '')}${path.startsWith('/') ? path : `/${path}`}`;
+	// Pratinjau bukti bayar: berkas privat (pemilik + admin) sehingga tidak bisa
+	// dibuka via tautan langsung (tanpa header Authorization = 403).
+	// Diunduh dengan token lalu ditampilkan sebagai object URL, per baris.
+	let proofUrls = $state<Record<number, string>>({});
+	let proofLoadingId = $state<number | null>(null);
+	let proofErrorById = $state<Record<number, string>>({});
+	let expandedProof = $state<Record<number, boolean>>({});
+
+	async function loadProof(row: AdminPaymentRow): Promise<void> {
+		if (proofUrls[row.id]) return;
+		// Pengaman bila API mengembalikan baris tanpa bukti (normalnya sudah
+		// disaring server): jangan fetch, tampilkan pesan saja.
+		if (!row.proofFileId) {
+			proofErrorById = { ...proofErrorById, [row.id]: 'Belum ada bukti bayar dari peserta.' };
+			return;
+		}
+		proofLoadingId = row.id;
+		proofErrorById = { ...proofErrorById, [row.id]: '' };
+		try {
+			const blob = await downloadProofFile(row.proofFileId);
+			proofUrls = { ...proofUrls, [row.id]: URL.createObjectURL(blob) };
+		} catch (e) {
+			proofErrorById = {
+				...proofErrorById,
+				[row.id]: e instanceof Error ? e.message : 'Gagal memuat bukti.'
+			};
+		} finally {
+			if (proofLoadingId === row.id) proofLoadingId = null;
+		}
+	}
+
+	function toggleProof(row: AdminPaymentRow): void {
+		expandedProof = { ...expandedProof, [row.id]: !expandedProof[row.id] };
+		if (expandedProof[row.id]) void loadProof(row);
 	}
 
 	function openVerify(row: AdminPaymentRow): void {
 		verifyId = row.id;
-		verifyAmount = String(row.amountExpected);
 		verifyReason = '';
 		verifyDecision = 'terima';
 		verifyError = '';
+		void loadProof(row);
 	}
 
 	function closeVerify(): void {
 		if (verifyBusy) return;
 		verifyId = null;
-		verifyAmount = '';
 		verifyReason = '';
 		verifyError = '';
 	}
@@ -104,9 +132,11 @@
 			verifyError = 'Alasan penolakan wajib diisi.';
 			return;
 		}
-		const amount = Number(verifyAmount);
-		if (verifyDecision === 'terima' && (!Number.isFinite(amount) || amount < 0)) {
-			verifyError = 'Nominal yang diterima harus angka ≥ 0.';
+		// Terima = dianggap lunas persis sebesar tagihan. Backend tetap butuh
+		// amountPaid (tolak bila < tagihan), jadi kirim amountExpected langsung.
+		const row = items.find((i) => i.id === verifyId);
+		if (!row) {
+			verifyError = 'Data pembayaran tidak ditemukan. Muat ulang antrean.';
 			return;
 		}
 		verifyBusy = true;
@@ -114,10 +144,11 @@
 			await verifyPayment(verifyId, {
 				decision: verifyDecision,
 				...(verifyDecision === 'terima'
-					? { amountPaid: Math.floor(amount) }
+					? { amountPaid: row.amountExpected }
 					: { reason: verifyReason.trim() })
 			});
 			closeVerify();
+			window.dispatchEvent(new CustomEvent('admin:notif-refresh'));
 			await load();
 		} catch (e) {
 			verifyError = e instanceof Error ? e.message : 'Verifikasi gagal. Coba lagi.';
@@ -144,16 +175,16 @@
 </script>
 
 <svelte:head>
-	<title>Verifikasi Pembayaran — Admin ARISTOTELES</title>
-	<meta name="description" content="Antrean verifikasi pembayaran QRIS manual peserta." />
+	<title>Monitor Pembayaran — Admin ARISTOTELES</title>
+	<meta name="description" content="Pantau pembayaran QRIS dinamis DOKU (otomatis) + antrean manual lawas." />
 	<meta name="robots" content="noindex, nofollow" />
 </svelte:head>
 
 <div class="page-wrap page-stack">
 	<PageHeader
 		eyebrow="Admin · Pembayaran"
-		title="Verifikasi Pembayaran"
-		description="Setujui bukti bayar QRIS untuk membuka akses kursus, atau tolak beserta alasannya. Nominal kurang dari tagihan otomatis ditolak sistem."
+		title="Monitor Pembayaran"
+		description="QRIS dinamis DOKU diverifikasi otomatis via webhook. Verifikasi manual hanya untuk antrean manual lawas (bila masih ada)."
 	/>
 
 	<div class="flex flex-wrap gap-2" role="group" aria-label="Filter status pembayaran">
@@ -199,13 +230,12 @@
 			<EmptyState
 				icon="fa-money-bill-transfer"
 				title={activeFilter === 'menunggu' ? 'Tidak ada antrean menunggu' : 'Tidak ada pembayaran pada filter ini'}
-				description="Pengajuan baru dari peserta akan muncul di sini untuk diverifikasi."
+				description="Pembayaran DOKU masuk otomatis setelah peserta memindai QR; antrean manual lawas muncul di sini untuk diverifikasi."
 			/>
 		</div>
 	{:else}
 		<ol class="grid grid-cols-1 gap-4 md:grid-cols-2" aria-label="Daftar pengajuan pembayaran">
 			{#each items as p (p.id)}
-				{@const proofUrl = p.proofFileId ? fileUrl(`/api/v1/files/${p.proofFileId}/content`) : null}
 				<li class="flex flex-col rounded-2xl border border-slate-200/70 bg-white p-5">
 					<div class="flex items-start justify-between gap-3">
 						<div class="min-w-0">
@@ -217,6 +247,14 @@
 							<span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{statusLabel(p.status)}
 						</span>
 					</div>
+					<p class="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
+						<span class={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 font-bold ${p.gateway === 'doku' ? 'bg-violet-100 text-violet-700' : 'bg-slate-100 text-slate-500'}`}>
+							<i class="fa-solid fa-qrcode" aria-hidden="true"></i> {p.gateway === 'doku' ? 'DOKU dinamis' : 'Manual lawas'}
+						</span>
+						{#if p.gateway === 'doku' && p.dokuReferenceId}
+							<span class="font-mono text-slate-400">{p.dokuReferenceId}</span>
+						{/if}
+					</p>
 					<dl class="mt-3 space-y-1 text-xs">
 						<div class="flex justify-between gap-3">
 							<dt class="text-slate-500">Tagihan</dt>
@@ -246,21 +284,18 @@
 						{/if}
 					</dl>
 					<div class="mt-3 flex flex-wrap gap-2">
-						{#if proofUrl}
-							<a
-								href={proofUrl}
-								target="_blank"
-								rel="noopener noreferrer"
+						{#if p.proofFileId}
+							<button
+								type="button"
+								onclick={() => toggleProof(p)}
+								aria-expanded={Boolean(expandedProof[p.id])}
 								class="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
-								<i class="fa-solid fa-receipt" aria-hidden="true"></i> Lihat bukti
-							</a>
-						{:else}
-							<span class="inline-flex min-h-10 flex-1 items-center justify-center rounded-xl bg-slate-100 px-3 py-2 text-xs font-bold text-slate-400">
-								<i class="fa-solid fa-image" aria-hidden="true"></i> Tanpa bukti
-							</span>
+								<i class="fa-solid fa-receipt" aria-hidden="true"></i>
+								{expandedProof[p.id] ? 'Sembunyikan bukti' : 'Lihat bukti'}
+							</button>
 						{/if}
-						{#if p.status === 'menunggu'}
+						{#if p.status === 'menunggu' && p.gateway !== 'doku'}
 							<button
 								type="button"
 								onclick={() => openVerify(p)}
@@ -268,8 +303,38 @@
 							>
 								<i class="fa-solid fa-check-double" aria-hidden="true"></i> Verifikasi
 							</button>
+						{:else if p.status === 'menunggu' && p.gateway === 'doku'}
+							<p class="flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-violet-50 px-3 py-2 text-center text-[11px] font-bold text-violet-700">
+								<i class="fa-solid fa-bolt" aria-hidden="true"></i> Otomatis via webhook DOKU
+							</p>
 						{/if}
 					</div>
+					{#if expandedProof[p.id]}
+						<div class="mt-3 overflow-hidden rounded-xl border border-slate-200">
+							{#if proofUrls[p.id]}
+								<img
+									src={proofUrls[p.id]}
+									alt={`Bukti bayar ${p.invoice}`}
+									class="max-h-80 w-full bg-slate-50 object-contain"
+								/>
+							{:else if proofLoadingId === p.id}
+								<p class="flex items-center justify-center gap-2 p-6 text-xs font-semibold text-slate-500">
+									<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat bukti…
+								</p>
+							{:else if proofErrorById[p.id]}
+								<div class="p-4 text-center">
+									<p role="alert" class="text-xs font-semibold text-red-600">{proofErrorById[p.id]}</p>
+									<button
+										type="button"
+										onclick={() => void loadProof(p)}
+										class="mt-2 inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+									>
+										<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+									</button>
+								</div>
+							{/if}
+						</div>
+					{/if}
 				</li>
 			{/each}
 		</ol>
@@ -290,6 +355,36 @@
 		<div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
 			<h2 id="verify-title" class="text-base font-extrabold text-slate-900">Verifikasi pembayaran</h2>
 			<p class="mt-1 font-mono text-xs text-slate-500">{row?.invoice ?? ''} · {row ? formatIDR(row.amountExpected) : ''}</p>
+			{#if row?.proofFileId}
+				<div class="mt-3 overflow-hidden rounded-xl border border-slate-200">
+					{#if row && proofUrls[row.id]}
+						<img
+							src={proofUrls[row.id]}
+							alt={`Bukti bayar ${row.invoice}`}
+							class="max-h-64 w-full bg-slate-50 object-contain"
+						/>
+					{:else if row && proofLoadingId === row.id}
+						<p class="flex items-center justify-center gap-2 p-6 text-xs font-semibold text-slate-500">
+							<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat bukti…
+						</p>
+					{:else if row?.id !== undefined && proofErrorById[row.id]}
+						<div class="p-4 text-center">
+							<p role="alert" class="text-xs font-semibold text-red-600">{proofErrorById[row.id]}</p>
+							<button
+								type="button"
+								onclick={() => row && void loadProof(row)}
+								class="mt-2 inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 px-4 text-xs font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+							>
+								<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Coba lagi
+							</button>
+						</div>
+					{/if}
+				</div>
+			{:else}
+				<p class="mt-3 rounded-xl bg-slate-100 px-4 py-3 text-center text-xs font-bold text-slate-400">
+					Belum ada bukti bayar dari peserta.
+				</p>
+			{/if}
 			<div class="mt-4 grid grid-cols-2 gap-2" role="group" aria-label="Keputusan verifikasi">
 				<button
 					type="button"
@@ -309,15 +404,9 @@
 				</button>
 			</div>
 			{#if verifyDecision === 'terima'}
-				<label for="verify-amount" class="mt-4 block text-xs font-bold text-slate-700">Nominal yang diterima (Rp) — harus ≥ tagihan</label>
-				<input
-					id="verify-amount"
-					type="number"
-					min="0"
-					step="1"
-					bind:value={verifyAmount}
-					class="mt-1.5 w-full rounded-xl border border-slate-200 px-4 py-2.5 font-mono text-sm font-bold focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
-				/>
+				<p class="mt-4 rounded-xl bg-emerald-50 px-4 py-3 text-xs font-semibold text-emerald-700">
+					Menerima berarti lunas sebesar tagihan ({row ? formatIDR(row.amountExpected) : ''}) — akses kursus langsung dibuka.
+				</p>
 			{:else}
 				<label for="verify-reason" class="mt-4 block text-xs font-bold text-slate-700">Alasan penolakan (wajib)</label>
 				<textarea

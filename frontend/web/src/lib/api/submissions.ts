@@ -45,6 +45,8 @@ export interface MaterialSubmissionItem {
 	originalName: string | null;
 	sizeBytes: number | null;
 	studentName: string | null;
+	/** URL foto profil peserta atau null; absen pada payload lama → null. */
+	studentAvatarUrl?: string | null;
 	studentNim: string | null;
 	note: string | null;
 	score: number | null;

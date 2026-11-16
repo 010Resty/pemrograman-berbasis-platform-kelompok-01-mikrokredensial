@@ -7,6 +7,18 @@
 		icon: string;
 		href: string;
 		badge?: string;
+		/**
+		 * Anak sub-menu. Bila diisi, label item dirender sebagai judul
+		 * kelompok dan anak-anaknya tampil sebagai menu di bawahnya.
+		 * Bila `collapsible: true`, kelompok bisa dilipat/dibentangkan lewat
+		 * tombol chevron (default terbuka bila halaman aktif ada di dalamnya).
+		 * Bila `linkable: true`, label grup menjadi tautan ke `href`-nya
+		 * sendiri (mis. menu "Promo" → halaman semua promo) dengan tombol
+		 * chevron terpisah untuk dropdown-nya.
+		 */
+		children?: NavItem[];
+		collapsible?: boolean;
+		linkable?: boolean;
 	}
 
 	let {
@@ -69,6 +81,28 @@
 		if (href === '/user' || href === '/admin' || href === '/instruktur')
 			return currentPath === href || currentPath === href + '/';
 		return currentPath === href || currentPath.startsWith(href + '/');
+	}
+
+	function isGroup(item: NavItem): boolean {
+		return !!item.children && item.children.length > 0;
+	}
+
+	/** Grup terlipat dibuka bila halaman aktif ada di dalamnya; pilihan manual diingat per label. */
+	let openGroups = $state<Record<string, boolean>>({});
+
+	function groupHasActive(item: NavItem): boolean {
+		if (isActive(item.href)) return true;
+		return !!item.children?.some((c) => isActive(c.href));
+	}
+
+	function isGroupOpen(item: NavItem): boolean {
+		if (!item.collapsible) return true;
+		const manual = openGroups[item.label];
+		return manual ?? groupHasActive(item);
+	}
+
+	function toggleGroup(item: NavItem): void {
+		openGroups[item.label] = !isGroupOpen(item);
 	}
 
 	function toggleSidebar() {
@@ -198,21 +232,21 @@
 			{/if}
 		</div>
 
-		<!-- Main navigation -->
+		<!-- Main navigation (judul kelompok statis + daftar menu di bawahnya) -->
 		<nav class="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto" aria-label={navAriaLabel}>
-			{#if !isCollapsed}
+			{#if !isCollapsed && !navItems.some((i) => isGroup(i))}
 				<span
 					class="sidebar-text mb-1 px-3 text-[11px] font-bold tracking-wider text-slate-400 uppercase"
 					>Menu Utama</span
 				>
 			{/if}
 
-			{#each navItems as item (item.href)}
-				{@const active = isActive(item.href)}
+			{#snippet navLink(entry: NavItem)}
+				{@const active = isActive(entry.href)}
 				<a
-					href={item.href}
-					title={isCollapsed ? item.label : undefined}
-					aria-label={isCollapsed ? item.label : undefined}
+					href={entry.href}
+					title={isCollapsed ? entry.label : undefined}
+					aria-label={isCollapsed ? entry.label : undefined}
 					aria-current={active ? 'page' : undefined}
 					onclick={closeMobileSidebar}
 					class={`group flex min-h-11 items-center gap-3 rounded-xl px-3.5 py-3 transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
@@ -225,20 +259,20 @@
 				>
 					<span class="flex w-6 shrink-0 justify-center">
 						<i
-							class={`fa-solid ${item.icon} text-base transition-transform group-hover:scale-110 ${active ? 'text-white' : 'text-slate-400 group-hover:text-blue-600'}`}
+							class={`fa-solid ${entry.icon} text-base transition-transform group-hover:scale-110 ${active ? 'text-white' : 'text-slate-400 group-hover:text-blue-600'}`}
 							aria-hidden="true"
 						></i>
 					</span>
 					{#if !isCollapsed}
-						<span class="sidebar-text flex-1 truncate text-sm">{item.label}</span>
-						{#if item.badge}
+						<span class="sidebar-text flex-1 truncate text-sm">{entry.label}</span>
+						{#if entry.badge}
 							<span
 								class={`inline-flex min-w-6 items-center justify-center rounded-full px-2 py-0.5 text-[11px] font-bold ${
 									active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
 								}`}
-								aria-label={`${item.badge} baru`}
+								aria-label={`${entry.badge} baru`}
 							>
-								{item.badge}
+								{entry.badge}
 							</span>
 						{/if}
 						{#if active}
@@ -246,6 +280,49 @@
 						{/if}
 					{/if}
 				</a>
+			{/snippet}
+
+			{#each navItems as item (item.label)}
+				{#if isGroup(item)}
+					{@const open = isGroupOpen(item)}
+					{#if !isCollapsed}
+						{#if item.collapsible}
+							<div class="mt-3 flex items-center gap-1 first:mt-0">
+								{#if item.linkable}
+									<div class="min-w-0 flex-1">{@render navLink(item)}</div>
+								{:else}
+									<span class="sidebar-text min-w-0 flex-1 truncate px-3 text-[11px] font-bold tracking-wider text-slate-400 uppercase">
+										{item.label}
+									</span>
+								{/if}
+								<button
+									type="button"
+									onclick={() => toggleGroup(item)}
+									aria-expanded={open}
+									aria-label={open ? `Sembunyikan submenu ${item.label}` : `Tampilkan submenu ${item.label}`}
+									class="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+								>
+									<i
+										class={`fa-solid fa-chevron-down text-xs transition-transform duration-200 ${open ? '' : '-rotate-90'}`}
+										aria-hidden="true"
+									></i>
+								</button>
+							</div>
+						{:else}
+							<span
+								class="sidebar-text mt-3 mb-1 px-3 text-[11px] font-bold tracking-wider text-slate-400 uppercase first:mt-0"
+								>{item.label}</span
+							>
+						{/if}
+					{/if}
+					{#if open || isCollapsed}
+						{#each item.children! as child (child.href)}
+							{@render navLink(child)}
+						{/each}
+					{/if}
+				{:else}
+					{@render navLink(item)}
+				{/if}
 			{/each}
 		</nav>
 	</div>

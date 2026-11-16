@@ -23,6 +23,8 @@ export interface DashboardCourse {
 export interface DashboardPendingReview {
   submissionId: number;
   studentName: string;
+  /** URL foto profil peserta atau null (relatif server, publik). */
+  studentAvatarUrl: string | null;
   courseId: number;
   courseTitle: string;
   materialId: number;
@@ -174,6 +176,7 @@ export const getInstructorDashboard = async (
     .select({
       submissionId: submissions.id,
       studentName: users.name,
+      studentAvatarFileId: users.avatarFileId,
       courseId: modules.courseId,
       courseTitle: courses.title,
       materialId: materials.id,
@@ -196,6 +199,9 @@ export const getInstructorDashboard = async (
   const pendingReviews: DashboardPendingReview[] = reviewRows.map((r) => ({
     submissionId: r.submissionId,
     studentName: r.studentName,
+    studentAvatarUrl: r.studentAvatarFileId
+      ? `/api/v1/files/${r.studentAvatarFileId}/content`
+      : null,
     courseId: r.courseId,
     courseTitle: r.courseTitle,
     materialId: r.materialId,

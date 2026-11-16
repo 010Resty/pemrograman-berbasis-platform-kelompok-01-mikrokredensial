@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import CertificateCover from '$lib/components/training/molecules/CertificateCover.svelte';
 	import { downloadMyCertificatePdf, fetchMyCertificates, type MyCertificate } from '$lib/api/progress';
+	import { fileUrl } from '$lib/api/courses';
 
 	/**
 	 * Detail satu sertifikat milik sendiri: fasimil besar + data + unduh PDF.
@@ -157,6 +158,7 @@
 					moduleTitle={cert.moduleTitle}
 					issuedLabel={formatDate(cert.issuedAt)}
 					instructorName={cert.instructorName ?? null}
+					signatureUrl={cert.signatureUrl ? fileUrl(cert.signatureUrl) : null}
 					status={active ? 'issued' : 'revoked'}
 					size="full"
 				/>

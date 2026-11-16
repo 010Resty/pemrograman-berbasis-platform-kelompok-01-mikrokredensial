@@ -1,4 +1,5 @@
 <script lang="ts">
+	import type { Snippet } from 'svelte';
 	/**
 	 * WarningModal — modal peringatan reusable ARISTOTELES.
 	 *
@@ -42,7 +43,8 @@
 		dismissible = true,
 		loading = false,
 		onconfirm,
-		oncancel
+		oncancel,
+		extra
 	}: {
 		/** Kontrol tampil/sembunyi (two-way via `bind:open`). */
 		open: boolean;
@@ -66,6 +68,8 @@
 		onconfirm: () => void;
 		/** Callback opsional saat dibatalkan (tombol batal / tutup / Escape / backdrop). */
 		oncancel?: () => void;
+		/** Konten tambahan opsional (mis. kolom input) di antara pesan dan tombol. */
+		extra?: Snippet;
 	} = $props();
 
 	const uid = `wm-${Math.random().toString(36).slice(2, 9)}`;
@@ -174,8 +178,7 @@
 						<p id={messageId} class="mt-1 text-sm leading-relaxed text-slate-600">
 							{message}
 						</p>
-					</div>
-					{#if dismissible && !loading}
+					</div>					{#if dismissible && !loading}
 						<button
 							type="button"
 							aria-label="Tutup dialog"
@@ -186,6 +189,12 @@
 						</button>
 					{/if}
 				</div>
+
+				{#if extra}
+					<div class="mt-4">
+						{@render extra()}
+					</div>
+				{/if}
 
 				<div class="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
 					<button

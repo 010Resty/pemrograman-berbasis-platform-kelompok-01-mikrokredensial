@@ -67,7 +67,7 @@ Alur saat ini: `register` → `verify-email` (keduanya menerbitkan pasangan
 | `POST /verify-reset-code` | — + rate-limit | `{email, code}` | 200 generik valid | 400/410; 429 |
 | `POST /reset-password` | — + rate-limit | `{email, code, newPassword(8–72)}` | 200 | 400/410; 429 |
 | `POST /login` | — + rate-limit | `{email, password(1–72)}` | 200 `{accessToken, refreshToken(64-hex, simpan aman), user}` | 400 generik; 403 bila `isActive=false`; 429 |
-| `POST /refresh` | — + rate-limit | `{refreshToken!}` (opaque, sekali pakai) | 200 `{accessToken, refreshToken(baru), refreshExpiresAt, user}` (token lama dicabut; pakai ulang token basi → 401 + seluruh sesi dicabut) | 400 validasi; 401 token tak dikenal/kedaluwarsa/dicabut/nonaktif; 429 |
+| `POST /refresh` | — + rate-limit | `{refreshToken!}` (opaque, sekali pakai) | 200 `{accessToken, refreshToken(baru), refreshExpiresAt, user}` (token lama dicabut + catat penerus; pakai ulang dalam grace `REFRESH_REUSE_GRACE_MS` default 60 dtk disusuri rantainya (maks 10 lompatan) → 200; rantai basi/terputus → 401 + seluruh sesi dicabut) | 400 validasi; 401 token tak dikenal/kedaluwarsa/dicabut/nonaktif; 429 |
 | `POST /logout` | JWT | `{refreshToken?}` (tanpa = cabut semua sesi sendiri) | 200 `{revoked}` | 401 tanpa token akses |
 | `GET /me` | JWT | — | 200 `{user{id,name,username,email,role,avatarUrl(/api/v1/files/:id/content|null)}}` (query ulang DB; `Cache-Control: no-store`) | 401 token hilang/tak valid/user terhapus |
 
@@ -97,14 +97,31 @@ katalog publik = `published` + `archived`; `draft` tidak bocor.
 
 | Endpoint | Auth/Role | Sukses | Error |
 |---|---|---|---|
-| `GET /courses?category=&period=&q=&status=published\|archived&limit=&page=&sort=newest\|oldest` | publik | 200 array kursus (default limit 20, maks 100; `status` selain dua nilai → diabaikan = keduanya) | 200 selalu (query tak valid → fallback default, bukan 400) |
+| `GET /courses?category=&period=&level=&q=&status=published\|archived&limit=&page=&sort=newest\|oldest` | publik | 200 array kursus (default limit 20, maks 100; `status` selain dua nilai → diabaikan = keduanya; `level` asing → diabaikan) | 200 selalu (query tak valid → fallback default, bukan 400) |
 | `GET /courses/:id` | opsional | 200 detail + `instructors[]`; arsip publik; draft → 404 kecuali pengelola | 404 hilang/draft-asing/id non-int |
-| `POST /courses` | teacher/admin | 201; **selalu `status:'draft'`**; relasi pengampu pembuat atomik | 400 Zod (`title` 10–120, `category` ∈ {Pengembangan Web, Basis Data, Jaringan, Keamanan, AI & Data, Infrastruktur, Desain, Bisnis}, `level` ∈ {Pemula, Menengah, Lanjutan} default Pemula, `durationMonths` 1–36, `description` 30–5000, `coverUrl` kosong/`/api/…`/http(s) ≤500, `period` ∈ {upcoming, ongoing, ended}, `startMonth` 1–100, `priceNominal` int ≥0, `outcomes` 2–20 × ≥10 karakter, `tools` 1–20) |
-| `PATCH /courses/:id` | teacher/admin + pengelola | 200 (termasuk ganti `status` draft↔published↔archived; `priceNominal` → `priceLabel` dihitung ulang) | 400 schema parsial kosong/tak valid; 403 pengelola-bukan (`exists?403:404`) |
+| `POST /courses` | teacher/admin | 201; **selalu `status:'draft'`**; relasi pengampu pembuat atomik | 400 Zod (`title` 10–120, `category` string 1–100 wajib AKTIF di tabel kelola-admin, `level` ∈ {Pemula, Menengah, Lanjutan} default Pemula, `durationMonths` 1–36, `description` 30–5000, `coverUrl` kosong/`/api/…`/http(s) ≤500, `period` ∈ {upcoming, ongoing, ended}, `startMonth` 1–100, `priceNominal` int ≥0, `outcomes` 2–20 × ≥10 karakter, `tools` 1–20) + `INVALID_CATEGORY` bila kategori asing/nonaktif |
+| `PATCH /courses/:id` | teacher/admin + pengelola | 200 (termasuk ganti `status` draft↔published↔archived; `priceNominal` → `priceLabel` dihitung ulang; ganti `category` wajib aktif) | 400 schema parsial kosong/tak valid + `INVALID_CATEGORY`; 403 pengelola-bukan (`exists?403:404`) |
 | `DELETE /courses/:id` | teacher/admin + pengelola | 200 `data:null`; cascade tree via FK; cover internal `/api/v1/files/:id/content` dibersihkan best-effort | 403/404 pola sama |
 | `GET /instructor/courses[?scope=mine]` | teacher/admin | teacher (atau admin `scope=mine`): kursus yang diampu/dibuat; admin default: semua + filter `status` | 401/403 |
 
 Uji relevan: `material-pass-score.test.ts` (skema `passScore` materi).
+
+### 3a. Kategori kursus — `/api/v1/categories`, `/api/v1/admin/categories`
+
+Sumber kebenaran dropdown/filter kategori adalah tabel `course_categories` (migrasi 0026, seed 8 bawaan).
+`courses.category` menyimpan NAMA (tanpa FK) agar kursus lama tetap tampil bila kategorinya dinonaktifkan.
+Nonaktif = hilang dari pilihan & daftar publik; kursus lama yang memakainya tetap valid.
+
+| Endpoint | Auth/Role | Sukses | Error |
+|---|---|---|---|
+| `GET /categories` | publik | 200 array aktif `{id,slug,name,sortOrder}` (sortOrder,id) | — |
+| `GET /admin/categories` | admin | 200 semua `{id,slug,name,sortOrder,isActive,courseCount,createdAt,updatedAt}` + audit tidak ada (baca) | 401/403 |
+| `GET /admin/categories/:id` | admin | 200 satu kategori + `courseCount` | 401/403/404 `CATEGORY_NOT_FOUND` |
+| `POST /admin/categories` `{name 2–100, slug? auto, sortOrder?}` | admin | 201 + audit `category.create` | 400 Zod/slug tak valid; 409 `CATEGORY_TAKEN` |
+| `PATCH /admin/categories/:id` `{name?, isActive?, sortOrder?}` | admin | 200 + audit `category.update`; ganti nama ikut mengubah `courses.category` pemakai (atomik) | 400/404 `CATEGORY_NOT_FOUND`/409 `CATEGORY_TAKEN` |
+| `DELETE /admin/categories/:id` | admin | 200 + audit `category.delete`; hanya bila tak dipakai kursus | 404/409 `CATEGORY_IN_USE` |
+
+Uji relevan: `categories/__tests__/categories.test.ts`.
 
 ---
 
@@ -201,10 +218,14 @@ Satu baris per (peserta, modul); `UNIQUE(userId,moduleId)` + transaksi = idempot
 | Endpoint | Auth/Role | Sukses | Error |
 |---|---|---|---|---|
 | `POST /modules/:id/certificate` | JWT + hak akses | Tetap didukung sebagai jalur manual/ulang: 201 baru / 200 sudah ada `{id,code ATS-YYYY-XXXXXXXX,recipientName,courseId/Title,moduleId/Title,status,issuedAt,...}`; snapshot nama+persyaratan; audit `certificate.issue` | 403 `NOT_ELIGIBLE` (+`failReasons`,`requirements`); 409 `CERT_REVOKED`; 404 |
-| `GET /me/certificates` | JWT | 200 milik sendiri (tanpa `superseded`; baris kursus `moduleId/moduleTitle: null`; tiap baris `instructorName` untuk sampul) | 401 |
-| `GET /me/certificates/:id/download` | JWT (pemilik/pengelola kursus) | 200 `application/pdf` + `Content-Disposition: attachment; filename="Sertifikat-<Judul>-<Nama>.pdf"`; PDF landscape A4 — kop logo Aristoteles, judul ID + subjudul Inggris, penerima, uraian penyelesaian, tanggal + kode, blok tanda tangan tengah (nama instruktur utama + QR verifikasi), catatan kaki; dibuat malas dari data + cache disk `uploads/certificates/v2-<KODE>.pdf` (prefix v2 menginvalidasi desain lama; tanpa migrasi; gagal PDF tak mengganggu terbit/daftar/verifikasi) | 401; 404 milik orang lain; 403 `CERT_REVOKED`; 410 `CERT_SUPERSEDED` (+ kode pengganti di pesan) |
+| `POST /courses/:id/certificate` | JWT + hak akses | Klaim manual sertifikat kursus (pemulih bila auto-issue terlewat): 201 baru / 200 sudah ada; 403 `NOT_ELIGIBLE` + `failReasons` per modul yang belum bersertifikat; 409 `CERT_REVOKED` | 403 `NO_ACCESS`; 404 |
+| `GET /me/certificates` | JWT | 200 milik sendiri (tanpa `superseded`; baris kursus `moduleId/moduleTitle: null`; tiap baris `instructorName` + `signatureUrl` untuk sampul) | 401 |
+| `GET /me/certificates/:id/download` | JWT (pemilik/pengelola kursus) | 200 `application/pdf` + `Content-Disposition: attachment; filename="Sertifikat-<Judul>-<Nama>.pdf"`; PDF landscape A4 gaya referensi — logo + ARISTOTELES kiri atas, chip kode, penerima, uraian kelulusan, tanggal + tanda tangan instruktur utama kiri bawah (gambar bila ada, fallback nama diketik), pita navy kanan "SERTIFIKAT KOMPETENSI" + medali emas (kursus) / perak (modul), QR + kode verifikasi kanan bawah (tanpa URL tercetak); dibuat malas dari data + cache disk `uploads/certificates/v4-<KODE>.pdf` (prefix v4 menginvalidasi desain lama; berkas v3/v2 dihapus malas; tanpa migrasi; gagal PDF tak mengganggu terbit/daftar/verifikasi) | 401; 404 milik orang lain; 403 `CERT_REVOKED`; 410 `CERT_SUPERSEDED` (+ kode pengganti di pesan) |
 | `GET /me/modules/:id/certificate-status` | JWT + hak akses | 200 `{eligible,requirements[],failReasons[],certificate?}` | 403/404 |
-| `GET /certificates/verify/:code` | **publik** | 200 minimal `{code,recipientName,courseTitle,moduleTitle|null,instructorName,status,revokeReason,issuedAt,revokedAt}` (`status` termasuk `superseded`; `moduleTitle` null = level kursus); tanpa userId/email/nilai | 404 `CODE_NOT_FOUND` |
+| `GET /certificates/verify/:code` | **publik** | 200 minimal `{code,recipientName,courseTitle,moduleTitle|null,instructorName,signatureUrl,status,revokeReason,issuedAt,revokedAt}` (`status` termasuk `superseded`; `moduleTitle` null = level kursus); tanpa userId/email/nilai | 404 `CODE_NOT_FOUND` |
+| `GET /instructor/signature` | teacher/admin | 200 `{fileId,url}` tanda tangan milik sendiri (null bila belum pasang) | 401 |
+| `POST /instructor/signature` | teacher/admin | 200 `{fileId,url,clearedPdfs}` pasang/ganti (`{fileId}` kind `signature` milik sendiri; file lama + cache PDF kursus yang ditandatangani dibersihkan; audit) | 400 kind bukan signature; 403 bukan milik; 404 file hilang |
+| `DELETE /instructor/signature` | teacher/admin | 200 `{fileId:null}` lepas tanda tangan (kembali ke nama diketik; cache dibersihkan; audit) | 401 |
 | `GET /certificates/verify/:code/qr` | **publik** (rate-limit baca 600x/15 mnt) | 200 `image/png` QR tautan verifikasi (dipakai fasimil sampul; tanpa PII) | 404 `CODE_NOT_FOUND` |
 | `GET /instructor/certificates/summary` | teacher/admin (scope kursus tanggung jawab) | 200 `{eligibleCount,issuedActiveCount,notEligibleCount,revokedCount,perCourse[],recentlyEligible[]}` untuk tab ringkasan `instruktur/sertifikat` | 200 kosong bila belum mengampu |
 | `GET /instructor/modules/:id/certificate-status` | teacher/admin scope | 200 `{moduleId,moduleTitle,courseId,courseTitle,eligibleCount,issuedCount,notEligibleCount,revokedCount}` | 403/404 |
@@ -253,12 +274,14 @@ pembayaran; verifikasi admin tidak berubah (voucher null → tidak ada hanguskan
 | `GET /admin/promos` | admin | filter status/type | 200 + `courseCount` | — |
 | `GET /admin/promos/:slug` | admin | — | 200 kampanye + semua kursus anggota (termasuk draft; untuk kelola sebelum aktif) | 404 |
 | `PATCH /admin/promos/:slug` | admin | parsial (aturan persen sama; jendela mulai ≤ selesai divalidasi ulang; non-diskon membersihkan persen) | 200 + audit `promo.update` | 400 `DISCOUNT_REQUIRED`/`DISCOUNT_FORBIDDEN`/`INVALID_WINDOW`; 404 |
-| `POST /admin/promos/:slug/courses` | admin | `{courseId!, position?, customBadge?}` | 201 + audit | 400 `COURSE_DRAFT`/`COURSE_ARCHIVED`/`COURSE_FREE` (gratis dilarang untuk diskon); 404; 409 `ALREADY_INCLUDED` |
+| `POST /admin/promos/:slug/courses` | admin | `{courseId!, position?, customBadge?, patunganPrice? (total grup, wajib > 0, hanya bila kampanye patungan)}` | 201 + audit | 400 `COURSE_DRAFT`/`COURSE_ARCHIVED`/`COURSE_FREE` (gratis dilarang untuk diskon), `PATUNGAN_PRICE_FORBIDDEN`; 404; 409 `ALREADY_INCLUDED` |
 | `DELETE /admin/promos/:slug/courses/:courseId` | admin | — | 200 + audit (idempoten) | 404 promo |
+| `DELETE /admin/promos/:slug` | admin | — | 200 hapus kampanye + anggotanya + audit `promo.delete` | 403 non-admin; 404 hilang; 409 `PROMO_IN_USE` (grup patungan pending / pembayaran menunggu masih menunjuk slug) |
 
 Type: `diskon` = potongan persen real; `kurasi` = pajang tanpa ubah harga;
-`patungan` = kursus eligible grup patungan (tanpa promo harga; iuran dihitung dari
-nominal katalog, dibagi habis ke anggota).
+`patungan` = kursus eligible grup patungan. Harga patungan per kursus
+(`promo_courses.patungan_price`, total grup, opsional) menimpa nominal katalog
+saat hitung iuran; kosong = ikut `priceNominal`. Iuran tetap dibagi habis ke anggota.
 Kolom `proposedBy` disiapkan untuk alur usulan instruktur (fase 2; perlu keputusan + endpoint approve).
 
 Uji: `promos/__tests__/promo.test.ts` (kelola admin-only, validasi persen 1–90,
@@ -307,12 +330,29 @@ kalah tidak dikonsumsi. `amountExpected` adalah tagihan otoritatif (server hitun
 |---|---|---|---|---|
 | `POST /courses/:id/payments` | JWT + rate-limit | `{proofFileId?, voucherCode?}` (strict) | 201 antrean (idempoten per antrean terbuka) `{invoice,amountExpected,voucherCode,promoSlug,discountAmount,...}` + audit `payment.create` | 400 kursus gratis; 403 `ENROLLMENT_CLOSED` (arsip/ended), `NEEDS_MANUAL_GRANT` bila berbayar tanpa jalur ini? tidak — ini JALUR bayarnya; 404 kursus/draft; 409 `ALREADY_ENROLLED`; `VOUCHER_INVALID` (+ kode asli voucher) |
 | `PATCH /payments/:id/proof` | JWT + rate-limit | `{proofFileId!}` (gambar jpg/png/webp ≤5MB, magic-bytes, milik sendiri) | 200 + audit `payment.proof` | 400 `FILE_INVALID`/kind; 403 bukan milik; 404; 409 `PAYMENT_LOCKED` |
+| `DELETE /payments/:id` | JWT + rate-limit | — (batalkan antrean menunggu milik sendiri; hard delete + hapus file bukti bila tak dipakai antrean lain; patungan → anggota kembali `unpaid`) | 200 `{id,courseId,cancelled}` + audit `payment.cancel` | 401; 404; 409 `PAYMENT_LOCKED` (sudah diputus admin) / `GROUP_NOT_PENDING` |
 | `GET /me/payments?courseId=` | JWT | — | 200 antrean terakhir kursus itu / `null` (untuk polling klien) | — |
 | `GET /me/payments?status=&limit=&page=` | JWT | filter `menunggu\|diverifikasi\|ditolak`, limit 1–100 (default 20) | 200 `{items[{id,invoice,courseId,courseTitle,status,rejectReason,...}],total,page,limit}` (untuk bell peserta) | 401 |
-| `GET /admin/payments?...` | admin | filter status/courseId/limit/page | 200 `{items[{userEmail,userName,courseTitle,...,promoSlug,patunganGroupId}],total}` | — |
+| `GET /admin/payments?...` | admin | filter status/courseId/limit/page; seluruh antrean (manual + DOKU; tanpa gate bukti agar iuran patungan ikut tampil) | 200 `{items[{userEmail,userName,courseTitle,...,gateway,dokuReferenceId,dokuExpiresAt,promoSlug,patunganGroupId}],total}` | — |
 | `POST /admin/payments/:id/verify` | admin | `{decision: terima\|tolak, amountPaid? (wajib bila terima), reason? (wajib bila tolak)}` | terima: 200 + enrollment aktif + hanguskan voucher bila ada + audit; tolak: 200 + alasan + audit | 400 `AMOUNT_INSUFFICIENT`/alasan/nominal; 404; 409 `PAYMENT_LOCKED`/`VOUCHER_EXHAUSTED`/`VOUCHER_REUSED` |
 
 Uji: `payments/__tests__/payment-verify.test.ts` + `payment-rules.test.ts` (unit aturan nominal).
+
+### 10c2. QRIS dinamis DOKU — `/payments/doku/*`, `/payments/:id/qr`
+
+Pengganti total jalur manual (UI hanya mengekspos DOKU; endpoint manual
+dipertahankan untuk antrean lawas). Nominal otoritatif tetap
+`amountExpected` server (voucher/promo non-stack dihitung sebelum order DOKU).
+
+| Endpoint | Auth/Role | Sukses | Error |
+|---|---|---|---|
+| `POST /courses/:id/payments` + `{gateway:"doku"}` | JWT + rate-limit | 201 antrean `menunggu` + kolom `dokuReferenceId/dokuExpiresAt` (+ audit `payment.create` gateway doku); QR kedaluwarsa pada antrean terbuka → generate ulang + audit `payment.doku.refresh` | 400 `PATUNGAN_DOKU_PENDING` (iuran patungan via DOKU menyusul) / `DOKU_NO_PROOF`; 403/404/409 sama seperti manual + `DOKU_QUEUE_CONFLICT` (antrean manual terbuka); 503 `DOKU_NOT_CONFIGURED` / `DOKU_NOT_WIRED` (tanpa QR palsu) |
+| `GET /payments/:id/qr` | JWT pemilik/admin | 200 `image/png` QRIS dinamis (`no-store`) | 401/404 (`DOKU_QR_MISSING` bila QR belum ada) |
+| `POST /payments/:id/doku/refresh` | JWT pemilik + rate-limit | 200 antrean (QR baru bila kedaluwarsa/hilang) + audit `payment.doku.refresh` | 404; 409 `PAYMENT_LOCKED`; 503 DOKU belum siap |
+| `POST /payments/doku/notify` | **publik** + rate-limit (verifikasi signature RSA `DOKU_PUBLIC_KEY` atas raw body) | 200 `{id,status,deduped}`; sukses = grant `payment:doku` + hanguskan voucher + audit `payment.doku.notify` (idempoten: baris sudah diputus → `deduped:true`); gagal/kedaluwarsa = `ditolak` + alasan | 401 `SIGNATURE_INVALID`; 400 `DOKU_NOTIFY_UNKNOWN`; 404 `DOKU_REFERENCE_UNKNOWN`; 503 `DOKU_NOT_CONFIGURED` |
+
+`POST /admin/payments/:id/verify` kini menolak baris DOKU (409 `DOKU_MANAGED`).
+Uji: `doku/__tests__/doku.test.ts` (unit kripto/status/gate/QR tanpa DB/jaringan).
 
 ---
 
@@ -335,8 +375,9 @@ Uji: `payments/__tests__/payment-verify.test.ts` + `payment-rules.test.ts` (unit
 | Endpoint | Role | Body | Sukses | Error |
 |---|---|---|---|---|
 | `GET /admin/overview` | admin | — | 200 `{totalStudents,totalTeachers,totalCourses,totalCertificates}` (4 agregat ringan untuk badge/kartu) | 403 |
-| `GET /admin/users?role=&isActive=&q=&limit=&page=` | admin | — | 200 `{items,total}` **tanpa `passwordHash`** | 403 |
-| `GET /admin/users/:id` | admin | — | 200 detail + `{enrollmentCount,certificateCount}` tanpa `passwordHash` | 403/404 |
+| `GET /admin/reports?from=&to=&courseId=&limit=&page=` | admin | `from/to` YYYY-MM-DD, `courseId` angka, `limit` 1–100 (default 100), `page` ≥ 1 | 200 `{summary{...},perCourse[...incl. paymentsDitolak],certificates{issued,revoked},filters,paging{page,limit,total},insights{funnel[{stage,label,basis,count,pctOfFirst,pctOfPrev|null bila tahap sblm. nol}],rates{approval,rejection,completion,certPerEnrollment,certified,revoke},note}}` (read-only; seluruh tahap funnel SATU lingkup filter — tahap 1 = pendaftar periode / peserta kursus; tiap tahap independen per tabel sehingga bisa naik; `avgProgress/pendingReviews` tetap snapshot) | 400 `INVALID_DATE/INVALID_RANGE/INVALID_COURSE_ID`; 403 |
+| `GET /admin/users?role=&isActive=&q=&limit=&page=` | admin | — | 200 `{items{id,name,username,email,expertise,role,isActive,avatarUrl(/api/v1/files/:id/content\|null),coverUrl(\|null),createdAt},total}` **tanpa `passwordHash`** | 403 |
+| `GET /admin/users/:id` | admin | — | 200 detail + `{avatarUrl,coverUrl,enrollmentCount,certificateCount}` tanpa `passwordHash` | 403/404 |
 | `POST /admin/users` | admin | `{name 2–100, email, password 8–72}` (role dikunci `teacher`) | 201 + audit `user.create` | 400/409 `EMAIL_TAKEN` |
 | `PATCH /admin/users/:id` | admin | `{name? 2–100, email?, expertise? ≤100 ("" = hapus), isActive?}` (min. 1 field; ganti status diri sendiri dilarang) | 200 + audit `user.update` | 400 validasi/ubah-status-diri; 404; 409 `EMAIL_TAKEN` |
 | `POST /admin/courses/:id/instructors` | admin | `{userId\|email}` (target harus teacher/admin) | 201 + audit | 400 `NOT_TEACHER`; 404 |
@@ -364,7 +405,8 @@ Token `randomBytes(32).hex`, hanya hash SHA-256 disimpan; default kedaluwarsa 7 
 ## 13. Upload & berkas — `POST /api/v1/uploads`, `GET /api/v1/files/:id/content`
 
 - Upload: JWT semua peran; `{filename 1–255, mimeType 1–100, kind, data base64 ≤20MB}`; MIME dicek vs klaim + **magic-bytes**; batas `image/cover` 4MB, `audio` 8MB, `pdf`/`assignment` 10MB (assignment wajib PDF), `avatar` 2MB (JPG/PNG/WebP), `profile_cover` 4MB (JPG/PNG/WebP); limit JSON global 15MB. → 201 `{id,url,mimeType,sizeBytes}`. Kind aset kursus (`image/audio/pdf/cover`) hanya teacher/admin (siswa → 403); `assignment` + berkas pelamar + `avatar`/`profile_cover` boleh semua peran terautentikasi.
-- Serve: aset kursus + `avatar`/`profile_cover` publik (`Cache-Control: public, immutable`); `assignment` privat (`private, no-store`): pemilik, admin, atau **teacher pengampu kursus yang punya submission menautkan berkas** (teacher asing → 403; anon → 403).
+- Optimasi gambar otomatis (backend, `image-optimization.service`): semua kind gambar (kecuali GIF animasi yang dilewati utuh) dinormalisasi EXIF → resize proporsional tanpa crop/upscale (cover ≤1600, materi ≤1200, avatar ≤256, dst) → WebP; dimensi >8000px/sisi ditolak (`IMAGE_DIMENSIONS_TOO_LARGE`); varian responsif `[320,480,800,1200,1600]` dibuat otomatis untuk srcset; kolom `files.width/height/original_size_bytes` + tabel `file_variants` (migrasi 0028).
+- Serve: aset kursus + `avatar`/`profile_cover` publik (`Cache-Control: public, immutable`); `assignment` privat (`private, no-store`): pemilik, admin, atau **teacher pengampu kursus yang punya submission menautkan berkas** (teacher asing → 403; anon → 403). Tambahan query `?w=lebar` memilih varian terkecil yang ≥ lebar diminta (jatuh ke berkas asli bila tak ada); otorisasi privat tetap ikut baris file induk.
 
 ---
 

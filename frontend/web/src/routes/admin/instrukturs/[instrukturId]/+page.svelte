@@ -7,6 +7,7 @@
 		setAdminUserActive,
 		type AdminUserDetail
 	} from '$lib/api/admin';
+	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import type { BackendCourse } from '$lib/api/courses';
 
 	/**
@@ -101,12 +102,6 @@
 		if (role === 'teacher') return 'Instruktur';
 		if (role === 'admin') return 'Administrator';
 		return 'Peserta';
-	}
-
-	function initials(name: string): string {
-		return (
-			name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
-		);
 	}
 
 	function courseStatus(course: BackendCourse): { label: string; classes: string } {
@@ -223,12 +218,13 @@
 		<header class="mb-6 overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
 			<div class="h-24 bg-gradient-to-r from-violet-600 via-indigo-700 to-slate-900" aria-hidden="true"></div>
 			<div class="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
-				<span
-					class="-mt-12 flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500 to-indigo-600 text-xl font-extrabold text-white shadow-lg sm:-mt-14"
-					aria-hidden="true"
-				>
-					{initials(user.name)}
-				</span>
+				<UserAvatar
+					name={user.name}
+					avatarUrl={user.avatarUrl ?? null}
+					size="-mt-12 h-20 w-20 sm:-mt-14"
+					text="text-xl"
+					rounded="rounded-2xl"
+				/>
 				<div class="min-w-0 flex-1">
 					<div class="flex flex-wrap items-center gap-2">
 						<h1 class="text-xl font-extrabold text-slate-900 sm:text-2xl">{user.name}</h1>

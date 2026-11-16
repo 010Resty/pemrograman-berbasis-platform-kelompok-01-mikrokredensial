@@ -10,6 +10,7 @@ import CertificateLightbox from '$lib/components/training/molecules/CertificateL
 	import { canonicalPath, getSiteUrl } from '$lib/seo/site';
 	import { reveal } from '$lib/actions/reveal';
 	import { apiRequest } from '$lib/api/backend';
+	import { fileUrl } from '$lib/api/courses';
 
 	interface VerifyResult {
 		code: string;
@@ -17,6 +18,7 @@ import CertificateLightbox from '$lib/components/training/molecules/CertificateL
 		courseTitle: string;
 		moduleTitle: string | null;
 		instructorName: string | null;
+		signatureUrl: string | null;
 		status: string;
 		revokeReason: string | null;
 		issuedAt: string;
@@ -229,6 +231,7 @@ import CertificateLightbox from '$lib/components/training/molecules/CertificateL
 										code={verifyResult.code}
 										recipientName={verifyResult.recipientName}
 										instructorName={verifyResult.instructorName}
+										signatureUrl={verifyResult.signatureUrl ? fileUrl(verifyResult.signatureUrl) : null}
 										courseTitle={verifyResult.courseTitle}
 										moduleTitle={verifyResult.moduleTitle}
 										issuedLabel={formatTanggalID(verifyResult.issuedAt)}
@@ -242,6 +245,7 @@ import CertificateLightbox from '$lib/components/training/molecules/CertificateL
 											code={verifyResult.code}
 											recipientName={verifyResult.recipientName}
 											instructorName={verifyResult.instructorName}
+											signatureUrl={verifyResult.signatureUrl ? fileUrl(verifyResult.signatureUrl) : null}
 											courseTitle={verifyResult.courseTitle}
 											moduleTitle={verifyResult.moduleTitle}
 											issuedLabel={formatTanggalID(verifyResult.issuedAt)}

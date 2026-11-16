@@ -15,6 +15,7 @@
 		type MaterialSubmissionItem
 	} from '$lib/api/submissions';
 	import { downloadSubmissionFile } from '$lib/services/submission.service';
+	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import { createEditorExtensions } from '$lib/tiptap/extensions';
 	import '$lib/tiptap/content.css';
 
@@ -481,13 +482,20 @@
 							{@const srvMeta = srvStatusMeta(r.status)}
 							<li class="px-4 py-4">
 								<div class="flex items-start justify-between gap-3">
-									<div class="min-w-0">
-										<p class="truncate text-sm font-bold text-slate-900">
-											{r.studentName ?? `Peserta #${r.userId}`}
-										</p>
-										<p class="mt-0.5 text-[11px] text-slate-500">
-											{r.studentNim ?? '-'} · {formatDateTime(r.submittedAt)}
-										</p>
+									<div class="flex min-w-0 items-center gap-2.5">
+										<UserAvatar
+											name={r.studentName ?? `Peserta #${r.userId}`}
+											avatarUrl={r.studentAvatarUrl ?? null}
+											size="h-9 w-9"
+										/>
+										<div class="min-w-0">
+											<p class="truncate text-sm font-bold text-slate-900">
+												{r.studentName ?? `Peserta #${r.userId}`}
+											</p>
+											<p class="mt-0.5 text-[11px] text-slate-500">
+												{r.studentNim ?? '-'} · {formatDateTime(r.submittedAt)}
+											</p>
+										</div>
 									</div>
 									<span
 										class={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${srvMeta.classes}`}
@@ -561,12 +569,21 @@
 								{#each srvRows as r (r.id)}
 									<tr class="transition-colors duration-200 ease-smooth hover:bg-slate-50/50">
 										<td class="px-5 py-4">
-											<span class="block font-semibold text-slate-900"
-												>{r.studentName ?? `Peserta #${r.userId}`}</span
-											>
-											<span class="mt-0.5 block text-xs text-slate-500"
-												>{r.studentNim ?? '-'} · {formatDateTime(r.submittedAt)}</span
-											>
+											<div class="flex items-center gap-2.5">
+												<UserAvatar
+													name={r.studentName ?? `Peserta #${r.userId}`}
+													avatarUrl={r.studentAvatarUrl ?? null}
+													size="h-9 w-9"
+												/>
+												<div class="min-w-0">
+													<span class="block font-semibold text-slate-900"
+														>{r.studentName ?? `Peserta #${r.userId}`}</span
+													>
+													<span class="mt-0.5 block text-xs text-slate-500"
+														>{r.studentNim ?? '-'} · {formatDateTime(r.submittedAt)}</span
+													>
+												</div>
+											</div>
 											{#if r.note}
 												<span
 													class="mt-1 block max-w-44 truncate text-[11px] text-slate-500"

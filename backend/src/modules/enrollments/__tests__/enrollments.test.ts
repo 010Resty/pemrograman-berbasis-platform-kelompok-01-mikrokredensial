@@ -564,6 +564,44 @@ describe("katalog publik dan status completed", () => {
     assert.ok(arc.json.data.every((c) => c.status === "archived"));
   });
 
+  it("filter level: hanya level cocok; level asing diabaikan (lenien)", async () => {
+    const [h] = await db.insert(schema.courses).values({
+      title: "Kursus Menengah Uji Filter Cukup Panjang",
+      description: "Deskripsi kursus menengah untuk uji filter level yang cukup panjang.",
+      category: "Pengembangan Web",
+      level: "Menengah",
+      duration: "4 Bulan",
+      status: "published",
+      priceLabel: "GRATIS",
+      priceNominal: 0,
+      period: "ongoing",
+      outcomes: ["Hasil belajar pertama yang cukup panjang"],
+      tools: ["Laptop"],
+      createdBy: ids.teacher,
+    });
+    const midId = Number((h as unknown as { insertId: number }).insertId);
+
+    const menengah = await api<Array<{ id: number; level: string }>>(
+      "GET",
+      "/api/v1/courses?level=Menengah&limit=100"
+    );
+    assert.ok(menengah.json.data.length > 0);
+    assert.ok(menengah.json.data.every((c) => c.level === "Menengah"));
+    assert.ok(menengah.json.data.some((c) => c.id === midId));
+    assert.ok(!menengah.json.data.some((c) => c.id === ids.freePub));
+
+    const semua = await api<Array<{ id: number }>>("GET", "/api/v1/courses?limit=100");
+    assert.ok(semua.json.data.some((c) => c.id === midId));
+    assert.ok(semua.json.data.some((c) => c.id === ids.freePub));
+
+    const asing = await api<Array<{ id: number }>>(
+      "GET",
+      "/api/v1/courses?level=Mahir-Takterdaftar&limit=100"
+    );
+    assert.ok(asing.json.data.some((c) => c.id === midId));
+    assert.ok(asing.json.data.some((c) => c.id === ids.freePub));
+  });
+
   it("detail arsip publik; draft 404 bagi asing, 200 bagi pengelola", async () => {
     assert.equal((await api("GET", `/api/v1/courses/${ids.archived}`)).http, 200);
     assert.equal((await api("GET", `/api/v1/courses/${ids.freePub}`)).http, 200);

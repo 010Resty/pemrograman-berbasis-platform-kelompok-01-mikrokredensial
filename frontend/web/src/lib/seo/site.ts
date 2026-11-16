@@ -48,8 +48,11 @@ export interface SitemapEntry {
 export const PUBLIC_SITEMAP_ROUTES: SitemapEntry[] = [
 	{ path: '/', changefreq: 'daily', priority: 1.0 },
 	{ path: '/pelatihan', changefreq: 'daily', priority: 0.9 },
-	{ path: '/modules', changefreq: 'daily', priority: 0.9 },
-	{ path: '/tentang', changefreq: 'monthly', priority: 0.7 },
+	{ path: '/promo', changefreq: 'daily', priority: 0.8 },
+	{ path: '/tentang/arti-nama', changefreq: 'monthly', priority: 0.7 },
+	{ path: '/tentang/cara-kerja', changefreq: 'monthly', priority: 0.6 },
+	{ path: '/tentang/untuk-siapa', changefreq: 'monthly', priority: 0.6 },
+	{ path: '/tentang/keunggulan', changefreq: 'monthly', priority: 0.6 },
 	{ path: '/menjadi-instruktur', changefreq: 'monthly', priority: 0.7 },
 	{ path: '/peringkat', changefreq: 'weekly', priority: 0.6 },
 	{ path: '/verifikasi', changefreq: 'monthly', priority: 0.6 },

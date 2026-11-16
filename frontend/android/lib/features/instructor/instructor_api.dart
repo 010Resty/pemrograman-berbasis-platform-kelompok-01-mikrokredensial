@@ -101,6 +101,7 @@ class MaterialSubmission {
     required this.status,
     this.score,
     this.studentName,
+    this.studentAvatarUrl,
     this.studentNim,
     this.fileUrl,
     this.originalName,
@@ -113,6 +114,8 @@ class MaterialSubmission {
   final String status;
   final int? score;
   final String? studentName;
+  /// Relatif backend (/api/v1/files/:id/content) atau null; publik.
+  final String? studentAvatarUrl;
   final String? studentNim;
   final String? fileUrl;
   final String? originalName;
@@ -140,6 +143,7 @@ class MaterialSubmission {
           ? m['score'] as int
           : int.tryParse('${m['score'] ?? ''}'),
       studentName: m['studentName'] as String?,
+      studentAvatarUrl: m['studentAvatarUrl'] as String?,
       studentNim: m['studentNim'] as String?,
       fileUrl: m['fileUrl'] as String?,
       originalName: m['originalName'] as String?,
@@ -180,6 +184,7 @@ class InstCertificateRecord {
     required this.id,
     required this.code,
     required this.studentName,
+    this.studentAvatarUrl,
     required this.courseTitle,
     this.moduleTitle,
     required this.status,
@@ -190,6 +195,8 @@ class InstCertificateRecord {
   final Object id;
   final String code;
   final String studentName;
+  /// Relatif backend (/api/v1/files/:id/content) atau null; publik.
+  final String? studentAvatarUrl;
   final String courseTitle;
   final String? moduleTitle;
   final String status;
@@ -202,6 +209,7 @@ class InstCertificateRecord {
       id: m['id'] ?? 0,
       code: '${m['code'] ?? ''}',
       studentName: '${m['studentName'] ?? m['recipientName'] ?? ''}',
+      studentAvatarUrl: m['studentAvatarUrl'] as String?,
       courseTitle: '${m['courseTitle'] ?? ''}',
       moduleTitle: m['moduleTitle'] as String?,
       status: '${m['status'] ?? ''}',
@@ -310,6 +318,62 @@ class InstructorApi {
       '/instructor/certificates/$id/revoke',
       body: {'reason': reason},
       fromData: (_) => null,
+    );
+  }
+
+  /// Tanda tangan milik sendiri (untuk blok tanda tangan PDF sertifikat).
+  Future<InstructorSignature> mySignature() {
+    return _api.get<InstructorSignature>(
+      '/instructor/signature',
+      InstructorSignature.fromJson,
+    );
+  }
+
+  Future<InstructorSignatureResult> setSignature(int fileId) {
+    return _api.post<InstructorSignatureResult>(
+      '/instructor/signature',
+      body: {'fileId': fileId},
+      fromData: InstructorSignatureResult.fromJson,
+    );
+  }
+
+  Future<void> removeSignature() {
+    return _api.delete('/instructor/signature');
+  }
+}
+
+/// Tanda tangan instruktur: fileId + path relatif backend (atau null).
+class InstructorSignature {
+  InstructorSignature({this.fileId, this.url});
+
+  final int? fileId;
+  final String? url;
+
+  factory InstructorSignature.fromJson(Object? json) {
+    final m = (json as Map?)?.cast<String, Object?>() ?? {};
+    final raw = m['fileId'];
+    return InstructorSignature(
+      fileId: raw is int ? raw : int.tryParse('$raw'),
+      url: m['url'] as String?,
+    );
+  }
+}
+
+class InstructorSignatureResult {
+  InstructorSignatureResult(
+      {required this.fileId, required this.url, required this.clearedPdfs});
+
+  final int fileId;
+  final String url;
+  final int clearedPdfs;
+
+  factory InstructorSignatureResult.fromJson(Object? json) {
+    final m = (json as Map?)?.cast<String, Object?>() ?? {};
+    int asInt(Object? v) => v is int ? v : int.tryParse('$v') ?? 0;
+    return InstructorSignatureResult(
+      fileId: asInt(m['fileId']),
+      url: '${m['url'] ?? ''}',
+      clearedPdfs: asInt(m['clearedPdfs']),
     );
   }
 }

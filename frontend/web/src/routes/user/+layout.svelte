@@ -11,6 +11,7 @@
 	import type { MyCertificate, MyEnrollment } from '$lib/api/progress';
 	import { fetchMyPayments } from '$lib/api/payments';
 	import type { MyPaymentListItem } from '$lib/api/payments';
+	import { fetchPromos, type PromoCampaign } from '$lib/api/promos';
 	import { fileUrl } from '$lib/api/courses';
 	import { syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
 	import { untrack } from 'svelte';
@@ -32,6 +33,17 @@
 	// Badge sidebar dari backend (bukan angka contoh): jumlah kursus diikuti
 	// + sertifikat terbit milik sendiri. Gagal dimuat = badge disembunyikan,
 	// halaman konten yang menampilkan error + retry.
+
+	// Daftar promo aktif untuk dropdown menu Promo (gagal = dropdown hanya "Semua Promo").
+	let promoCampaigns = $state<PromoCampaign[]>([]);
+
+	async function loadPromoNav(): Promise<void> {
+		try {
+			promoCampaigns = await fetchPromos();
+		} catch {
+			promoCampaigns = [];
+		}
+	}
 	let courseBadge = $state<string | undefined>(undefined);
 	let certBadge = $state<string | undefined>(undefined);
 	let badgesStarted = false;
@@ -51,7 +63,8 @@
 				fetchMyEnrollments(),
 				fetchMyCertificates(),
 				fetchMyPayments({ status: 'menunggu', limit: 3 }),
-				fetchMyPayments({ status: 'ditolak', limit: 3 })
+				// Hanya penolakan yang belum dibaca — yang sudah dibuka hilang dari bell.
+				fetchMyPayments({ status: 'ditolak', unseen: true, limit: 3 })
 			]);
 			myEnrollments = enrollments;
 			myIssuedCerts = certs.filter((c) => c.status === 'issued');
@@ -59,7 +72,7 @@
 			rejectedPayments = rejected.total;
 			pendingSample = pending.items;
 			rejectedSample = rejected.items;
-			courseBadge = String(enrollments.length);
+			courseBadge = String(myEnrollments.length);
 			certBadge = String(myIssuedCerts.length);
 			// Gerbang materi (ownedCourses) ikut kebenaran server yang sama.
 			void syncEnrollmentsFromServer(enrollments);
@@ -74,6 +87,7 @@
 		if (!browser || badgesStarted) return;
 		badgesStarted = true;
 		untrack(() => void loadBadges());
+		untrack(() => void loadPromoNav());
 	});
 
 	// Realtime tanpa push server: refresh saat pindah halaman, tab kembali
@@ -83,6 +97,7 @@
 		const path = page.url.pathname;
 		if (!badgesStarted || phase !== 'ready') return;
 		untrack(() => void loadBadges());
+		untrack(() => void loadPromoNav());
 		void path;
 	});
 
@@ -94,14 +109,21 @@
 		const onFocus = () => {
 			if (phase === 'ready') void loadBadges();
 		};
+		// Keputusan yang baru dibaca di halaman pembayaran langsung
+		// menyegarkan bell tanpa menunggu interval/navigasi.
+		const onDecided = () => {
+			if (phase === 'ready') void loadBadges();
+		};
 		document.addEventListener('visibilitychange', onVisible);
 		window.addEventListener('focus', onFocus);
+		window.addEventListener('user:notif-refresh', onDecided);
 		const timer = setInterval(() => {
 			if (phase === 'ready') void loadBadges();
 		}, 60000);
 		return () => {
 			document.removeEventListener('visibilitychange', onVisible);
 			window.removeEventListener('focus', onFocus);
+			window.removeEventListener('user:notif-refresh', onDecided);
 			clearInterval(timer);
 		};
 	});
@@ -135,16 +157,12 @@
 	let showNotifMenu = $state(false);
 
 	// Notifikasi jujur dari backend (tanpa tabel notifikasi khusus):
-	// - kursus aktif dari /me/enrollments
-	// - sertifikat terbit dari /me/certificates
-	// - pembayaran menunggu/ditolak dari /me/payments (endpoint list baru)
+	// - pembayaran menunggu verifikasi (hilang saat diputus admin)
+	// - pembayaran ditolak yang belum dibaca (hilang saat dibuka di halaman pembayaran)
+	// Kursus aktif & sertifikat terbit bersifat permanen sehingga tidak masuk
+	// bell (tetap terlihat sebagai badge sidebar) agar tidak menumpuk.
 	// Bell menyala hanya bila ada info (>0); gagal fetch = badge hilang.
-	const notifCount = $derived(
-		(myEnrollments.length > 0 ? 1 : 0) +
-			(myIssuedCerts.length > 0 ? 1 : 0) +
-			(pendingPayments > 0 ? 1 : 0) +
-			(rejectedPayments > 0 ? 1 : 0)
-	);
+	const notifCount = $derived((pendingPayments > 0 ? 1 : 0) + (rejectedPayments > 0 ? 1 : 0));
 	const notifLabel = $derived(
 		notifCount > 0 ? `${notifCount} informasi penting — buka Notifikasi` : 'Notifikasi'
 	);
@@ -155,14 +173,45 @@
 		/^\/user\/kursusku\/[^/]+\/[^/]+\/[^/]+/.test(page.url.pathname)
 	);
 
-	// 4 menu utama sesuai kebutuhan user
+	// Dropdown Promo: satu menu "Promo" (klik → semua promo) + daftar kampanye aktif di bawahnya.
+	const promoChildren = $derived<NavItem[]>(
+		promoCampaigns.slice(0, 6).map(
+			(c): NavItem => ({
+				label: c.title,
+				icon: c.type === 'diskon' ? 'fa-bolt' : c.type === 'patungan' ? 'fa-people-group' : 'fa-star',
+				href: `/user/promo/${c.slug}`
+			})
+		)
+	);
+
+	// Menu utama sesuai kebutuhan user
 	const navItems = $derived<NavItem[]>([
-		{ label: 'Dashboard', icon: 'fa-house', href: '/user' },
-		{ label: 'Kursusku', icon: 'fa-book-open', href: '/user/kursusku', badge: courseBadge },
-		{ label: 'Semua Kursus', icon: 'fa-layer-group', href: '/user/semua-kursus' },
-		{ label: 'Sertifikat', icon: 'fa-award', href: '/user/sertifikat', badge: certBadge },
-		{ label: 'Promo', icon: 'fa-tags', href: '/user/promo' },
-		{ label: 'Profil', icon: 'fa-user', href: '/user/profile' }
+		{
+			label: 'Belajar',
+			icon: 'fa-graduation-cap',
+			href: '/user',
+			children: [
+				{ label: 'Dashboard', icon: 'fa-house', href: '/user' },
+				{ label: 'Kursusku', icon: 'fa-book-open', href: '/user/kursusku', badge: courseBadge },
+				{ label: 'Semua Kursus', icon: 'fa-layer-group', href: '/user/semua-kursus' },
+				{ label: 'Riwayat Pembayaran', icon: 'fa-money-bill-transfer', href: '/user/pembayaran', badge: pendingPayments > 0 ? String(pendingPayments) : undefined },
+				{ label: 'Sertifikat', icon: 'fa-award', href: '/user/sertifikat', badge: certBadge }
+			]
+		},
+		{
+			label: 'Promo',
+			icon: 'fa-tags',
+			href: '/user/promo',
+			collapsible: true,
+			linkable: true,
+			children: promoChildren
+		},
+		{
+			label: 'Akun',
+			icon: 'fa-circle-user',
+			href: '/user/profile',
+			children: [{ label: 'Profil', icon: 'fa-user', href: '/user/profile' }]
+		}
 	]);
 
 	function toggleProfileMenu() {
@@ -293,7 +342,7 @@
 								<div class="flex items-center justify-between border-b border-slate-100 px-4 py-3">
 									<div>
 										<div class="text-sm font-semibold text-slate-800">Notifikasi</div>
-										<div class="text-xs text-slate-500">Perubahan dan informasi penting</div>
+										<div class="text-xs text-slate-500">Perlu perhatian Anda</div>
 									</div>
 									<button
 										type="button"
@@ -306,34 +355,6 @@
 									</button>
 								</div>
 								<div class="p-1.5" role="none">
-									{#if myEnrollments.length > 0}
-										<a
-											role="menuitem"
-											href="/user/kursusku"
-											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
-											onclick={closeNotifMenu}
-										>
-											<i class="fa-solid fa-book-open mt-0.5 w-4 text-center text-emerald-500" aria-hidden="true"></i>
-											<span>
-												<span class="block font-semibold text-slate-800">{myEnrollments.length} kursus aktif</span>
-												<span class="block text-xs text-slate-500">Akses belajar Anda — lanjutkan progres.</span>
-											</span>
-										</a>
-									{/if}
-									{#if myIssuedCerts.length > 0}
-										<a
-											role="menuitem"
-											href="/user/sertifikat"
-											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
-											onclick={closeNotifMenu}
-										>
-											<i class="fa-solid fa-award mt-0.5 w-4 text-center text-amber-500" aria-hidden="true"></i>
-											<span>
-												<span class="block font-semibold text-slate-800">{myIssuedCerts.length} sertifikat terbit</span>
-												<span class="block text-xs text-slate-500">Lihat dan unduh PDF sertifikat.</span>
-											</span>
-										</a>
-									{/if}
 									{#if pendingPayments > 0}
 										<a
 											role="menuitem"
@@ -367,8 +388,20 @@
 										</a>
 									{/if}
 									{#if notifCount === 0}
-										<p class="px-3 py-4 text-center text-xs text-slate-500">Belum ada informasi penting.</p>
+										<p class="px-3 py-4 text-center text-xs text-slate-500">Semua beres, tidak ada yang perlu perhatian.</p>
 									{/if}
+									<a
+										role="menuitem"
+										href="/user/pembayaran"
+										class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+										onclick={closeNotifMenu}
+									>
+										<i class="fa-solid fa-clock-rotate-left mt-0.5 w-4 text-center text-slate-400" aria-hidden="true"></i>
+										<span>
+											<span class="block font-semibold text-slate-800">Riwayat pembayaran</span>
+											<span class="block text-xs text-slate-500">Lanjutkan yang menunggu atau lihat status.</span>
+										</span>
+									</a>
 								</div>
 							</div>
 						{/if}

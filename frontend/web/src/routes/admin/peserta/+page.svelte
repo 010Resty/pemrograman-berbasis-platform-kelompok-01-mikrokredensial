@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import { fetchAdminUsers, type AdminUser } from '$lib/api/admin';
 
 	/**
@@ -40,12 +41,6 @@
 		return Number.isNaN(d.getTime())
 			? iso
 			: d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-	}
-
-	function initials(name: string): string {
-		return (
-			name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
-		);
 	}
 
 	async function load(): Promise<void> {
@@ -182,9 +177,7 @@
 							class="flex items-center gap-3 px-4 py-3.5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-blue-600"
 							aria-label={`Lihat detail ${u.name}`}
 						>
-							<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white" aria-hidden="true">
-								{initials(u.name)}
-							</span>
+							<UserAvatar name={u.name} avatarUrl={u.avatarUrl ?? null} />
 							<span class="min-w-0 flex-1">
 								<span class="block truncate font-semibold text-slate-900">{u.name}</span>
 								<span class="block truncate text-xs text-slate-500">{u.email} · {formatDate(u.createdAt)}</span>
@@ -210,9 +203,7 @@
 							<tr class={`transition-colors hover:bg-blue-50/50 ${i % 2 === 1 ? 'bg-slate-50/60' : 'bg-white'}`}>
 								<td class="px-6 py-3.5">
 									<div class="flex items-center gap-3">
-										<span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-bold text-white shadow-sm" aria-hidden="true">
-											{initials(u.name)}
-										</span>
+										<UserAvatar name={u.name} avatarUrl={u.avatarUrl ?? null} />
 										<span>
 											<span class="block font-semibold text-slate-900">{u.name}</span>
 											<span class="block text-xs text-slate-500">{u.email}</span>

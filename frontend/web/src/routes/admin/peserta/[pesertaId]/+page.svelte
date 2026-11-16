@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import { page } from '$app/state';
+	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import { fetchAdminUser, setAdminUserActive, type AdminUserDetail } from '$lib/api/admin';
 
 	/**
@@ -67,12 +68,6 @@
 		if (role === 'teacher') return 'Instruktur';
 		if (role === 'admin') return 'Administrator';
 		return 'Mahasiswa';
-	}
-
-	function initials(name: string): string {
-		return (
-			name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
-		);
 	}
 
 	async function toggleActive(): Promise<void> {
@@ -172,12 +167,13 @@
 		<header class="mb-6 overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
 			<div class="h-24 bg-gradient-to-r from-slate-900 via-blue-900 to-indigo-800" aria-hidden="true"></div>
 			<div class="flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:p-6">
-				<span
-					class="-mt-12 flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-xl font-extrabold text-white shadow-lg sm:-mt-14"
-					aria-hidden="true"
-				>
-					{initials(user.name)}
-				</span>
+				<UserAvatar
+					name={user.name}
+					avatarUrl={user.avatarUrl ?? null}
+					size="-mt-12 h-20 w-20 sm:-mt-14"
+					text="text-xl"
+					rounded="rounded-2xl"
+				/>
 				<div class="min-w-0 flex-1">
 					<div class="flex flex-wrap items-center gap-2">
 						<h1 class="text-xl font-extrabold text-slate-900 sm:text-2xl">{user.name}</h1>

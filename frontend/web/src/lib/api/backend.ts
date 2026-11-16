@@ -39,6 +39,9 @@ export interface BackendUser {
 export interface AuthPayload {
 	message: string;
 	accessToken: string;
+	/** Opaque 64-hex untuk silent refresh; disimpan aman, diputar tiap pakai. */
+	refreshToken: string;
+	refreshExpiresAt?: string | null;
 	user: BackendUser;
 }
 
@@ -79,6 +82,28 @@ export interface ApiRequestOptions {
 	token?: string | null;
 	/** Batas waktu ms; hanya dipakai bila > 0. Tanpa ini perilaku lama dipertahankan. */
 	timeoutMs?: number;
+	/**
+	 * Lewati silent-refresh + retry saat 401 (dipakai alur refresh/logout
+	 * sendiri agar tidak berputar). Default false = ikut silent refresh.
+	 */
+	noAuthRetry?: boolean;
+}
+
+/**
+ * Pemulih sesi terpusat (diinjeksikan auth store agar backend.ts tetap
+ * bebas import store — anti circular-import). Mengembalikan access token
+ * baru bila refresh berhasil, null bila sesi memang sudah mati.
+ */
+let silentRefresher: (() => Promise<string | null>) | null = null;
+
+/** Daftarkan pemulih sesi; dipanggil sekali saat modul auth store dimuat. */
+export function configureSilentRefresh(fn: () => Promise<string | null>): void {
+	silentRefresher = fn;
+}
+
+/** Endpoint auth tidak ikut silent-refresh (login/register/refresh/logout). */
+function isAuthPath(path: string): boolean {
+	return path === '/auth' || path.startsWith('/auth/');
 }
 
 /** Dedup GET in-flight: request identik yang bersamaan hanya 1 fetch (hindari N× modul ganda). */
@@ -136,23 +161,24 @@ export async function apiRequest<T>(
 	const isGet = method === 'GET' && options.body === undefined;
 	// Default timeout aman untuk GET agar $effect race tidak gantung (login tetap 15 dtk).
 	const timeoutMs = options.timeoutMs ?? (isGet ? 15000 : undefined);
-	const headers: Record<string, string> = { accept: 'application/json' };
-	let payload: string | undefined;
-	if (options.body !== undefined) {
-		headers['content-type'] = 'application/json';
-		payload = JSON.stringify(options.body);
-	}
-	// Token hanya dikirim ke base API sendiri (same-origin) — lihat request-policy.
-	const auth = authorizationHeader(options.token);
-	if (auth) headers.authorization = auth;
 
-	const init: RequestInit = {
-		method,
-		headers,
-		body: payload
-	};
+	const doFetchOnce = async (token: string | null | undefined): Promise<T> => {
+		const headers: Record<string, string> = { accept: 'application/json' };
+		let payload: string | undefined;
+		if (options.body !== undefined) {
+			headers['content-type'] = 'application/json';
+			payload = JSON.stringify(options.body);
+		}
+		// Token hanya dikirim ke base API sendiri (same-origin) — lihat request-policy.
+		const auth = authorizationHeader(token ?? null);
+		if (auth) headers.authorization = auth;
 
-	const doFetch = async (): Promise<T> => {
+		const init: RequestInit = {
+			method,
+			headers,
+			body: payload
+		};
+
 		let res: Response;
 		try {
 			res =
@@ -187,18 +213,83 @@ export async function apiRequest<T>(
 		return (envelope as BackendSuccess<T>).data;
 	};
 
+	// 401 + sesi tersimpan: coba silent refresh sekali lalu ulangi request
+	// dengan token baru (tanpa logout). Gagal refresh = lempar error asli
+	// agar caller (handlePrivateRequestError) menjalankan alur logout normal.
+	const runWithSilentRefresh = async (): Promise<T> => {
+		try {
+			return await doFetchOnce(options.token);
+		} catch (err) {
+			if (
+				err instanceof BackendRequestError &&
+				err.httpStatus === 401 &&
+				silentRefresher &&
+				!options.noAuthRetry &&
+				!isAuthPath(path)
+			) {
+				const fresh = await silentRefresher().catch(() => null);
+				if (fresh) return await doFetchOnce(fresh);
+			}
+			throw err;
+		}
+	};
+
 	// Hanya GET yang didedup; mutasi tetap jalan tiap panggil.
-	if (!isGet) return doFetch();
+	if (!isGet) return runWithSilentRefresh();
 	const key = inflightKey(`${method}:${url}`, options.token ?? '');
 	const pending = inflightGet.get(key);
 	if (pending) return pending as Promise<T>;
-	const p = doFetch();
+	const p = runWithSilentRefresh();
 	inflightGet.set(key, p);
 	try {
 		return await p;
 	} finally {
 		if (inflightGet.get(key) === p) inflightGet.delete(key);
 	}
+}
+
+/**
+ * Hasil pertukaran refresh token: pasangan sesi baru + identitas.
+ * Bentuk sama dengan respons login (AuthPayload) agar pemakaian seragam.
+ */
+export interface RefreshSessionResult {
+	message: string;
+	accessToken: string;
+	refreshToken: string;
+	refreshExpiresAt: string;
+	user: BackendUser;
+}
+
+/**
+ * Tukar refresh token menjadi pasangan sesi baru (rotasi sekali pakai).
+ * Tanpa token akses (pakai body saja) + TANPA silent-retry agar tidak berputar.
+ */
+export function refreshSessionTokens(
+	refreshToken: string,
+	timeoutMs: number = DEFAULT_LOGIN_TIMEOUT_MS
+): Promise<RefreshSessionResult> {
+	return apiRequest<RefreshSessionResult>('/auth/refresh', {
+		method: 'POST',
+		body: { refreshToken },
+		timeoutMs,
+		noAuthRetry: true
+	});
+}
+
+/**
+ * Cabut sesi di server saat logout eksplisit (best-effort: kegagalan
+ * jaringan/token kedaluwarsa diabaikan — sesi lokal tetap dibersihkan).
+ */
+export function revokeSession(
+	accessToken: string | null,
+	refreshToken?: string | null
+): Promise<{ revoked: number }> {
+	return apiRequest<{ revoked: number }>('/auth/logout', {
+		method: 'POST',
+		body: refreshToken ? { refreshToken } : {},
+		token: accessToken ?? undefined,
+		noAuthRetry: true
+	});
 }
 
 export function loginRequest(

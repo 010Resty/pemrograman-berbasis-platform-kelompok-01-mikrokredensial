@@ -195,6 +195,9 @@
 		actionLoading = true;
 		try {
 			data = await reviewApplicationRequest(data.id, { status });
+			if (status === 'approved' || status === 'rejected') {
+				window.dispatchEvent(new CustomEvent('admin:notif-refresh'));
+			}
 			showNotice(
 				status === 'approved' ? 'Pengajuan disetujui.' : status === 'rejected' ? 'Pengajuan ditolak.' : 'Pengajuan ditandai sedang ditinjau.',
 				true

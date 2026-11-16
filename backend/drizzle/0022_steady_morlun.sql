@@ -1,0 +1,1 @@
+ALTER TABLE `promo_campaigns` ADD `cover_image` varchar(500);

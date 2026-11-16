@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 
 import 'package:aristoteles_app/core/api_client.dart';
+import 'package:aristoteles_app/features/admin/report_api.dart';
 import 'package:aristoteles_app/features/catalog/catalog_api.dart';
 import 'package:aristoteles_app/features/certificate/certificate_api.dart';
 import 'package:aristoteles_app/features/payment/payment_api.dart';
@@ -172,6 +173,59 @@ void main() {
       final rows = await api.mine();
       expect(rows.single.code, 'ATS-2026-X');
       expect(auth, 'Bearer t');
+    });
+  });
+
+  group('laporan admin', () {
+    test('ringkasan + per kursus + filter tanggal', () async {
+      String? path;
+      final api = ReportApi(mockClient((url, headers, body) {
+        path = url.path + (url.hasQuery ? '?${url.query}' : '');
+        return {
+          'code': 200,
+          'json': ok({
+            'summary': {
+              'totalStudents': 2,
+              'totalTeachers': 1,
+              'totalCourses': 1,
+              'totalCertificates': 1,
+              'activeEnrollments': 2,
+              'completedEnrollments': 0,
+              'paymentsMenunggu': 1,
+              'paymentsDiverifikasi': 1,
+              'paymentsDitolak': 0,
+              'revenueVerified': 150000,
+              'voucherRedemptions': 1,
+            },
+            'perCourse': [
+              {
+                'courseId': 1,
+                'title': 'K1',
+                'status': 'published',
+                'studentCount': 2,
+                'avgProgress': 50,
+                'pendingReviews': 1,
+                'revenueVerified': 150000,
+                'paymentsMenunggu': 1,
+                'paymentsDiverifikasi': 1,
+                'certificatesIssued': 1,
+                'certificatesRevoked': 0,
+              }
+            ],
+            'certificates': {'issued': 1, 'revoked': 0},
+            'filters': {'from': '2026-01-01', 'to': '2026-01-31'},
+          }),
+        };
+      }));
+      final from = DateTime(2026, 1, 1);
+      final to = DateTime(2026, 1, 31);
+      final r = await api.fetch(from: from, to: to);
+      expect(r.summary.revenueVerified, 150000);
+      expect(r.perCourse.single.title, 'K1');
+      expect(r.certificatesIssued, 1);
+      expect(path, contains('from=2026-01-01'));
+      expect(path, contains('to=2026-01-31'));
+      expect(ReportApi.fmtDay(DateTime(2026, 2, 3)), '2026-02-03');
     });
   });
 

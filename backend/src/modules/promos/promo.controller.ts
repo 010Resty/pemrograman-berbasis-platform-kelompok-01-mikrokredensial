@@ -3,16 +3,26 @@ import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import {
   PromoError,
   addCourseSchema,
+  approveProposal,
+  createCampaign,
   createCampaignSchema,
+  createProposal,
+  decideProposalSchema,
+  deleteCampaign,
   getAdminCampaign,
   getPublicCampaign,
   getPromoQuoteForCourse,
   addCourseToCampaign,
-  createCampaign,
   listCampaignsAdmin,
+  listInstructorPromoMemberships,
+  listMyProposals,
+  listProposalsAdmin,
   listPublicCampaigns,
+  markProposalsSeen,
   patchCampaign,
   patchCampaignSchema,
+  proposePromoSchema,
+  rejectProposal,
   removeCourseFromCampaign,
 } from "./promo.service";
 
@@ -202,6 +212,156 @@ export const removeCourseHandler = async (req: AuthenticatedRequest, res: Respon
     }
     const data = await removeCourseFromCampaign(actorId, String(req.params.slug ?? ""), courseId);
     res.status(200).json({ status: "success", message: "Kursus dihapus dari promo", data });
+  } catch (e) {
+    if (promoError(res, e)) return;
+    next(e);
+  }
+};
+
+export const removeHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const actorId = uid(req);
+    if (actorId === null) {
+      res.status(401).json({ status: "error", message: "Token autentikasi diperlukan", data: null });
+      return;
+    }
+    const data = await deleteCampaign(actorId, String(req.params.slug ?? ""));
+    res.status(200).json({ status: "success", message: "Promo dihapus.", data });
+  } catch (e) {
+    if (promoError(res, e)) return;
+    next(e);
+  }
+};
+
+// ---------- Pengajuan instruktur ----------
+
+const instructorId = (req: AuthenticatedRequest): number | null => uid(req);
+
+export const proposeHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const actorId = instructorId(req);
+    if (actorId === null) {
+      res.status(401).json({ status: "error", message: "Token autentikasi diperlukan", data: null });
+      return;
+    }
+    const parsed = proposePromoSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        status: "error",
+        message: "Data pengajuan promo tidak valid",
+        errors: toFieldErrors(parsed.error.issues),
+        data: null,
+      });
+      return;
+    }
+    const role = String(req.user?.role ?? "");
+    const data = await createProposal(actorId, role, String(req.params.slug ?? ""), parsed.data);
+    res.status(201).json({ status: "success", message: "Pengajuan terkirim, menunggu persetujuan admin", data });
+  } catch (e) {
+    if (promoError(res, e)) return;
+    next(e);
+  }
+};
+
+export const myProposalsHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const actorId = instructorId(req);
+    if (actorId === null) {
+      res.status(401).json({ status: "error", message: "Token autentikasi diperlukan", data: null });
+      return;
+    }
+    const data = await listMyProposals(actorId);
+    res.status(200).json({ status: "success", message: "Daftar pengajuanku ke promo", data });
+  } catch (e) {
+    next(e);
+  }
+};
+
+/** Tandai keputusan atas pengajuanku sudah dibaca (badge nav hilang). */
+export const markSeenHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const actorId = instructorId(req);
+    if (actorId === null) {
+      res.status(401).json({ status: "error", message: "Token autentikasi diperlukan", data: null });
+      return;
+    }
+    const data = await markProposalsSeen(actorId);
+    res.status(200).json({ status: "success", message: "Keputusan promo ditandai dibaca", data });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const myPromosHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const actorId = instructorId(req);
+    if (actorId === null) {
+      res.status(401).json({ status: "error", message: "Token autentikasi diperlukan", data: null });
+      return;
+    }
+    const data = await listInstructorPromoMemberships(actorId);
+    res.status(200).json({ status: "success", message: "Kursusku yang masuk promo", data });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const adminProposalsHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const q = req.query as Record<string, unknown>;
+    const data = await listProposalsAdmin({
+      status: typeof q.status === "string" ? q.status : undefined,
+    });
+    res.status(200).json({ status: "success", message: "Daftar pengajuan promo", data });
+  } catch (e) {
+    next(e);
+  }
+};
+
+export const approveProposalHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const actorId = instructorId(req);
+    if (actorId === null) {
+      res.status(401).json({ status: "error", message: "Token autentikasi diperlukan", data: null });
+      return;
+    }
+    const proposalId = Number(req.params.id);
+    if (!Number.isInteger(proposalId) || proposalId <= 0) {
+      res.status(404).json({ status: "error", message: "Pengajuan tidak ditemukan", data: null });
+      return;
+    }
+    const data = await approveProposal(actorId, proposalId);
+    res.status(200).json({ status: "success", message: "Pengajuan disetujui, kursus masuk promo", data });
+  } catch (e) {
+    if (promoError(res, e)) return;
+    next(e);
+  }
+};
+
+export const rejectProposalHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
+  try {
+    const actorId = instructorId(req);
+    if (actorId === null) {
+      res.status(401).json({ status: "error", message: "Token autentikasi diperlukan", data: null });
+      return;
+    }
+    const proposalId = Number(req.params.id);
+    if (!Number.isInteger(proposalId) || proposalId <= 0) {
+      res.status(404).json({ status: "error", message: "Pengajuan tidak ditemukan", data: null });
+      return;
+    }
+    const parsed = decideProposalSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({
+        status: "error",
+        message: "Data penolakan tidak valid",
+        errors: toFieldErrors(parsed.error.issues),
+        data: null,
+      });
+      return;
+    }
+    const data = await rejectProposal(actorId, proposalId, parsed.data.note);
+    res.status(200).json({ status: "success", message: "Pengajuan ditolak", data });
   } catch (e) {
     if (promoError(res, e)) return;
     next(e);

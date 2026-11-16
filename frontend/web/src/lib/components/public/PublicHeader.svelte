@@ -28,6 +28,9 @@
 	let promoOpen = $state(false);
 	let mobilePromoOpen = $state(false);
 	let promoWrap: HTMLDivElement | undefined = $state(undefined);
+	let tentangOpen = $state(false);
+	let mobileTentangOpen = $state(false);
+	let tentangWrap: HTMLDivElement | undefined = $state(undefined);
 
 	/**
 	 * Shortcut ke tiap bagian halaman promo khusus — dipakai saat halaman tidak
@@ -42,18 +45,36 @@
 
 	const promoMenuItems = $derived(promoItems ?? defaultPromoItems);
 
+	const tentangMenuItems = [
+		{ id: 'arti-nama', title: 'Arti Nama', desc: 'Makna dan singkatan ARISTOTELES', href: '/tentang/arti-nama' as const },
+		{ id: 'cara-kerja', title: 'Cara Kerja', desc: 'Empat langkah menuju sertifikat', href: '/tentang/cara-kerja' as const },
+		{ id: 'untuk-siapa', title: 'Untuk Siapa', desc: 'Portal peserta, instruktur, dan admin', href: '/tentang/untuk-siapa' as const },
+		{ id: 'keunggulan', title: 'Keunggulan', desc: 'Kurikulum industri dan mentor praktisi', href: '/tentang/keunggulan' as const }
+	];
+
 	function closePromo(): void {
 		promoOpen = false;
+	}
+
+	function closeTentang(): void {
+		tentangOpen = false;
 	}
 
 	function handleWindowClick(e: MouseEvent): void {
 		if (promoOpen && promoWrap && !promoWrap.contains(e.target as Node | null)) {
 			promoOpen = false;
 		}
+		if (tentangOpen && tentangWrap && !tentangWrap.contains(e.target as Node | null)) {
+			tentangOpen = false;
+		}
 	}
 
 	function handleWindowKeydown(e: KeyboardEvent): void {
-		if (e.key === 'Escape') promoOpen = false;
+		if (e.key === 'Escape') {
+			promoOpen = false;
+			tentangOpen = false;
+			mobileTentangOpen = false;
+		}
 	}
 
 	const links = [
@@ -144,6 +165,58 @@
 										{#if promoMenuItems.length === 0}
 											<li class="px-4 py-3 text-sm text-slate-500">Belum ada promo saat ini.</li>
 										{/if}
+									</ul>
+								</div>
+							</div>
+						{/if}
+					</div>
+				{:else if link.id === 'tentang'}
+					<div class="relative" bind:this={tentangWrap}>
+						<button
+							type="button"
+							aria-haspopup="menu"
+							aria-expanded={tentangOpen}
+							aria-controls="tentang-menu"
+							onclick={() => (tentangOpen = !tentangOpen)}
+							onkeydown={(e) => {
+								if (e.key === 'Escape') tentangOpen = false;
+							}}
+							class="relative flex cursor-pointer items-center gap-1.5 rounded-lg px-4 py-2 transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-royal {active === link.id
+								? 'text-royal'
+								: 'text-slate-600 hover:text-abyss'}"
+						>
+							{link.label}
+							<i class={`fa-solid fa-chevron-down text-[10px] transition-transform duration-200 ${tentangOpen ? 'rotate-180' : ''}`} aria-hidden="true"></i>
+						</button>
+						{#if tentangOpen}
+							<div class="absolute top-full left-1/2 z-50 w-[540px] max-w-[calc(100vw-2rem)] -translate-x-1/2 pt-2.5">
+								<div class="flex overflow-hidden rounded-2xl border border-mist bg-white shadow-[0_16px_32px_rgba(0,0,0,0.08)]">
+									<div class="relative flex w-[42%] flex-col items-center justify-center overflow-hidden p-6 text-center text-white">
+										<img src={dropdownBg} alt="" aria-hidden="true" class="absolute inset-0 h-full w-full object-cover" loading="lazy" />
+										<div class="absolute inset-0 bg-abyss/65" aria-hidden="true"></div>
+										<div class="relative">
+											<p class="mb-2 text-xs font-semibold tracking-wide text-teal">Mengenal Kami</p>
+											<p class="font-heading text-xl leading-snug font-extrabold">Laboratorium Pendidikan Era AI</p>
+											<p class="mt-2 text-xs leading-relaxed text-slate-200">Praktis, terukur, dan relevan dengan dunia kerja</p>
+										</div>
+									</div>
+									<ul id="tentang-menu" role="menu" aria-label="Menu tentang" class="flex w-[58%] flex-col gap-0.5 p-3">
+										{#each tentangMenuItems as item (item.id)}
+											<li>
+												<a
+													href={resolve(item.href)}
+													onclick={closeTentang}
+													class="block rounded-lg px-3 py-2 transition-colors duration-200 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-royal"
+												>
+													<span class="flex items-center gap-2">
+														<span class="text-sm font-bold text-abyss">{item.title}</span>
+													</span>
+													{#if item.desc}
+														<span class="mt-0.5 block text-xs text-slate-400">{item.desc}</span>
+													{/if}
+												</a>
+											</li>
+										{/each}
 									</ul>
 								</div>
 							</div>
@@ -243,6 +316,36 @@
 								{#if promoMenuItems.length === 0}
 										<li class="px-2 py-2.5 text-sm font-normal text-slate-500">Belum ada promo saat ini.</li>
 									{/if}
+								</ul>
+							{/if}
+						{:else if link.label === 'Tentang'}
+							<button
+								type="button"
+								aria-expanded={mobileTentangOpen}
+								onclick={() => (mobileTentangOpen = !mobileTentangOpen)}
+								class="flex w-full items-center justify-between rounded-lg px-2 py-3 transition-colors duration-200 hover:bg-ice focus-visible:outline-2 focus-visible:outline-royal {active === 'tentang' ? 'text-royal' : 'text-slate-700'}"
+							>
+								{link.label}
+								<i class={`fa-solid fa-chevron-down text-xs transition-transform duration-200 ${mobileTentangOpen ? 'rotate-180' : ''}`} aria-hidden="true"></i>
+							</button>
+							{#if mobileTentangOpen}
+								<ul class="mb-2 ml-2 space-y-0.5 border-l-2 border-mist pl-3">
+								{#each tentangMenuItems as item (item.id)}
+										<li>
+											<a
+												href={resolve(item.href)}
+												onclick={() => (menuOpen = false)}
+												class="flex items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-sm font-semibold text-slate-600 transition-colors duration-200 hover:bg-ice hover:text-abyss focus-visible:outline-2 focus-visible:outline-royal"
+											>
+												<span class="min-w-0 flex-1">
+												<span class="block truncate">{item.title}</span>
+												{#if item.desc}
+													<span class="block truncate text-xs font-normal text-slate-400">{item.desc}</span>
+												{/if}
+											</span>
+											</a>
+										</li>
+									{/each}
 								</ul>
 							{/if}
 						{:else}

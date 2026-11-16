@@ -20,6 +20,10 @@ export interface AdminUser {
 	expertise: string | null;
 	role: string;
 	isActive: boolean;
+	/** URL foto profil atau null; absen pada payload lama → null. */
+	avatarUrl?: string | null;
+	/** URL sampul profil atau null; absen pada payload lama → null. */
+	coverUrl?: string | null;
 	createdAt: string;
 }
 
@@ -97,12 +101,13 @@ export type AdminCourseStatus = 'draft' | 'published' | 'archived';
 export interface AdminCourseListParams {
 	q?: string;
 	status?: AdminCourseStatus;
+	category?: string;
 	limit?: number;
 }
 
 /**
  * Daftar kursus untuk admin dengan filter server
- * (GET /api/v1/instructor/courses?q=&status=&limit=&sort=newest).
+ * (GET /api/v1/instructor/courses?q=&status=&category=&limit=&sort=newest).
  * Respons berupa array tanpa total — paginasi dilakukan di klien.
  */
 export async function fetchAdminCourseList(
@@ -111,6 +116,7 @@ export async function fetchAdminCourseList(
 	const sp = new URLSearchParams();
 	if (params.q?.trim()) sp.set('q', params.q.trim());
 	if (params.status) sp.set('status', params.status);
+	if (params.category?.trim()) sp.set('category', params.category.trim());
 	sp.set('limit', String(params.limit ?? 100));
 	sp.set('sort', 'newest');
 	const data = await req<{ courses?: BackendCourse[] } | BackendCourse[]>(
@@ -162,4 +168,86 @@ export function updateAdminUser(
 	input: { name?: string; email?: string; expertise?: string; isActive?: boolean }
 ): Promise<AdminUser> {
 	return req<AdminUser>(`/admin/users/${id}`, { method: 'PATCH', body: input });
+}
+
+export interface AdminReportCourseRow {
+	courseId: number;
+	title: string;
+	status: string;
+	studentCount: number;
+	avgProgress: number;
+	pendingReviews: number;
+	revenueVerified: number;
+	paymentsMenunggu: number;
+	paymentsDiverifikasi: number;
+	paymentsDitolak: number;
+	certificatesIssued: number;
+	certificatesRevoked: number;
+}
+
+export interface AdminReportInsightStage {
+	stage: 'pendaftar' | 'enrollment' | 'pembayaran' | 'sertifikat';
+	label: string;
+	basis: 'snapshot' | 'filter';
+	count: number;
+	pctOfFirst: number;
+	pctOfPrev: number | null;
+}
+
+export interface AdminReportInsights {
+	funnel: AdminReportInsightStage[];
+	rates: {
+		paymentApproval: number;
+		paymentRejection: number;
+		enrollmentCompletion: number;
+		certificatePerEnrollment: number;
+		enrollmentCertified: number;
+		certificateRevoke: number;
+	};
+	note: string;
+}
+
+export interface AdminReports {
+	summary: {
+		totalStudents: number;
+		totalTeachers: number;
+		totalCourses: number;
+		totalCertificates: number;
+		activeEnrollments: number;
+		completedEnrollments: number;
+		paymentsMenunggu: number;
+		paymentsDiverifikasi: number;
+		paymentsDitolak: number;
+		revenueVerified: number;
+		voucherRedemptions: number;
+	};
+	perCourse: AdminReportCourseRow[];
+	certificates: { issued: number; revoked: number };
+	filters: { from?: string; to?: string; courseId?: number };
+	paging: { page: number; limit: number; total: number };
+	insights: AdminReportInsights;
+}
+
+export interface AdminReportsParams {
+	from?: string;
+	to?: string;
+	courseId?: number;
+	limit?: number;
+	page?: number;
+}
+
+/**
+ * Laporan agregat read-only (GET /api/v1/admin/reports?from=&to=&courseId=&limit=&page=).
+ * Kontrak backend: docs `backend/docs/API_CONTRACT.md` §11.
+ * `avgProgress`/`pendingReviews` adalah snapshot saat ini (tak terfilter tanggal).
+ */
+export function fetchAdminReports(params: AdminReportsParams = {}): Promise<AdminReports> {
+	const sp = new URLSearchParams();
+	if (params.from) sp.set('from', params.from);
+	if (params.to) sp.set('to', params.to);
+	if (params.courseId !== undefined) sp.set('courseId', String(params.courseId));
+	if (params.limit !== undefined) sp.set('limit', String(params.limit));
+	if (params.page !== undefined) sp.set('page', String(params.page));
+	const qs = sp.toString();
+	return req<AdminReports>(`/admin/reports${qs ? `?${qs}` : ''}`);
 }

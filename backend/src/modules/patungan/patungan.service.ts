@@ -66,6 +66,8 @@ export interface PatunganCampaignRef {
   title: string;
   badgeLabel: string | null;
   endsAt: Date | null;
+  /** Harga khusus patungan (total grup); null = ikut harga kursus. */
+  patunganPrice: number | null;
 }
 
 /**
@@ -85,6 +87,7 @@ export const getActivePatunganForCourse = async (
       status: promoCampaigns.status,
       startsAt: promoCampaigns.startsAt,
       endsAt: promoCampaigns.endsAt,
+      patunganPrice: promoCourses.patunganPrice,
       priceNominal: courses.priceNominal,
       courseStatus: courses.status,
     })
@@ -95,7 +98,7 @@ export const getActivePatunganForCourse = async (
   for (const r of rows.sort((a, b) => b.id - a.id)) {
     if (r.courseStatus !== "published" || r.priceNominal <= 0) continue;
     if (!isCampaignActive({ status: r.status, startsAt: r.startsAt, endsAt: r.endsAt }, now)) continue;
-    return { id: r.id, slug: r.slug, title: r.title, badgeLabel: r.badgeLabel, endsAt: r.endsAt };
+    return { id: r.id, slug: r.slug, title: r.title, badgeLabel: r.badgeLabel, endsAt: r.endsAt, patunganPrice: r.patunganPrice };
   }
   return null;
 };
@@ -110,7 +113,15 @@ export interface ResolvedMember {
 }
 
 export interface ResolvedGroup {
-  course: { id: number; title: string; priceLabel: string; priceNominal: number };
+  course: {
+    id: number;
+    title: string;
+    priceLabel: string;
+    priceNominal: number;
+    /** Harga dasar yang dipakai membagi iuran (override promo bila ada). */
+    effectivePrice: number;
+    patunganPrice: number | null;
+  };
   campaign: PatunganCampaignRef;
   creator: ResolvedMember;
   members: ResolvedMember[];
@@ -251,9 +262,19 @@ export const resolveGroupMembers = async (
     );
   }
 
-  const shares = splitShares(course.priceNominal, total);
+  // Harga dasar iuran = harga khusus patungan bila diset admin,
+  // selain itu harga kursus (total grup, dibagi rata ke anggota).
+  const effectivePrice = campaign.patunganPrice ?? course.priceNominal;
+  const shares = splitShares(effectivePrice, total);
   return {
-    course: { id: course.id, title: course.title, priceLabel: course.priceLabel, priceNominal: course.priceNominal },
+    course: {
+      id: course.id,
+      title: course.title,
+      priceLabel: course.priceLabel,
+      priceNominal: course.priceNominal,
+      effectivePrice,
+      patunganPrice: campaign.patunganPrice,
+    },
     campaign,
     creator,
     members,
@@ -288,7 +309,7 @@ export const createPatunganGroup = async (creatorId: number, courseId: number, r
           courseId: resolved.course.id,
           promoSlug: resolved.campaign.slug,
           memberCount: all.length,
-          priceNominal: resolved.course.priceNominal,
+          priceNominal: resolved.course.effectivePrice,
           status: "pending",
           createdBy: creatorId,
         });
@@ -605,7 +626,7 @@ export const setMemberPaymentState = async (
  * dipanggil ulang (grup bukan pending → false). WAJIB dalam transaksi
  * verifikasi pembayaran (anti-race dua approve bersamaan).
  */
-export const tryCompleteGroup = async (tx: DbTx, adminId: number, groupId: number): Promise<boolean> => {
+export const tryCompleteGroup = async (tx: DbTx, adminId: number | null, groupId: number): Promise<boolean> => {
   const locked = await tx.select().from(patunganGroups).where(eq(patunganGroups.id, groupId)).for("update").limit(1);
   const g = locked[0];
   if (!g || g.status !== "pending") return false;

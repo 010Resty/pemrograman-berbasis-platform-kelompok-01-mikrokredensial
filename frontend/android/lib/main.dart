@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'core/api_client.dart';
 import 'core/auth_api.dart';
+import 'core/offline_cache.dart';
 import 'core/session.dart';
 import 'features/auth/auth_scaffold.dart';
 import 'features/auth/login_page.dart';
@@ -18,6 +19,9 @@ void main() {
   final api = ApiClient();
   final session = SessionManager(authApi: AuthApi(api));
   api.onUnauthorized = () => session.clear();
+  // 401 → coba rotasi refresh token dulu (single-flight); hanya bila gagal
+  // sesi dibersihkan dan pengguna diarahkan ke login.
+  api.onRefreshNeeded = () => session.refreshNow();
   runApp(AristotelesApp(session: session, authApi: AuthApi(api), api: api));
 }
 
@@ -61,7 +65,15 @@ class _AristotelesAppState extends State<AristotelesApp> {
         onAuthenticated: () => HomeRouter(
           user: widget.session.user!,
           api: widget.api,
-          onLogout: () => widget.session.logout(),
+          // Cache offline milik akun dihapus agar data tak tertinggal.
+          onLogout: () async {
+            await OfflineCache().clearAll();
+            await widget.session.logout();
+          },
+          onLogoutAll: () async {
+            await OfflineCache().clearAll();
+            await widget.session.logout(allDevices: true);
+          },
         ),
         onUnauthenticated: () => _authScreen(),
       ),

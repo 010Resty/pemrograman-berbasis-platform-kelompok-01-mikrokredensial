@@ -17,16 +17,17 @@ lib/
   shared_ui.dart       # state loading/error/kosong, formatIDR, konfirmasi
   features/
     auth/              # splash, login, register, verify OTP, lupa/reset
-    home/              # router + home per peran (menu navigasi nyata)
+    home/              # router + home per peran (bottom navigation ≤5 tab + halaman "Lainnya")
     catalog/           # Semua Kursus, Kursusku, detail kursus, materi, kuis, tugas
     payment/           # bayar QRIS, notifikasi, unggah bukti, polling
     certificate/       # sertifikat saya, unduh PDF, verifikasi publik
     profile/           # lihat + ubah profil (termasuk voucher diskon)
     instructor/        # kursusku, antrean penilaian + rubrik, sertifikat
-    admin/             # dasbor, peserta, undangan, voucher, verifikasi bayar
+    admin/             # dasbor, laporan, peserta, undangan, voucher, verifikasi bayar
 test/
   envelope_test.dart   # unit parser envelope + model (tanpa jaringan)
   api_contract_test.dart # kontrak endpoint vs mock HTTP (tanpa backend)
+  bottom_nav_test.dart # widget bottom nav per peran + menu "Lainnya" (tanpa jaringan)
 ```
 
 Kontrak acuan: `frontend/shared/` (envelope, 80 endpoint, skenario K-01–K-08).
@@ -57,9 +58,30 @@ flutter test      # unit envelope, model, kontrak endpoint (mock HTTP)
 > `setx PUB_CACHE C:\pub-cache` (permanen, buka terminal baru) dan
 > `flutter pub get` ulang.
 
-## Batasan (disengaja, sesuai rencana)
+## Status penyelesaian batasan sebelumnya
 
-- Online-only: tanpa cache offline dan tanpa push notification.
-- Logout menghapus sesi perangkat ini; "keluar semua perangkat" menyusul
-  bila dibutuhkan (endpoint `/auth/logout` tanpa token sudah didukung).
-- Avatar profil belum dapat diubah dari aplikasi (baca/tulis field teks saja).
+- ✅ Avatar profil dapat diubah dari aplikasi: pilih dari galeri
+  (`image_picker`, downscale klien) → validasi JPG/PNG/WebP ≤2MB →
+  `POST /uploads {kind: avatar}` → `PATCH /me/profile {avatarFileId}`.
+  Hapus via `DELETE /me/profile/avatar`. Cermin web
+  (`ProfileEditor.svelte` + `uploads.ts` + `profile.ts`).
+- ✅ Cache offline (tanpa dep baru, `path_provider`):
+  `lib/core/offline_cache.dart` menyimpan JSON `{savedAt, data}` per kunci
+  dengan TTL (katalog 15 mnt, profil 30 mnt). Katalog + Profil menampilkan
+  data tersimpan + spanduk "Offline" bila backend tak terjangkau.
+  Cache dibersihkan saat logout agar data akun tak tertinggal.
+- ✅ Notifikasi: polling lokal tiap 60 detik selama halaman Notifikasi aktif
+  + pull-to-refresh + lencana BARU jujur via `lib/core/notification_center.dart`
+  (diff vs terakhir dilihat di secure storage). Tanpa Firebase.
+- ✅ Keluar semua perangkat: dialog keluar menawarkan "Perangkat ini" vs
+  "Semua perangkat" (`POST /auth/logout` tanpa body mencabut semua sesi,
+  cermin kontrak `API_CONTRACT.md` §2 + `SessionManager.logout(allDevices)`).
+
+## Batasan tersisa (disengaja)
+
+- Push FCM asli (Firebase project + `google-services.json` +
+  `firebase_messaging`) belum dipasang — butuh setup native + kredensial
+  Firebase yang belum diputuskan. Polling + lencana lokal di atas adalah
+  pengganti sementara yang jujur.
+- Online-first: tulis (bayar, kumpul tugas, kuis) tetap butuh koneksi;
+  yang di-cache hanya baca (katalog, profil).

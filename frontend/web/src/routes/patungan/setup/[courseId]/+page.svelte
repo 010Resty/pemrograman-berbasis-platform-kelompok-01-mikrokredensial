@@ -40,6 +40,7 @@
 	let shares = $state<Record<string, number>>({});
 	let creatorShare = $state(0);
 	let totalNominal = $state(0);
+	let promoPrice = $state<number | null>(null);
 	let formCode = $state('');
 	let formMessage = $state('');
 	let checking = $state(false);
@@ -108,10 +109,12 @@
 				shares = res.shares ?? {};
 				creatorShare = res.creatorShare ?? 0;
 				totalNominal = res.total ?? 0;
+				promoPrice = res.course?.patunganPrice ?? null;
 				formCode = '';
 				formMessage = '';
 			} else {
 				ready = false;
+				promoPrice = null;
 				formCode = res.error?.code ?? '';
 				formMessage = (res.error?.code && CODE_MESSAGE[res.error.code]) || res.error?.message || 'Belum bisa dibuat.';
 			}
@@ -196,6 +199,9 @@
 				{/if}
 				{#if campaignTitle}
 					<p class="mt-1 text-xs text-teal">Promo: {campaignTitle}</p>
+				{/if}
+				{#if promoPrice !== null}
+					<p class="mt-1 text-xs font-bold text-amber-300">Harga khusus patungan: {formatIDR(promoPrice)} total grup (bukan harga satuan)</p>
 				{/if}
 			</div>
 

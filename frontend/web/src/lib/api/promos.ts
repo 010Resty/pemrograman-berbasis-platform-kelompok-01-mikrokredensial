@@ -21,12 +21,16 @@ export interface PromoCourse {
 	promoPrice: number | null;
 	badgeLabel: string | null;
 	promoEndsAt: string | null;
+	/** Harga khusus patungan (total grup); null = ikut harga kursus. */
+	patunganPrice: number | null;
 }
 
 export interface PromoCampaign {
 	slug: string;
 	title: string;
 	badgeLabel: string | null;
+	/** Sampul promo untuk highlight katalog; null = fallback. */
+	coverImage: string | null;
 	type: PromoType;
 	discountPercent: number | null;
 	startsAt: string | null;
@@ -61,6 +65,7 @@ export interface AdminPromoDetail extends AdminPromoCampaign {
 		title: string;
 		status: string;
 		priceNominal: number;
+		patunganPrice: number | null;
 	}>;
 }
 
@@ -81,6 +86,7 @@ export interface AdminPromoCampaign {
 	slug: string;
 	title: string;
 	badgeLabel: string | null;
+	coverImage: string | null;
 	type: PromoType;
 	discountPercent: number | null;
 	status: PromoStatus;
@@ -102,6 +108,16 @@ async function adminRequest<T>(path: string, method: string, body?: unknown): Pr
 	}
 }
 
+/** Request terautentikasi portal instruktur (teacher/admin) — pola sama seperti admin. */
+async function instructorRequest<T>(path: string, method: string, body?: unknown): Promise<T> {
+	try {
+		return await apiRequest<T>(path, { method, body, token: getAccessToken() });
+	} catch (e) {
+		await handlePrivateRequestError(e);
+		throw e;
+	}
+}
+
 export function fetchAdminPromos(params: { status?: string; type?: string } = {}): Promise<AdminPromoCampaign[]> {
 	const qs = new URLSearchParams();
 	if (params.status) qs.set('status', params.status);
@@ -114,6 +130,7 @@ export function createPromo(input: {
 	slug: string;
 	title: string;
 	badgeLabel?: string;
+	coverImage?: string;
 	type: PromoType;
 	discountPercent?: number;
 	status?: PromoStatus;
@@ -128,6 +145,7 @@ export function patchPromo(
 	input: Partial<{
 		title: string;
 		badgeLabel: string | null;
+		coverImage: string | null;
 		type: PromoType;
 		discountPercent: number | null;
 		status: PromoStatus;
@@ -140,11 +158,100 @@ export function patchPromo(
 
 export function addCourseToPromo(
 	slug: string,
-	input: { courseId: number; position?: number; customBadge?: string }
+	input: { courseId: number; position?: number; customBadge?: string; patunganPrice?: number }
 ): Promise<{ slug: string; courseId: number }> {
 	return adminRequest(`/admin/promos/${encodeURIComponent(slug)}/courses`, 'POST', input);
 }
 
 export function removeCourseFromPromo(slug: string, courseId: number): Promise<{ slug: string; courseId: number }> {
 	return adminRequest(`/admin/promos/${encodeURIComponent(slug)}/courses/${courseId}`, 'DELETE');
+}
+
+export function deletePromo(slug: string): Promise<{ slug: string; removed: boolean }> {
+	return adminRequest(`/admin/promos/${encodeURIComponent(slug)}`, 'DELETE');
+}
+
+export type PromoProposalStatus = 'pending' | 'approved' | 'rejected';
+
+export interface PromoProposal {
+	id: number;
+	campaignSlug: string;
+	campaignTitle: string;
+	campaignType: PromoType;
+	courseId: number;
+	courseTitle: string;
+	customBadge: string | null;
+	patunganPrice: number | null;
+	note: string | null;
+	status: PromoProposalStatus;
+	decidedNote: string | null;
+	/** Kapan keputusan dilihat instruktur; null = belum dibaca (badge nav). */
+	seenAt: string | null;
+	createdAt: string;
+	decidedAt: string | null;
+}
+
+export interface InstructorPromoMembership {
+	slug: string;
+	title: string;
+	type: PromoType;
+	discountPercent: number | null;
+	status: PromoStatus;
+	endsAt: string | null;
+	courseId: number;
+	courseTitle: string;
+	customBadge: string | null;
+	patunganPrice: number | null;
+}
+
+export interface AdminPromoProposal extends PromoProposal {
+	courseStatus: string;
+	priceNominal: number;
+	proposedBy: number | null;
+	proposerName: string | null;
+}
+
+/** Kampanye aktif + keanggotaan kursusku (termasuk yang ditambah langsung admin). */
+export function fetchInstructorPromoMemberships(): Promise<InstructorPromoMembership[]> {
+	return instructorRequest<InstructorPromoMembership[]>('/instructor/promos', 'GET');
+}
+
+/** Riwayat pengajuanku ke promo (pending/disetujui/ditolak). */
+export function fetchMyPromoProposals(): Promise<PromoProposal[]> {
+	return instructorRequest<PromoProposal[]>('/instructor/promo-proposals', 'GET');
+}
+
+/** Tandai semua keputusan atas pengajuanku sudah dibaca. */
+export function markPromoProposalsSeen(): Promise<{ seen: number }> {
+	return instructorRequest<{ seen: number }>('/instructor/promo-proposals/seen', 'POST', {});
+}
+
+/** Ajukan kursus milikku ke sebuah kampanye (butuh approve admin). */
+export function proposeCourseToPromo(
+	slug: string,
+	input: { courseId: number; customBadge?: string; patunganPrice?: number; note?: string }
+): Promise<PromoProposal> {
+	return instructorRequest<PromoProposal>(
+		`/instructor/promos/${encodeURIComponent(slug)}/proposals`,
+		'POST',
+		input
+	);
+}
+
+/** Antrean pengajuan untuk admin (filter status opsional). */
+export function fetchAdminPromoProposals(status?: string): Promise<AdminPromoProposal[]> {
+	const qs = status ? `?status=${encodeURIComponent(status)}` : '';
+	return adminRequest<AdminPromoProposal[]>(`/admin/promo-proposals${qs}`, 'GET');
+}
+
+/** Setujui pengajuan: kursus masuk promo. */
+export function approvePromoProposal(id: number): Promise<PromoProposal> {
+	return adminRequest<PromoProposal>(`/admin/promo-proposals/${id}/approve`, 'POST', {});
+}
+
+/** Tolak pengajuan beserta catatan keputusan opsional. */
+export function rejectPromoProposal(id: number, note?: string): Promise<PromoProposal> {
+	return adminRequest<PromoProposal>(`/admin/promo-proposals/${id}/reject`, 'POST', {
+		note: note ?? undefined
+	});
 }

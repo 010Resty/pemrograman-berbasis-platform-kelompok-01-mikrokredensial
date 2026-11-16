@@ -41,6 +41,11 @@ class ProfileApi {
       fromData: (_) => null,
     );
   }
+
+  /// Lepas foto profil (DELETE /me/profile/avatar) → profil tanpa avatar.
+  Future<Map<String, Object?>> removeAvatar() {
+    return _api.delete('/me/profile/avatar').then((_) async => raw());
+  }
 }
 
 class DiscountQuote {

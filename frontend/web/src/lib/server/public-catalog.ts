@@ -34,14 +34,9 @@ export function getSpotServer(): Promise<BackendCourse[]> {
 	return getList('status=published&limit=12&sort=newest');
 }
 
-/** /pelatihan: filter default "Semua" (cermin loadModul). */
+/** /pelatihan: 10 pelatihan pertama filter default "Semua" (cermin load awal klien). */
 export function getModulServer(): Promise<BackendCourse[]> {
-	return getList('status=published&limit=8&sort=newest');
-}
-
-/** /modules: katalog awal tanpa filter (cermin load). */
-export function getCatalogServer(): Promise<BackendCourse[]> {
-	return getList('limit=100&sort=newest');
+	return getList('status=published&limit=10&sort=newest');
 }
 
 /**

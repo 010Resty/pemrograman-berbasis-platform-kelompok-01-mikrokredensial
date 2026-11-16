@@ -18,7 +18,7 @@
 				<li><a href={resolve('/')} class="transition-colors duration-200 hover:text-white">Promo</a></li>
 				<li><a href={resolve('/pelatihan')} class="transition-colors duration-200 hover:text-white">Pelatihan</a></li>
 				<li><a href={resolve('/peringkat')} class="transition-colors duration-200 hover:text-white">Peringkat</a></li>
-				<li><a href={resolve('/tentang')} class="transition-colors duration-200 hover:text-white">Tentang</a></li>
+				<li><a href={resolve('/tentang/arti-nama')} class="transition-colors duration-200 hover:text-white">Tentang</a></li>
 				<li><a href={resolve('/verifikasi')} class="transition-colors duration-200 hover:text-white">Verifikasi sertifikat</a></li>
 			</ul>
 		</nav>
@@ -28,13 +28,16 @@
 				<li><a href={resolve('/user')} class="transition-colors duration-200 hover:text-white">Portal peserta</a></li>
 				<li><a href={resolve('/instruktur')} class="transition-colors duration-200 hover:text-white">Portal instruktur</a></li>
 				<li><a href={resolve('/admin')} class="transition-colors duration-200 hover:text-white">Portal admin</a></li>
-				<li><a href={resolve('/modules')} class="transition-colors duration-200 hover:text-white">Katalog lengkap</a></li>
+				<li><a href={resolve('/pelatihan')} class="transition-colors duration-200 hover:text-white">Katalog lengkap</a></li>
 			</ul>
 		</nav>
 		<nav aria-label="Informasi footer">
 			<h2 class="font-heading text-sm font-bold tracking-wide text-white uppercase">Informasi</h2>
 			<ul class="mt-4 space-y-2.5 text-sm">
-				<li><a href={resolve('/tentang')} class="transition-colors duration-200 hover:text-white">Tentang ARISTOTELES</a></li>
+				<li><a href={resolve('/tentang/arti-nama')} class="transition-colors duration-200 hover:text-white">Tentang ARISTOTELES</a></li>
+				<li><a href={resolve('/tentang/cara-kerja')} class="transition-colors duration-200 hover:text-white">Cara kerja</a></li>
+				<li><a href={resolve('/tentang/untuk-siapa')} class="transition-colors duration-200 hover:text-white">Untuk siapa</a></li>
+				<li><a href={resolve('/tentang/keunggulan')} class="transition-colors duration-200 hover:text-white">Keunggulan</a></li>
 				<li><a href={resolve('/syarat-ketentuan')} class="transition-colors duration-200 hover:text-white">Syarat &amp; ketentuan</a></li>
 				<li><a href={resolve('/kebijakan-privasi')} class="transition-colors duration-200 hover:text-white">Kebijakan privasi</a></li>
 			</ul>

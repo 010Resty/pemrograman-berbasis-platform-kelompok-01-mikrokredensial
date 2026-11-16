@@ -54,6 +54,15 @@ export const users = mysqlTable("users", {
       onUpdate: "cascade",
     }
   ),
+  // Tanda tangan instruktur (opsional, milik sendiri, kind=signature).
+  // Dipakai pada PDF sertifikat; NULL = fallback nama diketik.
+  signatureFileId: int("signature_file_id").references(
+    (): AnyMySqlColumn => files.id,
+    {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }
+  ),
   // Penonaktifan oleh admin; ditegakkan saat login (jendela token ≤15 mnt).
   // Penanda verifikasi email alur OTP. NULL = belum diverifikasi.
   // Baris lama di-backfill saat migrasi 0008.
@@ -66,7 +75,9 @@ export const users = mysqlTable("users", {
 // Sesi refresh untuk klien mobile (Flutter): token opaque sekali pakai
 // (rotasi), hanya hash SHA-256 yang disimpan — mirip undangan instruktur.
 // Akses tetap JWT 15 menit; refresh berlaku REFRESH_EXPIRES_DAYS (default 30).
-// Tanpa migrasi tambahan setelah ini: pencabutan = tandai revokedAt.
+// Pencabutan = tandai revokedAt; rotasi mencatat replacedByTokenHash agar
+// pakai-ulang balapan (dua klien refresh bersamaan) dalam grace window
+// singkat dapat diputar dari token penerus, bukan dianggap pencurian.
 export const refreshTokens = mysqlTable(
   "refresh_tokens",
   {
@@ -80,6 +91,9 @@ export const refreshTokens = mysqlTable(
     tokenHash: varchar("token_hash", { length: 64 }).notNull().unique(),
     expiresAt: timestamp("expires_at").notNull(),
     revokedAt: timestamp("revoked_at"),
+    // Hash token pengganti saat baris ini dicabut karena rotasi.
+    // NULL = dicabut via logout/kedaluwarsa/nonaktif (tanpa penerus).
+    replacedByTokenHash: varchar("replaced_by_token_hash", { length: 64 }),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => ({
@@ -148,6 +162,31 @@ export const courses = mysqlTable("courses", {
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 });
+
+// Kategori kursus yang dikelola admin (sumber kebenaran dropdown/filter).
+// `courses.category` menyimpan NAMA kategori (varchar, tanpa FK) agar kursus
+// lama tetap tampil bila kategorinya dinonaktifkan/dihapus.
+// Baris aktif = boleh dipakai kursus baru; nonaktif = disembunyikan dari
+// pilihan tapi tetap valid untuk kursus yang sudah memakainya.
+export const courseCategories = mysqlTable(
+  "course_categories",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    slug: varchar("slug", { length: 100 }).notNull().unique(),
+    name: varchar("name", { length: 100 }).notNull().unique(),
+    isActive: boolean("is_active").notNull().default(true),
+    sortOrder: int("sort_order").notNull().default(0),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    activeSortIdx: index("course_categories_active_sort_idx").on(
+      table.isActive,
+      table.sortOrder,
+      table.id
+    ),
+  })
+);
 
 // Relasi pengampu: satu kursus bisa diampu banyak instruktur dan sebaliknya.
 // Dipakai menegakkan "instruktur mengelola kursus tanggung jawabnya".
@@ -273,17 +312,47 @@ export const files = mysqlTable("files", {
     "payment_proof",
     "avatar",
     "profile_cover",
+    "signature",
   ])
     .notNull()
     .default("image"),
   originalName: varchar("original_name", { length: 255 }).notNull(),
   mimeType: varchar("mime_type", { length: 100 }).notNull(),
   sizeBytes: int("size_bytes").notNull().default(0),
+  // Dimensi gambar hasil optimasi (NULL = berkas lama pra-optimasi / non-gambar).
+  width: int("width"),
+  height: int("height"),
+  // Ukuran byte SEBELUM optimasi (untuk audit perbandingan); NULL bila dilewati.
+  originalSizeBytes: int("original_size_bytes"),
   storageKey: varchar("storage_key", { length: 255 }).notNull().unique(),
   url: varchar("url", { length: 500 }).notNull(),
   sha256: varchar("sha256", { length: 64 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
+
+// Varian responsif gambar hasil optimasi (untuk srcset frontend).
+// Satu baris per lebar: file turunan dari `files` yang sama, dihapus
+// berjenjang (FK cascade) tetapi byte di disk dibersihkan manual
+// (lihat deleteFileById) karena DB tak tahu filesystem.
+export const fileVariants = mysqlTable(
+  "file_variants",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    fileId: int("file_id")
+      .notNull()
+      .references(() => files.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    width: int("width").notNull(),
+    storageKey: varchar("storage_key", { length: 255 }).notNull().unique(),
+    sizeBytes: int("size_bytes").notNull().default(0),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    variantFileIdx: index("file_variants_file_idx").on(table.fileId),
+  })
+);
 
 export const enrollments = mysqlTable(
   "enrollments",
@@ -649,11 +718,22 @@ export const payments = mysqlTable(
       .notNull()
       .default("menunggu"),
     rejectReason: varchar("reject_reason", { length: 500 }),
+    // Gateway pembayaran: manual (QRIS statis + verifikasi admin, lawas)
+    // atau doku (QRIS dinamis DOKU + webhook otomatis).
+    gateway: varchar("gateway", { length: 20 }).notNull().default("manual"),
+    // Referensi DOKU Direct API (null untuk antrean manual lawas).
+    dokuReferenceId: varchar("doku_reference_id", { length: 100 }).unique(),
+    // String EMVCo QRIS dinamis per invoice (nominal sudah termasuk diskon).
+    // Pindai → nominal tampil otomatis di aplikasi pembayar.
+    dokuQrString: text("doku_qr_string"),
+    dokuExpiresAt: timestamp("doku_expires_at"),
     verifiedBy: int("verified_by").references(() => users.id, {
       onDelete: "set null",
       onUpdate: "cascade",
     }),
     verifiedAt: timestamp("verified_at"),
+    // Kapan peserta melihat keputusan (NULL = belum dibaca; badge bell).
+    studentSeenAt: timestamp("student_seen_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   },
   (table) => ({
@@ -859,6 +939,8 @@ export const promoCampaigns = mysqlTable(
     slug: varchar("slug", { length: 100 }).notNull().unique(),
     title: varchar("title", { length: 200 }).notNull(),
     badgeLabel: varchar("badge_label", { length: 100 }),
+    /** Sampul promo untuk highlight (URL http(s) atau path /api/...); NULL = fallback. */
+    coverImage: varchar("cover_image", { length: 500 }),
     type: mysqlEnum("type", ["diskon", "kurasi", "patungan"]).notNull().default("diskon"),
     discountPercent: int("discount_percent"),
     status: mysqlEnum("status", ["draft", "active", "archived"]).notNull().default("draft"),
@@ -898,10 +980,62 @@ export const promoCourses = mysqlTable(
       }),
     position: int("position").notNull().default(0),
     customBadge: varchar("custom_badge", { length: 100 }),
+    // Harga khusus patungan (total grup) untuk kursus ini di kampanye ini.
+    // NULL = ikut harga kursus. Hanya bermakna bila kampanye bertipe patungan.
+    patunganPrice: int("patungan_price"),
   },
   (table) => ({
     pk: primaryKey({ columns: [table.campaignId, table.courseId] }),
     promoCourseIdx: index("promo_courses_course_idx").on(table.courseId),
+  })
+);
+
+// Pengajuan instruktur agar kursusnya masuk promo (wajib approve admin).
+// Jalur admin langsung (promo_courses) tetap ada; baris proposal TIDAK tampil
+// di katalog publik — hanya jadi antrean sebelum approve.
+export const promoCourseProposals = mysqlTable(
+  "promo_course_proposals",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    campaignId: int("campaign_id")
+      .notNull()
+      .references(() => promoCampaigns.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    courseId: int("course_id")
+      .notNull()
+      .references(() => courses.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    proposedBy: int("proposed_by").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    customBadge: varchar("custom_badge", { length: 100 }),
+    // Usulan harga khusus patungan (total grup); NULL = ikut harga kursus.
+    // Hanya bermakna bila kampanye bertipe patungan.
+    patunganPrice: int("patungan_price"),
+    note: varchar("note", { length: 500 }),
+    status: mysqlEnum("status", ["pending", "approved", "rejected"])
+      .notNull()
+      .default("pending"),
+    decidedBy: int("decided_by").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    decidedAt: timestamp("decided_at"),
+    decidedNote: varchar("decided_note", { length: 500 }),
+    // Kapan instruktur melihat keputusan (NULL = belum dibaca; badge nav).
+    seenAt: timestamp("seen_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    proposalStatusIdx: index("promo_proposals_status_idx").on(table.status),
+    proposalCourseIdx: index("promo_proposals_course_idx").on(table.courseId),
+    proposalCampaignIdx: index("promo_proposals_campaign_idx").on(table.campaignId),
   })
 );
 

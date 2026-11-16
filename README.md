@@ -53,8 +53,10 @@ tanpa SMTP, email OTP/undangan hanya tercatat di log konsol backend (`MAIL_PROVI
 
 - Autentikasi nyata via backend (JWT + OTP email + undangan instruktur). Tidak ada akun
   demo di bundle; pendaftaran publik selalu peran student (K-01).
-- Pembayaran masih **manual QRIS + verifikasi admin** tanpa gateway (`frontend/web/src/routes/user/pembayaran/`);
-  akses resmi tetap lewat enrollment/voucher/hibah server. Gateway belum diputuskan
-  (`backend/src/modules/payments/README.md`).
+- Pembayaran via **QRIS dinamis DOKU** (`frontend/web/src/routes/user/pembayaran/`,
+  `frontend/android/lib/features/payment/`): pindai QR → nominal tampil otomatis
+  → webhook memverifikasi → akses dibuka. Tanpa konfigurasi DOKU, backend
+  menjawab 503 jujur (tanpa QR palsu); pemetaan endpoint live menunggu API spec
+  DOKU (`backend/src/modules/doku/` + `backend/src/modules/payments/README.md`).
 - Detail per fitur (sudah jalan / sebagian / mock / belum ada) dan skenario uji K-01–K-08:
   `frontend/web/docs/04-inventaris-fitur.md` dan `frontend/web/docs/07-risiko-dan-validasi.md`.

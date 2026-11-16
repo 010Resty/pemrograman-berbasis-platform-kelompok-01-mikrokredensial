@@ -16,7 +16,7 @@
 
 - Auth lokal (`auth.svelte.ts`, 3 layout guard) — jalan tapi bypass via `localStorage`.
 - Progres (`progress.svelte.ts`) — jalan dalam sesi, hilang saat refresh.
-- Pembayaran QRIS manual + verifikasi admin (`pembayaran/+page.svelte`, `api/payments/*`, modul backend `payments`) — tanpa gateway: ajukan → unggah bukti → admin setujui/tolak → grant `payment:manual` + audit. Kwitansi dapat diunduh (HTML).
+- Pembayaran QRIS dinamis DOKU + verifikasi otomatis via webhook (`user/pembayaran/[courseId]/+page.svelte`, `api/payments/*`, modul backend `payments` + `doku`) — pindai QR → nominal tampil otomatis → akses dibuka tanpa unggah bukti: buat antrean → QR PNG server + hitung mundur kedaluwarsa/refresh → polling status → grant `payment:doku` + audit. Kwitansi dapat diunduh (HTML).
 - Penilaian (`penilaian/*`, `grading.svelte.ts`) — seed + fetch, nilai fallback lokal.
 - Sertifikat UI (`user/sertifikat`, `instruktur/sertifikat`) — kartu statis, tombol Unduh/Bagikan tanpa handler.
 - Tambah kursus (`tambah/+page.svelte`) — validasi lengkap, simpan `instruktur-draft-course` dengan `modules: []`, tidak masuk daftar.
@@ -24,6 +24,8 @@
 - Undangan instruktur end-to-end (`admin/invitations`, `/invite/[token]`, `api/invitations.ts`) — daftar/buat/batal/kirim-ulang + aktivasi via backend, email SMTP otomatis; token sekali-tampil, kirim-ulang menerbitkan token baru (lama hangus).
 - Voucher admin end-to-end (`admin/vouchers`, `api/vouchers.ts`) — daftar/filter, buat Personal/Umum/Diskon (persen/nominal, K-03 opsi A), validasi tanpa hangus, detail + riwayat penukaran asli, nonaktif/aktifkan via backend (K-03).
 - Ubah instruktur (`admin/instrukturs/[id]/edit`, PATCH `/admin/users/:id`) — nama/email/keahlian/status tersimpan permanen + audit; keahlian tampil di daftar, detail, dan form.
+- Laporan admin (`admin/laporan`, `api/admin.ts:fetchAdminReports`) — ringkasan + keuangan + sertifikat + tabel per kursus dari backend (`GET /admin/reports`), filter tanggal + paginasi server + unduh CSV; progres/antrean dilabeli snapshot saat ini. Insight tampil sebagai diagram: corong konversi pendaftar→enrollment→pembayaran→sertifikat (lebar proporsional + badge penurunan terbesar), meter 6 persentase kunci, donat komposisi pembayaran, bar ganda konversi per kursus; seluruh angka tetap tertulis sebagai teks + `aria-label` (aksesibel, bukan warna saja).
+- Promo 3 default (`flash-sale` diskon, `promo-pilihan` kurasi, `promo-patungan`) dari seed; durasi + persen diatur admin; hapus kampanye via tombol Hapus + konfirmasi (ditolak bila antrean aktif menunjuknya); tambah promo lewat modal dialog; harga patungan per kursus menimpa harga katalog saat hitung iuran (fallback ikut harga kursus). Halaman detail per promo di landing (`/promo/[slug]`) dan portal peserta (`/user/promo/[slug]`); sidebar peserta punya dropdown Promo dinamis.
 
 ## Simulasi / mock [Terverifikasi]
 
@@ -33,7 +35,7 @@
 
 - Verifikasi sertifikat publik (tombol tanpa handler di `+page.svelte`).
 - Search global / notifikasi bell (form `preventDefault` saja).
-- `Unduh PDF` sertifikat, `Lihat Laporan` (salah arah ke `/admin/courses`).
+- `Unduh PDF` sertifikat.
 
 ## Kebutuhan baru dari K-01–K-08 [Keputusan pengguna, belum implementasi]
 

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../core/api_client.dart';
+import '../../core/file_url.dart';
 import '../../shared_ui.dart';
+import '../learning/submission_api.dart';
 import 'instructor_api.dart';
 
 /// Sertifikat instruktur: ringkasan, riwayat, detail, cabut.
@@ -17,7 +20,9 @@ class InstCertificatesPage extends StatefulWidget {
 class _InstCertificatesPageState extends State<InstCertificatesPage> {
   InstCertificateSummary? _summary;
   List<InstCertificateRecord> _rows = [];
+  InstructorSignature? _sig;
   bool _loading = true;
+  bool _sigBusy = false;
   String? _error;
 
   @override
@@ -35,16 +40,78 @@ class _InstCertificatesPageState extends State<InstCertificatesPage> {
       final api = InstructorApi(widget.api);
       final summary = await api.certSummary();
       final rows = await api.certificates();
+      final sig = await api.mySignature();
       if (!mounted) return;
       setState(() {
         _summary = summary;
         _rows = rows;
+        _sig = sig;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
       setState(() => _error = e.message);
     } finally {
       if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  /// Unggah + pasang tanda tangan (dipakai blok tanda tangan PDF).
+  Future<void> _uploadSignature() async {
+    final picked = await ImagePicker().pickImage(
+      source: ImageSource.gallery,
+      maxWidth: 1200,
+      imageQuality: 90,
+    );
+    if (picked == null) return;
+    setState(() => _sigBusy = true);
+    try {
+      final bytes = await picked.readAsBytes();
+      final mime = picked.mimeType ?? 'image/png';
+      final up = await SubmissionApi(widget.api).upload(
+        filename: picked.name,
+        mimeType: mime,
+        kind: 'signature',
+        bytes: bytes,
+      );
+      final res =
+          await InstructorApi(widget.api).setSignature(up.id);
+      if (!mounted) return;
+      setState(() => _sig =
+          InstructorSignature(fileId: res.fileId, url: res.url));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(res.clearedPdfs > 0
+              ? 'Tanda tangan tersimpan. ${res.clearedPdfs} PDF lama ikut diperbarui.'
+              : 'Tanda tangan tersimpan.')));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _sigBusy = false);
+    }
+  }
+
+  Future<void> _removeSignature() async {
+    final ok = await confirmDialog(context,
+        title: 'Lepas tanda tangan?',
+        message:
+            'PDF berikutnya kembali memakai nama diketik.',
+        confirmText: 'Ya, lepas',
+        danger: true);
+    if (ok != true) return;
+    setState(() => _sigBusy = true);
+    try {
+      await InstructorApi(widget.api).removeSignature();
+      if (!mounted) return;
+      setState(() => _sig = null);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Tanda tangan dilepas.')));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
+    } finally {
+      if (mounted) setState(() => _sigBusy = false);
     }
   }
 
@@ -61,6 +128,14 @@ class _InstCertificatesPageState extends State<InstCertificatesPage> {
                   child: ListView(
                     padding: const EdgeInsets.all(12),
                     children: [
+                      _SignatureCard(
+                        sig: _sig,
+                        busy: _sigBusy,
+                        baseUrl: widget.api.baseUrl,
+                        onUpload: _uploadSignature,
+                        onRemove: _removeSignature,
+                      ),
+                      const SizedBox(height: 8),
                       if (_summary != null)
                         Row(
                           children: [
@@ -91,13 +166,22 @@ class _InstCertificatesPageState extends State<InstCertificatesPage> {
                         for (final r in _rows)
                           Card(
                             child: ListTile(
-                              leading: Icon(
-                                  r.status == 'revoked'
-                                      ? Icons.cancel
-                                      : Icons.verified,
-                                  color: r.status == 'revoked'
-                                      ? Colors.red
-                                      : Colors.green),
+                              leading: Builder(builder: (context) {
+                                final avatar = resolveAvatarUrl(
+                                    r.studentAvatarUrl, widget.api.baseUrl);
+                                if (avatar != null) {
+                                  return CircleAvatar(
+                                      backgroundImage:
+                                          NetworkImage(avatar));
+                                }
+                                return Icon(
+                                    r.status == 'revoked'
+                                        ? Icons.cancel
+                                        : Icons.verified,
+                                    color: r.status == 'revoked'
+                                        ? Colors.red
+                                        : Colors.green);
+                              }),
                               title: Text(r.studentName),
                               subtitle: Text(
                                   '${r.courseTitle}${r.moduleTitle != null ? ' · ${r.moduleTitle}' : ''}\n${r.code} · ${r.status}'),
@@ -121,6 +205,86 @@ class _InstCertificatesPageState extends State<InstCertificatesPage> {
                     ],
                   ),
                 ),
+    );
+  }
+}
+
+/// Kartu tanda tangan instruktur untuk blok tanda tangan PDF sertifikat.
+class _SignatureCard extends StatelessWidget {
+  const _SignatureCard({
+    required this.sig,
+    required this.busy,
+    required this.baseUrl,
+    required this.onUpload,
+    required this.onRemove,
+  });
+
+  final InstructorSignature? sig;
+  final bool busy;
+  final String baseUrl;
+  final Future<void> Function() onUpload;
+  final Future<void> Function() onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = resolveAvatarUrl(sig?.url, baseUrl);
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Tanda tangan sertifikat',
+                style:
+                    TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 4),
+            const Text(
+                'Tercetak di PDF sertifikat kursus yang Anda tandatangani. Tanpa ini, PDF memakai nama diketik.',
+                style: TextStyle(fontSize: 12)),
+            const SizedBox(height: 8),
+            Container(
+              height: 72,
+              width: double.infinity,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                border: Border.all(color: Colors.grey.shade300),
+                borderRadius: BorderRadius.circular(8),
+                color: Colors.grey.shade50,
+              ),
+              child: url != null
+                  ? Image.network(url, height: 64, fit: BoxFit.contain)
+                  : const Text('Belum ada tanda tangan',
+                      style:
+                          TextStyle(fontSize: 12, color: Colors.grey)),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    onPressed: busy ? null : onUpload,
+                    icon: const Icon(Icons.upload),
+                    label: Text(busy
+                        ? 'Mengunggah…'
+                        : (sig?.fileId != null
+                            ? 'Ganti tanda tangan'
+                            : 'Pasang tanda tangan')),
+                  ),
+                ),
+                if (sig?.fileId != null) ...[
+                  const SizedBox(width: 8),
+                  IconButton(
+                    tooltip: 'Lepas tanda tangan',
+                    onPressed: busy ? null : onRemove,
+                    icon: const Icon(Icons.delete_outline,
+                        color: Colors.red),
+                  ),
+                ],
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

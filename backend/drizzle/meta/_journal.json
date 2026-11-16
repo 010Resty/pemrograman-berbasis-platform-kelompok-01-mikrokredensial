@@ -148,6 +148,83 @@
       "when": 1794241696587,
       "tag": "0020_loving_mister_fear",
       "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "5",
+      "when": 1794563806246,
+      "tag": "0021_nice_havok",
+      "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "5",
+      "when": 1794569570430,
+      "tag": "0022_steady_morlun",
+      "breakpoints": true
+    },
+    {
+      "idx": 23,
+      "version": "5",
+      "when": 1794720000000,
+      "tag": "0023_promo_proposals",
+      "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "5",
+      "when": 1794720000001,
+      "tag": "0024_dazzling_shatterstar",
+      "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "5",
+      "when": 1794720000002,
+      "tag": "0025_olive_blink",
+      "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "5",
+      "when": 1794720000003,
+      "tag": "0026_brave_categories",
+      "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "5",
+      "when": 1794720000004,
+      "tag": "0027_tidy_giraffe",
+      "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "5",
+      "when": 1794720000005,
+      "tag": "0028_nice_shark",
+      "breakpoints": true
+    },
+    {
+      "idx": 29,
+      "version": "5",
+      "when": 1795000000000,
+      "tag": "0029_gigantic_madame_hydra",
+      "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "5",
+      "when": 1795000000001,
+      "tag": "0030_dark_manta",
+      "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "5",
+      "when": 1795000000002,
+      "tag": "0031_doku_qris",
+      "breakpoints": true
     }
   ]
 }

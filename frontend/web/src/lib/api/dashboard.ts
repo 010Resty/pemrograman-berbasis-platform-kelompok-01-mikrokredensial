@@ -15,6 +15,8 @@ export interface DashboardCourse {
 export interface DashboardPendingReview {
 	submissionId: number;
 	studentName: string;
+	/** URL foto profil peserta atau null; absen pada payload lama → null. */
+	studentAvatarUrl?: string | null;
 	courseId: number;
 	courseTitle: string;
 	materialId: number;

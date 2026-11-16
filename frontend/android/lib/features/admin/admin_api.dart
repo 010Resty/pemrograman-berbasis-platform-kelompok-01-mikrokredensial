@@ -32,6 +32,8 @@ class AdminUser {
     required this.email,
     required this.role,
     required this.isActive,
+    this.avatarUrl,
+    this.coverUrl,
   });
 
   final int id;
@@ -39,6 +41,9 @@ class AdminUser {
   final String email;
   final String role;
   final bool isActive;
+  /// Relatif backend (/api/v1/files/:id/content) atau null; publik.
+  final String? avatarUrl;
+  final String? coverUrl;
 
   factory AdminUser.fromJson(Object? json) {
     final m = (json as Map?)?.cast<String, Object?>() ?? {};
@@ -49,6 +54,8 @@ class AdminUser {
       email: '${m['email'] ?? ''}',
       role: '${m['role'] ?? ''}',
       isActive: m['isActive'] != false,
+      avatarUrl: m['avatarUrl'] as String?,
+      coverUrl: m['coverUrl'] as String?,
     );
   }
 }

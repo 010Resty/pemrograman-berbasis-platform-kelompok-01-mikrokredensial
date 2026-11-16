@@ -8,7 +8,7 @@ import type { Server } from "node:http";
 import mysql from "mysql2/promise";
 import bcrypt from "bcryptjs";
 import { migrate } from "drizzle-orm/mysql2/migrator";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import { db, pool } from "../../../db/index";
 import * as schema from "../../../db/schema";
 import app from "../../../app";
@@ -145,11 +145,68 @@ describe("refresh token (rotasi sekali pakai)", () => {
     assert.equal(me.http, 200);
     assert.equal(me.json.data.user.id, userId);
 
-    // Token lama sudah dicabut: pakai lagi = 401.
+    // Pakai-ulang langsung = dalam grace window → diputar dari penerus (200).
+    // Simulasi basi: mundurkan revoked_at melewati grace (pakai jam aplikasi,
+    // bukan NOW() DB) → baru 401.
+    const stale = new Date(Date.now() - 3600_000);
+    await db
+      .update(schema.refreshTokens)
+      .set({ revokedAt: stale })
+      .where(
+        and(
+          eq(schema.refreshTokens.userId, userId),
+          isNotNull(schema.refreshTokens.revokedAt)
+        )
+      );
     const reuse = await api("POST", "/api/v1/auth/refresh", undefined, {
       refreshToken: first.refreshToken,
     });
     assert.equal(reuse.http, 401);
+  });
+
+  it("pakai-ulang dalam grace window memutar dari penerus (bukan pencurian)", async () => {
+    const first = await login();
+    const r = await api<RefreshData>("POST", "/api/v1/auth/refresh", undefined, {
+      refreshToken: first.refreshToken,
+    });
+    assert.equal(r.http, 200);
+    const second = r.json.data.refreshToken;
+    assert.notEqual(second, first.refreshToken);
+
+    // Balapan dua klien (web + Android refresh bersamaan): token lama yang
+    // baru diputar dipakai lagi seketika → 200 dengan pasangan KETIGA.
+    const race = await api<RefreshData>("POST", "/api/v1/auth/refresh", undefined, {
+      refreshToken: first.refreshToken,
+    });
+    assert.equal(race.http, 200);
+    assert.notEqual(race.json.data.refreshToken, first.refreshToken);
+    assert.notEqual(race.json.data.refreshToken, second);
+
+    // Pasangan ketiga valid untuk endpoint privat.
+    const me = await api<{ user: { id: number } }>(
+      "GET",
+      "/api/v1/auth/me",
+      race.json.data.accessToken
+    );
+    assert.equal(me.http, 200);
+    assert.equal(me.json.data.user.id, userId);
+
+    // Lompatan ketiga: T1 dipakai lagi saat rantai sudah T1→T2→T3 → T4.
+    // Tanpa susur rantai, tab ketiga ini akan memicu nuke dan logout semua.
+    const race2 = await api<RefreshData>("POST", "/api/v1/auth/refresh", undefined, {
+      refreshToken: first.refreshToken,
+    });
+    assert.equal(race2.http, 200);
+    assert.notEqual(race2.json.data.refreshToken, first.refreshToken);
+    assert.notEqual(race2.json.data.refreshToken, second);
+    assert.notEqual(race2.json.data.refreshToken, race.json.data.refreshToken);
+    const me2 = await api<{ user: { id: number } }>(
+      "GET",
+      "/api/v1/auth/me",
+      race2.json.data.accessToken
+    );
+    assert.equal(me2.http, 200);
+    assert.equal(me2.json.data.user.id, userId);
   });
 
   it("pakai ulang token basi mencabut seluruh sesi (deteksi pencurian)", async () => {
@@ -160,7 +217,18 @@ describe("refresh token (rotasi sekali pakai)", () => {
     assert.equal(r.http, 200);
     const fresh = r.json.data.refreshToken;
 
-    // Token lama dipakai lagi → 401 + seluruh sesi ikut dicabut.
+    // Token lama dipakai lagi SETELAH grace window → 401 + seluruh sesi dicabut.
+    // (Mundur pakai jam aplikasi agar tak tergantung jam sesi DB.)
+    const stale = new Date(Date.now() - 3600_000);
+    await db
+      .update(schema.refreshTokens)
+      .set({ revokedAt: stale })
+      .where(
+        and(
+          eq(schema.refreshTokens.userId, userId),
+          isNotNull(schema.refreshTokens.revokedAt)
+        )
+      );
     const reuse = await api("POST", "/api/v1/auth/refresh", undefined, {
       refreshToken: first.refreshToken,
     });
@@ -242,5 +310,45 @@ describe("refresh token (rotasi sekali pakai)", () => {
       .update(schema.users)
       .set({ isActive: true })
       .where(eq(schema.users.id, userId));
+  });
+});
+
+describe("simulasi sesi aktif kedaluwarsa (perpanjangan transparan)", () => {
+  it("access token 1 detik: me 401 → refresh → me 200 tanpa login ulang", async () => {
+    const saved = process.env.JWT_EXPIRES_IN;
+    process.env.JWT_EXPIRES_IN = "1s";
+    try {
+      // Sesi seperti pengguna yang sedang menonton/beraktivitas.
+      const sess = await login();
+      // Lewatkan umur access token (video tetap jalan: byte publik tanpa auth).
+      await new Promise((r) => setTimeout(r, 1200));
+
+      // Aksi terautentikasi pertama setelah kedaluwarsa → 401.
+      const expired = await api("GET", "/api/v1/auth/me", sess.accessToken);
+      assert.equal(expired.http, 401);
+
+      // Silent refresh di belakang layar + ulangi aksi yang gagal.
+      const r = await api<RefreshData>("POST", "/api/v1/auth/refresh", undefined, {
+        refreshToken: sess.refreshToken,
+      });
+      assert.equal(r.http, 200);
+      const me = await api<{ user: { id: number } }>(
+        "GET",
+        "/api/v1/auth/me",
+        r.json.data.accessToken
+      );
+      assert.equal(me.http, 200);
+      assert.equal(me.json.data.user.id, userId);
+
+      // Token lama hangus (sekali pakai); pakai-ulang seketika masih dalam
+      // grace window → diputar (bukan pencurian), bukan 401.
+      const reuse = await api("POST", "/api/v1/auth/refresh", undefined, {
+        refreshToken: sess.refreshToken,
+      });
+      assert.equal(reuse.http, 200);
+    } finally {
+      if (saved === undefined) delete process.env.JWT_EXPIRES_IN;
+      else process.env.JWT_EXPIRES_IN = saved;
+    }
   });
 });

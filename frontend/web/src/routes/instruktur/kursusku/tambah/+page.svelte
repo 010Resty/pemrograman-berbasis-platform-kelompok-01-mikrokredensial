@@ -1,26 +1,27 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import { browser } from '$app/environment';
 	import { formatIDR } from '$lib/data/payment';
 	import MonthPicker from '$lib/components/MonthPicker.svelte';
 	import { createCourse } from '$lib/api/courses';
+	import { fetchCategories, FALLBACK_CATEGORIES } from '$lib/api/categories';
 	import { invalidateMyCourses } from '$lib/stores/instructor-courses.svelte';
 	import { uploadFile } from '$lib/api/uploads';
 	import { BackendRequestError } from '$lib/api/backend';
 	import { toast } from '$lib/stores/toast.svelte';
 
-	const CATEGORIES = [
-		'Pengembangan Web',
-		'Basis Data',
-		'Jaringan',
-		'Keamanan',
-		'AI & Data',
-		'Infrastruktur',
-		'Desain',
-		'Bisnis'
-	];
+	/** Kategori resmi dari server (dikelola admin); fallback bila offline. */
+	let CATEGORIES = $state<string[]>([...FALLBACK_CATEGORIES]);
 	const LEVELS = ['Pemula', 'Menengah', 'Lanjutan'];
 
 	let errorSummaryEl = $state<HTMLElement | null>(null);
+
+	$effect(() => {
+		if (!browser) return;
+		void fetchCategories().then((names) => {
+			if (names.length > 0) CATEGORIES = names;
+		});
+	});
 
 	// ---- Satu-satunya langkah: info dasar + hasil + langsung upcoming ----
 	let title = $state('');

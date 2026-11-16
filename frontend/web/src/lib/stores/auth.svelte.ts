@@ -2,19 +2,23 @@ import { browser } from '$app/environment';
 import { goto } from '$app/navigation';
 import {
 	BackendRequestError,
+	configureSilentRefresh,
 	forgotPasswordRequest,
 	isEmailUnverifiedError,
 	loginRequest,
 	meRequest,
+	refreshSessionTokens,
 	registerRequest,
 	resendEmailOtp,
 	resetPasswordRequest,
+	revokeSession,
 	verifyEmailRequest,
 	verifyResetCodeRequest,
 	type BackendUser
 } from '$lib/api/backend';
 import {
 	classifyRequestError,
+	createRefreshCoordinator,
 	createUnauthorizedCoordinator,
 	type RequestFailureKind
 } from '$lib/api/request-policy';
@@ -84,9 +88,12 @@ export const PORTALS: PortalInfo[] = [
 
 export const SESSION_KEY = 'aristoteles-session';
 const TOKEN_KEY = 'aristoteles-access-token';
+/** Refresh token: disimpan berdampingan dengan access token (ingat-saya → local, sesi → session). */
+const REFRESH_KEY = 'aristoteles-refresh-token';
 
 let currentUser = $state<Session | null>(null);
 let accessToken: string | null = null;
+let refreshToken: string | null = null;
 
 /**
  * Cache verifikasi sesi terpusat (optimasi request):
@@ -133,6 +140,89 @@ export function getAccessToken(): string | null {
 	return raw;
 }
 
+/** Refresh token dari penyimpanan (tanpa memori): versi terbaru antar-tab. */
+function storedRefreshToken(): string | null {
+	if (!browser) return null;
+	try {
+		const raw = localStorage.getItem(REFRESH_KEY) || sessionStorage.getItem(REFRESH_KEY);
+		if (raw && raw.trim().length >= 10) return raw.trim();
+	} catch {
+		// abaikan
+	}
+	return null;
+}
+
+/** Refresh token backend (memori + storage). Dipakai silent refresh 401. */
+export function getRefreshToken(): string | null {
+	const raw =
+		refreshToken ??
+		(browser
+			? (() => {
+					try {
+						return sessionStorage.getItem(REFRESH_KEY) || localStorage.getItem(REFRESH_KEY);
+					} catch {
+						return null;
+					}
+				})()
+			: null);
+	if (!raw || raw.trim().length < 10) return null;
+	return raw;
+}
+
+/**
+ * Silent refresh: tukar refresh token tersimpan menjadi pasangan sesi baru
+ * TANPA logout (dipakai otomatis saat API menjawab 401).
+ * Single-flight: N pemanggil bersamaan berbagi satu POST /auth/refresh —
+ * WAJIB karena refresh token sekali pakai (dua pakai = seluruh sesi dicabut).
+ */
+const refreshCoordinator = createRefreshCoordinator(async () => {
+	// Dahulukan salinan storage: tab lain mungkin baru saja memutar pasangan
+	// yang lebih baru; token memori tab ini bisa basi (tetap aman via grace
+	// server, tapi memakai yang terbaru menghindari rantai tak perlu).
+	const stored = storedRefreshToken() ?? getRefreshToken();
+	if (!stored) throw new Error('Tidak ada refresh token tersimpan.');
+	const res = await refreshSessionTokens(stored);
+	applyRefreshedSession(res);
+	return { accessToken: res.accessToken, refreshToken: res.refreshToken };
+});
+
+/** Coba perpanjang sesi diam-diam; kembalikan access token baru atau null. */
+export async function trySilentRefresh(): Promise<string | null> {
+	const out = await refreshCoordinator.refresh();
+	return out?.accessToken ?? null;
+}
+
+configureSilentRefresh(trySilentRefresh);
+
+function applyRefreshedSession(res: {
+	accessToken: string;
+	refreshToken: string;
+	user: BackendUser;
+}): void {
+	const session = toSession(res.user);
+	currentUser = session;
+	accessToken = res.accessToken;
+	refreshToken = res.refreshToken;
+	// Sesi terverifikasi mengikuti token baru agar guard tak /me lagi.
+	verifiedSession = session;
+	verifiedToken = res.accessToken;
+	if (!browser) return;
+	try {
+		const rawSession = JSON.stringify(session);
+		if (localStorage.getItem(TOKEN_KEY)) {
+			localStorage.setItem(SESSION_KEY, rawSession);
+			localStorage.setItem(TOKEN_KEY, res.accessToken);
+			localStorage.setItem(REFRESH_KEY, res.refreshToken);
+		} else {
+			sessionStorage.setItem(SESSION_KEY, rawSession);
+			sessionStorage.setItem(TOKEN_KEY, res.accessToken);
+			sessionStorage.setItem(REFRESH_KEY, res.refreshToken);
+		}
+	} catch {
+		// abaikan
+	}
+}
+
 function isValidRole(value: unknown): value is Role {
 	return value === 'student' || value === 'teacher' || value === 'admin';
 }
@@ -150,21 +240,33 @@ function toSession(user: BackendUser): Session {
 	};
 }
 
-function persistAuth(session: Session, token: string, rememberMe: boolean): void {
+function persistAuth(
+	session: Session,
+	token: string,
+	refreshTokenValue: string | null,
+	rememberMe: boolean
+): void {
 	accessToken = token;
+	refreshToken = refreshTokenValue;
 	if (!browser) return;
 	try {
 		const rawSession = JSON.stringify(session);
 		if (rememberMe) {
 			localStorage.setItem(SESSION_KEY, rawSession);
 			localStorage.setItem(TOKEN_KEY, token);
+			if (refreshTokenValue) localStorage.setItem(REFRESH_KEY, refreshTokenValue);
+			else localStorage.removeItem(REFRESH_KEY);
 			sessionStorage.removeItem(SESSION_KEY);
 			sessionStorage.removeItem(TOKEN_KEY);
+			sessionStorage.removeItem(REFRESH_KEY);
 		} else {
 			sessionStorage.setItem(SESSION_KEY, rawSession);
 			sessionStorage.setItem(TOKEN_KEY, token);
+			if (refreshTokenValue) sessionStorage.setItem(REFRESH_KEY, refreshTokenValue);
+			else sessionStorage.removeItem(REFRESH_KEY);
 			localStorage.removeItem(SESSION_KEY);
 			localStorage.removeItem(TOKEN_KEY);
+			localStorage.removeItem(REFRESH_KEY);
 		}
 	} catch {
 		// penyimpanan tidak tersedia — sesi tetap berlaku di memori
@@ -249,7 +351,7 @@ export async function loginWithBackend(
 		const payload = await loginRequest(email.trim(), password);
 		const session = toSession(payload.user);
 		currentUser = session;
-		persistAuth(session, payload.accessToken, rememberMe);
+		persistAuth(session, payload.accessToken, payload.refreshToken ?? null, rememberMe);
 		// Seed cache verifikasi: respons login sudah tervalidasi server,
 		// sehingga guard portal setelah login tidak perlu /me tambahan.
 		verifiedSession = session;
@@ -314,7 +416,7 @@ export async function verifyEmailWithBackend(
 		const payload = await verifyEmailRequest(email.trim(), code.trim());
 		const session = toSession(payload.user);
 		currentUser = session;
-		persistAuth(session, payload.accessToken, rememberMe);
+		persistAuth(session, payload.accessToken, payload.refreshToken ?? null, rememberMe);
 		verifiedSession = session;
 		verifiedToken = payload.accessToken;
 		sessionGeneration += 1;
@@ -452,7 +554,8 @@ async function doVerify(token: string): Promise<VerifyResult> {
 		const session = toSession(user);
 		currentUser = session;
 		verifiedSession = session;
-		verifiedToken = token;
+		// Token bisa berganti bila apiRequest sempat silent-refresh + retry.
+		verifiedToken = getAccessToken() ?? token;
 		if (browser) {
 			try {
 				if (localStorage.getItem(TOKEN_KEY)) {
@@ -479,8 +582,12 @@ async function doVerify(token: string): Promise<VerifyResult> {
 }
 
 export function logout(): void {
+	const at = getAccessToken();
+	const rt = getRefreshToken();
+	const hadSession = currentUser !== null || at !== null;
 	currentUser = null;
 	accessToken = null;
+	refreshToken = null;
 	clearVerifiedCache();
 	sessionGeneration += 1;
 	clearAllPrivateCaches();
@@ -488,10 +595,18 @@ export function logout(): void {
 	try {
 		localStorage.removeItem(SESSION_KEY);
 		localStorage.removeItem(TOKEN_KEY);
+		localStorage.removeItem(REFRESH_KEY);
 		sessionStorage.removeItem(SESSION_KEY);
 		sessionStorage.removeItem(TOKEN_KEY);
+		sessionStorage.removeItem(REFRESH_KEY);
 	} catch {
 		// abaikan
+	}
+	// Best-effort: cabut sesi di server agar refresh token tak bisa dipakai
+	// lagi. Kegagalan (mis. token sudah kedaluwarsa) diabaikan — sesi lokal
+	// tetap dibersihkan.
+	if (hadSession && (at || rt)) {
+		void revokeSession(at, rt).catch(() => {});
 	}
 }
 

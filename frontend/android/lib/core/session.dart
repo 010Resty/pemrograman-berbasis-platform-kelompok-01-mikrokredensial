@@ -89,7 +89,22 @@ class SessionManager extends ChangeNotifier {
   }
 
   /// Paksa rotasi manual (dipakai bila API mengembalikan 401).
-  Future<bool> refreshNow() async {
+  /// Single-flight: N pemanggil bersamaan berbagi satu POST /auth/refresh —
+  /// WAJIB karena refresh token sekali pakai (dua pakai = seluruh sesi dicabut).
+  Future<bool>? _refreshFuture;
+
+  Future<bool> refreshNow() {
+    final running = _refreshFuture;
+    if (running != null) return running;
+    final fut = _doRefresh();
+    _refreshFuture = fut;
+    fut.whenComplete(() {
+      if (identical(_refreshFuture, fut)) _refreshFuture = null;
+    });
+    return fut;
+  }
+
+  Future<bool> _doRefresh() async {
     final refresh = await _storage.read(key: _kRefresh);
     if (refresh == null || refresh.isEmpty) {
       await clear();

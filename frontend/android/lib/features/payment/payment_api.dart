@@ -9,11 +9,14 @@ class MyPayment {
     required this.status,
     required this.amountExpected,
     this.amountPaid,
+    this.proofFileId,
     this.rejectReason,
     this.createdAt,
     this.verifiedAt,
     this.voucherCode,
     this.promoSlug,
+    this.gateway = 'manual',
+    this.dokuExpiresAt,
   });
 
   final int id;
@@ -23,11 +26,18 @@ class MyPayment {
   final String status;
   final int amountExpected;
   final int? amountPaid;
+  final int? proofFileId;
   final String? rejectReason;
   final String? createdAt;
   final String? verifiedAt;
   final String? voucherCode;
   final String? promoSlug;
+
+  /// Gateway: manual (antrean lawas) atau doku (QRIS dinamis).
+  final String gateway;
+
+  /// Kedaluwarsa QR DOKU (ISO) — null untuk antrean manual lawas.
+  final String? dokuExpiresAt;
 
   bool get isPending => status == 'menunggu';
   bool get isRejected => status == 'ditolak';
@@ -46,11 +56,14 @@ class MyPayment {
       status: '${m['status'] ?? ''}',
       amountExpected: asInt(m['amountExpected']),
       amountPaid: asIntN(m['amountPaid']),
+      proofFileId: asIntN(m['proofFileId']),
       rejectReason: m['rejectReason'] as String?,
       createdAt: m['createdAt'] as String?,
       verifiedAt: m['verifiedAt'] as String?,
       voucherCode: m['voucherCode'] as String?,
       promoSlug: m['promoSlug'] as String?,
+      gateway: '${m['gateway'] ?? 'manual'}',
+      dokuExpiresAt: m['dokuExpiresAt'] as String?,
     );
   }
 }
@@ -77,8 +90,11 @@ class PaymentApi {
 
   final ApiClient _api;
 
-  Future<MyPayment> create(int courseId, {String? voucherCode}) {
-    final body = <String, Object?>{};
+  Future<MyPayment> create(int courseId,
+      {String? voucherCode, String gateway = 'doku'}) {
+    final body = <String, Object?>{
+      'gateway': gateway,
+    };
     if (voucherCode != null && voucherCode.isNotEmpty) {
       body['voucherCode'] = voucherCode;
     }
@@ -117,11 +133,30 @@ class PaymentApi {
     }
   }
 
+  /// Unduh PNG QRIS dinamis DOKU (pemilik/admin).
+  Future<List<int>> qrBytes(int paymentId) {
+    return _api.downloadBytes('/payments/$paymentId/qr');
+  }
+
+  /// Generate ulang QR DOKU yang hilang/kedaluwarsa (masih menunggu).
+  Future<MyPayment> refreshDoku(int paymentId) {
+    return _api.post<MyPayment>(
+      '/payments/$paymentId/doku/refresh',
+      body: const {},
+      fromData: MyPayment.fromJson,
+    );
+  }
+
   Future<MyPayment> attachProof(int paymentId, int proofFileId) {
     return _api.patch<MyPayment>(
       '/payments/$paymentId/proof',
       body: {'proofFileId': proofFileId},
       fromData: MyPayment.fromJson,
     );
+  }
+
+  /// Batalkan antrean menunggu milik sendiri (hard delete di server).
+  Future<void> cancel(int paymentId) {
+    return _api.delete('/payments/$paymentId');
   }
 }

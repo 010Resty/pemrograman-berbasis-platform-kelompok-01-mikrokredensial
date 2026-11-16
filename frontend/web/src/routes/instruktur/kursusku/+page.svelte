@@ -16,6 +16,7 @@
 		markServerKelola,
 		type BackendCourse
 	} from '$lib/api/courses';
+	import PromoProposeModal from '$lib/components/instruktur/PromoProposeModal.svelte';
 	import {
 		loadMyCourses,
 		loadCourseTree,
@@ -45,6 +46,15 @@
 	let deleting = $state(false);
 	let deleteTarget = $state<{ id: number; title: string } | null>(null);
 	let deleteError = $state('');
+
+	/** State ajukan kursus ke promo (approve admin sebelum tampil). */
+	let promoModalOpen = $state(false);
+	let promoCourse = $state<{ id: number; title: string } | null>(null);
+
+	function openPromoModal(course: { id: number; title: string }): void {
+		promoCourse = course;
+		promoModalOpen = true;
+	}
 
 	function askDeleteCourse(id: number, title: string): void {
 		deleteTarget = { id, title };
@@ -460,6 +470,13 @@
 								<i class="fa-solid fa-trash-can" aria-hidden="true"></i>
 							</button>
 						</div>
+						<button
+							type="button"
+							onclick={() => openPromoModal({ id: course.id, title: course.title })}
+							class="mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-slate-300 px-4 py-2 text-xs font-bold text-slate-600 transition-colors duration-200 ease-smooth hover:border-blue-400 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+						>
+							<i class="fa-solid fa-tags" aria-hidden="true"></i> Ajukan ke Promo
+						</button>
 					</div>
 				</article>
 			{/each}
@@ -475,6 +492,16 @@
 		</p>
 	{/if}
 </div>
+
+<PromoProposeModal
+	open={promoModalOpen}
+	course={promoCourse}
+	onclose={() => {
+		promoModalOpen = false;
+		promoCourse = null;
+	}}
+	onsuccess={(title) => toast.success(`“${title}” diajukan ke promo, menunggu persetujuan admin.`)}
+/>
 
 <WarningModal
 	bind:open={showDelete}

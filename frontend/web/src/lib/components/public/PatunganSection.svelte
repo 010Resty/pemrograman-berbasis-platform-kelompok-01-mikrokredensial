@@ -12,9 +12,11 @@
 		/** Kursus anggota promo patungan aktif saja (tanpa fallback). */
 		courses: BackendCourse[];
 		loading: boolean;
+		/** Override harga patungan (total grup) per kursus dari kampanye. */
+		patunganPrices?: Record<number, number>;
 	}
 
-	let { courses, loading }: Props = $props();
+	let { courses, loading, patunganPrices = {} }: Props = $props();
 
 	const paidCourses = $derived(courses.filter((c) => (c.priceNominal ?? 0) > 0));
 
@@ -24,10 +26,13 @@
 	const selected = $derived(
 		paidCourses.find((c) => c.id === Number(courseId)) ?? paidCourses[0] ?? null
 	);
-	const price = $derived(selected?.priceNominal ?? 0);
+	/** Harga dasar iuran: override promo bila ada, selain itu harga katalog. */
+	const effectivePrice = $derived(
+		selected ? (patunganPrices[selected.id] ?? selected.priceNominal) : 0
+	);
 	// Tanpa fee fiktif: antrean manual tidak membebankan biaya layanan ke peserta.
 	// Nominal resmi ditetapkan server saat grup dibuat.
-	const split = $derived(hitungPatungan(price, 0, anggota));
+	const split = $derived(hitungPatungan(effectivePrice, 0, anggota));
 
 	// Sinkronkan pilihan kursus default.
 	$effect(() => {
@@ -79,7 +84,8 @@
 							class="w-full rounded-xl border border-white/15 bg-abyss px-4 py-2.5 text-sm font-semibold text-white focus:border-ice focus:outline-none"
 						>
 							{#each paidCourses as c (c.id)}
-								<option value={c.id}>{c.title} — {c.priceLabel}</option>
+								{@const pp = patunganPrices[c.id]}
+								<option value={c.id}>{c.title} — {pp !== undefined ? `${formatIDR(pp)} (patungan)` : c.priceLabel}</option>
 							{/each}
 						</select>
 					</div>
@@ -112,7 +118,11 @@
 							</p>
 						</div>
 						<p class="mt-1 text-[11px] text-slate-400">
-							Estimasi {formatIDR(split.total)} (harga katalog ÷ {anggota}), dibulatkan ke atas.
+							{#if selected && patunganPrices[selected.id] !== undefined}
+								Estimasi {formatIDR(split.total)} (harga khusus patungan ÷ {anggota}), dibulatkan ke atas.
+							{:else}
+								Estimasi {formatIDR(split.total)} (harga katalog ÷ {anggota}), dibulatkan ke atas.
+							{/if}
 							Nominal resmi ditetapkan server saat grup dibuat.
 						</p>
 					</div>

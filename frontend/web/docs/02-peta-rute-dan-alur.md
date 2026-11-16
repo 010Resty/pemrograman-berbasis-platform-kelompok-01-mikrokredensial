@@ -10,6 +10,8 @@
 | `/modules` | `src/routes/modules/+page.svelte` | Filter lokal kategori/periode |
 | `/modules/[courseId]` | `src/routes/modules/[courseId]/+page.svelte` | `TrainingHero`, `LearningPathRoadmap`, `ModuleLearningPath`, `TrainingActionCard` |
 | `/login`, `/register`, `/with_UNIRA` | `src/routes/login/+page.svelte`, `src/routes/register/+page.svelte`, `src/routes/with_UNIRA/+page.svelte` | `login`, `register`, `loginWithUnita` di `auth.svelte.ts` |
+| `/promo`, `/promo/[slug]` | `src/routes/promo/+page.svelte`, `src/routes/promo/[slug]/+page.svelte` | Indeks kampanye aktif + detail per kampanye (diskon/unggulan/patungan, kalkulator patungan) |
+| `/patungan/setup/[courseId]`, `/patungan/saya`, `/patungan/[groupId]` | `src/routes/patungan/*/+page.svelte` | Buat/kelola grup patungan (hanya kursus anggota promo patungan aktif) |
 
 ## Peserta [Terverifikasi]
 
@@ -20,6 +22,7 @@
 - `src/routes/user/kursusku/[courseId]/[moduleId]/[materialId]/+page.svelte` — `flat = getModuleMaterials()`, `isMaterialLocked`, `MaterialRenderer` dengan `onComplete=markDone`.
 - `.../hasil/+page.svelte` — `getQuizResult` + `normalizePassScore` + `DEFAULT_PASS_SCORE` di `quiz-drafts.ts`.
 - `src/routes/user/semua-kursus/+page.svelte`, `semua-kursus/[courseId]/+page.svelte` (`CoursePreview`), `pembayaran/[courseId]/+page.svelte`, `sertifikat/+page.svelte`.
+- `src/routes/user/promo/+page.svelte`, `promo/[slug]/+page.svelte` — etalase + detail per kampanye (harga server, owned-check, CTA beli/grup patungan).
 
 Alur peserta: Kursusku → detail kursus → materi via `MaterialRenderer` → kuis lolos `score >= effectivePass` di `QuizMaterial.svelte` → `hasil` → materi berikut bila `markDone`. Tugas via `AssignmentMaterial.svelte` → `onSubmit=markDone`.
 
@@ -39,6 +42,19 @@ Alur peserta: Kursusku → detail kursus → materi via `MaterialRenderer` → k
 
 - `src/routes/admin/+layout.svelte` — guard admin klien.
 - `admin/+page.svelte`, `admin/courses/+page.svelte`, `admin/users/+page.svelte`, `admin/users/[userId]/+page.svelte`, `admin/instrukturs/+page.svelte` — tabel/kartu + tambah lokal, aksi Reset/Nonaktifkan hanya `flash()`.
+
+## Navigasi sidebar [Terverifikasi]
+
+Sidebar (`src/lib/components/Sidebar.svelte`) mendukung item tunggal dan grup
+sub-menu (`NavItem.children`): label grup tampil sebagai judul kecil di atas,
+menu anggotanya tampil di bawahnya; grup bertanda `collapsible` bisa
+dilipat/dibentangkan lewat tombol (default terbuka bila halaman aktif ada di
+dalamnya), dan bila `linkable` labelnya sekaligus tautan (menu Promo peserta).
+Pengelompokan per portal:
+
+- Peserta: Belajar (Dashboard, Kursusku, Semua Kursus, Sertifikat), Promo tautan + *dropdown* (maks. 6 kampanye aktif), Akun (Profil).
+- Instruktur: Mengajar (Dashboard, Kursusku, Penilaian), Hasil (Pendapatan, Sertifikat), Akun (Profil).
+- Admin: Ringkasan (Dasbor, Laporan), Pengguna (Peserta, Instruktur, Pengajuan, Undangan), Katalog (Kursus, Voucher, Promo, Pembayaran), Akun (Profil).
 
 ## Gap vs keputusan
 

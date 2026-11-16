@@ -7,6 +7,7 @@ import {
   createTeacher,
   createTeacherSchema,
   getAdminOverview,
+  getAdminReports,
   getUserById,
   listUsers,
   unassignInstructor,
@@ -73,6 +74,76 @@ export const overviewHandler = async (
       status: "success",
       message: "Ringkasan admin",
       data: await getAdminOverview(),
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+// GET /api/v1/admin/reports — laporan agregat read-only (ringkasan + per kursus).
+export const reportsHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAdmin(req, res);
+    if (userId === null) return;
+    void userId;
+    const q = req.query;
+    const parseDay = (
+      v: unknown,
+      endOfDay: boolean
+    ): { date?: Date; invalid: boolean } => {
+      if (v === undefined) return { invalid: false };
+      if (typeof v !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(v)) return { invalid: true };
+      const d = new Date(`${v}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}Z`);
+      if (Number.isNaN(d.getTime())) return { invalid: true };
+      return { date: d, invalid: false };
+    };
+    const from = parseDay(q.from, false);
+    const to = parseDay(q.to, true);
+    let courseId: number | undefined;
+    if (q.courseId !== undefined) {
+      if (typeof q.courseId !== "string" || !/^\d+$/.test(q.courseId)) {
+        res.status(400).json({
+          status: "error",
+          message: "courseId tidak valid",
+          code: "INVALID_COURSE_ID",
+          data: null,
+        });
+        return;
+      }
+      courseId = Number(q.courseId);
+    }
+    if (from.invalid || to.invalid) {
+      res.status(400).json({
+        status: "error",
+        message: "Format tanggal tidak valid (gunakan YYYY-MM-DD)",
+        code: "INVALID_DATE",
+        data: null,
+      });
+      return;
+    }
+    const limit =
+      typeof q.limit === "string" && /^\d+$/.test(q.limit)
+        ? Math.min(Math.max(Number(q.limit), 1), 100)
+        : 100;
+    const page =
+      typeof q.page === "string" && /^\d+$/.test(q.page) ? Math.max(Number(q.page), 1) : 1;
+    if (from.date && to.date && from.date.getTime() > to.date.getTime()) {
+      res.status(400).json({
+        status: "error",
+        message: "Rentang tanggal tidak valid (from > to)",
+        code: "INVALID_RANGE",
+        data: null,
+      });
+      return;
+    }
+    res.status(200).json({
+      status: "success",
+      message: "Laporan admin",
+      data: await getAdminReports({ from: from.date, to: to.date, courseId, limit, page }),
     });
   } catch (e) {
     next(e);

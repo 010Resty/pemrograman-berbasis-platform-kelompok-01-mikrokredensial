@@ -51,6 +51,8 @@ export interface SummaryCourseRow {
 export interface RecentlyEligible {
 	eligibilityId: number | string;
 	studentName: string;
+	/** URL foto profil peserta atau null; absen pada payload lama → null. */
+	studentAvatarUrl?: string | null;
 	courseTitle: string;
 	moduleTitle: string;
 }
@@ -79,6 +81,8 @@ export interface ModuleCertificateStatus {
 export interface EligibilityEntry {
 	id: number | string;
 	studentName: string;
+	/** URL foto profil peserta atau null; absen pada payload lama → null. */
+	studentAvatarUrl?: string | null;
 	nim: string | null;
 	courseId: number;
 	courseTitle: string;
@@ -110,6 +114,8 @@ export interface CertificateRecord {
 	id: number | string;
 	code: string;
 	studentName: string;
+	/** URL foto profil peserta atau null; absen pada payload lama → null. */
+	studentAvatarUrl?: string | null;
 	printedName: string;
 	courseId: number;
 	courseTitle: string;
@@ -256,6 +262,34 @@ export async function revokeCertificate(
  */
 export function publicVerifyHref(code?: string): string {
 	return code ? `/verifikasi?code=${encodeURIComponent(code)}` : '/verifikasi';
+}
+
+/** Tanda tangan milik sendiri (GET /api/v1/instructor/signature). */
+export interface InstructorSignature {
+	fileId: number | null;
+	url: string | null;
+}
+
+export async function fetchMySignature(): Promise<InstructorSignature> {
+	return req<InstructorSignature>('/instructor/signature');
+}
+
+/**
+ * Pasang/ganti tanda tangan ({fileId} hasil unggah kind `signature`).
+ * Berhasil = cache PDF kursus yang ditandatangani ikut dibersihkan server.
+ */
+export async function setMySignature(
+	fileId: number
+): Promise<{ fileId: number; url: string; clearedPdfs: number }> {
+	return req<{ fileId: number; url: string; clearedPdfs: number }>('/instructor/signature', {
+		method: 'POST',
+		body: { fileId }
+	});
+}
+
+/** Lepas tanda tangan (kembali ke fallback nama diketik di PDF). */
+export async function removeMySignature(): Promise<{ fileId: number | null }> {
+	return req<{ fileId: number | null }>('/instructor/signature', { method: 'DELETE' });
 }
 
 /** Kelayakan sertifikat milik sendiri per modul (GET /api/v1/me/modules/:id/certificate-status). */

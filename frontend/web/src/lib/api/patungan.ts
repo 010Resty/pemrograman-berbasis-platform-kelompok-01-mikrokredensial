@@ -64,7 +64,14 @@ export interface ValidateMembersResult {
 	shares?: Record<string, number>;
 	total?: number;
 	memberCount?: number;
-	course?: { id: number; title: string; priceLabel: string; priceNominal: number };
+	course?: {
+		id: number;
+		title: string;
+		priceLabel: string;
+		priceNominal: number;
+		effectivePrice: number;
+		patunganPrice: number | null;
+	};
 	campaign?: { slug: string; title: string };
 	error?: { code: string; message: string };
 }

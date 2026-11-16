@@ -1,0 +1,1 @@
+ALTER TABLE `promo_courses` ADD `patungan_price` int;

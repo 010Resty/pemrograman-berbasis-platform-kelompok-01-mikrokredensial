@@ -4,6 +4,7 @@ import {
   createCourseSchema,
   updateCourseSchema,
   courseListQuerySchema,
+  CourseError,
   createCourse,
   getCourseById,
   listCourses,
@@ -18,6 +19,20 @@ import { deleteFileById } from "../uploads/upload.service";
 const toFieldErrors = (
   issues: Array<{ path: Array<string | number>; message: string }>
 ) => issues.map((i) => ({ field: i.path.length > 0 ? String(i.path[0]) : "body", message: i.message }));
+
+const courseError = (res: Response, e: unknown): boolean => {
+  if (e instanceof CourseError) {
+    res.status(e.http).json({
+      status: "error",
+      message: e.message,
+      code: e.code,
+      errors: [{ field: "category", message: e.code }],
+      data: null,
+    });
+    return true;
+  }
+  return false;
+};
 
 // POST /api/v1/courses — buat kursus (teacher, admin). Selalu draft.
 export const create = async (
@@ -44,7 +59,7 @@ export const create = async (
     const course = await createCourse(userId, parsed.data);
     res.status(201).json({ status: "success", message: "Kursus berhasil dibuat", data: course });
   } catch (error) {
-    next(error);
+    if (!courseError(res, error)) next(error);
   }
 };
 
@@ -71,6 +86,7 @@ export const listPublic = async (
         period: typeof req.query.period === "string" ? req.query.period : undefined,
         q: typeof req.query.q === "string" ? req.query.q : undefined,
         status,
+        level: typeof req.query.level === "string" ? req.query.level : undefined,
       },
       true,
       { limit: q.limit, page: q.page, sort: q.sort }
@@ -111,6 +127,7 @@ export const listMine = async (
           period: typeof req.query.period === "string" ? req.query.period : undefined,
           q: typeof req.query.q === "string" ? req.query.q : undefined,
           status,
+          level: typeof req.query.level === "string" ? req.query.level : undefined,
         },
         false,
         pg
@@ -198,7 +215,7 @@ export const update = async (
     }
     res.status(200).json({ status: "success", message: "Kursus berhasil diubah", data: course });
   } catch (error) {
-    next(error);
+    if (!courseError(res, error)) next(error);
   }
 };
 

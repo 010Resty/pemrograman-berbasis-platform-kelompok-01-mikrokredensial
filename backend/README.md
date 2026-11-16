@@ -37,7 +37,7 @@ backend/
 │       ├── applications/       # pengajuan instruktur publik (rate-limit)
 │       ├── dashboard/          # ringkasan instruktur
 │       ├── uploads/            # upload base64 + serve berkas (assignment privat)
-│       └── payments/           # PLACEHOLDER — tanpa kode, lihat README di dalamnya
+│       └── payments/           # QRIS dinamis DOKU (gateway) + manual lawas, lihat README di dalamnya
 ├── drizzle/                    # Migrasi 0000–0011 + meta/_journal.json
 ├── docs/
 │   └── API_CONTRACT.md         # Kontrak endpoint dari kode aktual
@@ -57,7 +57,9 @@ cp .env.example .env   # lalu isi nilai berikut
 | `DB_HOST`, `DB_PORT`, `DB_USER`, `DB_PASSWORD`, `DB_NAME` | ya (salah satu) | atau satu `DATABASE_URL=mysql://…` (diprioritaskan) |
 | `JWT_SECRET` | ya | ≥32 karakter acak; server menolak start tanpa ini |
 | `JWT_EXPIRES_IN` | tidak | default `15m` (access token pendek, untuk web + mobile) |
-| `REFRESH_EXPIRES_DAYS` | tidak | default `30`; umur refresh token opaque sekali pakai (khusus klien mobile) |
+| `REFRESH_EXPIRES_DAYS` | tidak | default `30`; umur refresh token opaque sekali pakai (web + mobile) |
+| `IMAGE_QUALITY_<KIND>`, `IMAGE_QUALITY_<KIND>_ALPHA`, `IMAGE_MAX_SIDE_PIXELS` | tidak | override kualitas WebP per kind (1–100) dan batas sisi px anti decompression-bomb (default 8000) |
+| `REFRESH_REUSE_GRACE_MS` | tidak | default `60000`; jendela pakai-ulang refresh token yang masih diputar dari penerus (anti-nuke saat web + aplikasi refresh bersamaan) |
 | `CORS_ORIGIN` | tidak | default `http://localhost:5173` |
 | `FRONTEND_URL` | ya (production) | basis tautan undangan di email; server production menolak start bila kosong |
 | `SEED_DEMO_PASSWORD` | tidak | hanya untuk `db:seed` (dev) |

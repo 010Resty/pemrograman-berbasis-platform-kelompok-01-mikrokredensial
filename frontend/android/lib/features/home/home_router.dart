@@ -7,21 +7,32 @@ import 'role_homes.dart';
 /// Tanpa rute publik: pengguna yang sudah masuk langsung ke home per peran.
 class HomeRouter extends StatelessWidget {
   const HomeRouter(
-      {super.key, required this.api, required this.user, required this.onLogout});
+      {super.key,
+      required this.api,
+      required this.user,
+      required this.onLogout,
+      this.onLogoutAll});
 
   final ApiClient api;
   final AppUser user;
   final Future<void> Function() onLogout;
+  final Future<void> Function()? onLogoutAll;
 
   @override
   Widget build(BuildContext context) {
     switch (user.role) {
       case AppRole.teacher:
-        return TeacherHome(api: api, user: user, onLogout: onLogout);
+        return TeacherHome(
+            api: api,
+            user: user,
+            onLogout: onLogout,
+            onLogoutAll: onLogoutAll);
       case AppRole.admin:
-        return AdminHome(api: api, user: user, onLogout: onLogout);
+        return AdminHome(
+            api: api, user: user, onLogout: onLogout, onLogoutAll: onLogoutAll);
       case AppRole.student:
-        return StudentHome(api: api, user: user, onLogout: onLogout);
+        return StudentHome(
+            api: api, user: user, onLogout: onLogout, onLogoutAll: onLogoutAll);
     }
   }
 }

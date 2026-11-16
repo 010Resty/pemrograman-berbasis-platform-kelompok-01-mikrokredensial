@@ -8,9 +8,11 @@ dotenv.config({
 
 import { createHash } from "node:crypto";
 import bcrypt from "bcryptjs";
+import { eq } from "drizzle-orm";
 import { db, pool } from "./index";
 import {
   users,
+  courseCategories,
   instructorInvitations,
   courses,
   courseInstructors,
@@ -24,6 +26,7 @@ import {
   vouchers,
   voucherRedemptions,
   certificates,
+  promoCampaigns,
 } from "./schema";
 
 /**
@@ -79,4 +82,110 @@ async function seedUsers(passwordHash: string) {
   ]);
   console.log("[seed] users: 1 (student)");
 }
+
+// --- Promo default: 3 kampanye, tanpa anggota (admin yang mengisi) ---------
+const DEFAULT_PROMOS = [
+  {
+    slug: "flash-sale",
+    title: "Flash Sale",
+    badgeLabel: "Flash Sale",
+    type: "diskon" as const,
+    discountPercent: 10 as number | null,
+    status: "draft" as const,
+    note: "contoh 10%; ubah persen + jendela + aktifkan via halaman admin",
+  },
+  {
+    slug: "promo-pilihan",
+    title: "Promo Pilihan",
+    badgeLabel: "Paling Diminati",
+    type: "kurasi" as const,
+    discountPercent: null as number | null,
+    status: "draft" as const,
+    note: "kurasi admin; tambah kursus pilihan via halaman admin",
+  },
+  {
+    slug: "promo-patungan",
+    title: "Promo Patungan",
+    badgeLabel: "Bayar Bareng",
+    type: "patungan" as const,
+    discountPercent: null as number | null,
+    status: "draft" as const,
+    note: "tambah kursus + harga patungan per kursus via halaman admin",
+  },
+];
+
+async function seedPromos() {
+  let added = 0;
+  for (const p of DEFAULT_PROMOS) {
+    const existing = await db
+      .select({ id: promoCampaigns.id })
+      .from(promoCampaigns)
+      .where(eq(promoCampaigns.slug, p.slug))
+      .limit(1);
+    if (existing[0]) {
+      console.log(`[seed] promos: lewati "${p.slug}" (sudah ada)`);
+      continue;
+    }
+    await db.insert(promoCampaigns).values({
+      slug: p.slug,
+      title: p.title,
+      badgeLabel: p.badgeLabel,
+      type: p.type,
+      discountPercent: p.discountPercent,
+      status: p.status,
+    });
+    console.log(`[seed] promos: tambah "${p.slug}" (${p.note})`);
+    added += 1;
+  }
+  console.log(`[seed] promos: ${added} baru`);
+}
+
+// --- Kategori resmi (parity dengan migrasi 0026; idempoten per slug) --------
+const DEFAULT_CATEGORIES = [
+  { slug: "pengembangan-web", name: "Pengembangan Web", sortOrder: 10 },
+  { slug: "basis-data", name: "Basis Data", sortOrder: 20 },
+  { slug: "jaringan", name: "Jaringan", sortOrder: 30 },
+  { slug: "keamanan", name: "Keamanan", sortOrder: 40 },
+  { slug: "ai-data", name: "AI & Data", sortOrder: 50 },
+  { slug: "infrastruktur", name: "Infrastruktur", sortOrder: 60 },
+  { slug: "desain", name: "Desain", sortOrder: 70 },
+  { slug: "bisnis", name: "Bisnis", sortOrder: 80 },
+];
+
+async function seedCategories() {
+  let added = 0;
+  for (const c of DEFAULT_CATEGORIES) {
+    const existing = await db
+      .select({ id: courseCategories.id })
+      .from(courseCategories)
+      .where(eq(courseCategories.slug, c.slug))
+      .limit(1);
+    if (existing[0]) {
+      console.log(`[seed] categories: lewati "${c.slug}" (sudah ada)`);
+      continue;
+    }
+    await db.insert(courseCategories).values(c);
+    added += 1;
+  }
+  console.log(`[seed] categories: ${added} baru`);
+}
+
+async function main() {
+  const existingUsers = await db.select({ id: users.id }).from(users).limit(1);
+  if (existingUsers.length === 0) {
+    const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 10);
+    await seedUsers(passwordHash);
+  } else {
+    console.log("[seed] users: lewati (sudah berisi)");
+  }
+  await seedCategories();
+  await seedPromos();
+  await pool.end();
+}
+
+void main().catch(async (e) => {
+  console.error("[seed] gagal:", e);
+  await pool.end();
+  process.exit(1);
+});
 

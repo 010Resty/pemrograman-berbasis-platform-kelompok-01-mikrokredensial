@@ -1,15 +1,15 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:image_picker/image_picker.dart';
 
 import '../../core/api_client.dart';
 import '../../shared_ui.dart';
-import '../learning/submission_api.dart';
 import '../profile/profile_api.dart';
 import 'payment_api.dart';
 
-/// Bayar QRIS manual: ajukan → unggah bukti → polling verifikasi admin.
+/// Bayar QRIS DINAMIS DOKU: buat antrean → pindai QR (nominal tampil
+/// otomatis) → polling status → akses dibuka otomatis via webhook.
 /// Kontrak: nominal otoritatif dari server (`amountExpected`).
 class PaymentPage extends StatefulWidget {
   const PaymentPage({super.key, required this.api, required this.courseId});
@@ -32,6 +32,11 @@ class _PaymentPageState extends State<PaymentPage> {
   String? _voucherError;
   String? _lastRejection;
 
+  Uint8List? _qrBytes;
+  bool _qrLoading = false;
+  String? _qrError;
+  bool _refreshing = false;
+
   @override
   void initState() {
     super.initState();
@@ -51,15 +56,19 @@ class _PaymentPageState extends State<PaymentPage> {
       _error = null;
     });
     try {
-      final existing =
-          await PaymentApi(widget.api).mine(widget.courseId);
+      final existing = await PaymentApi(widget.api).mine(widget.courseId);
       if (!mounted) return;
-      setState(() => _payment = existing);
+      setState(() {
+        _payment = existing;
+        _qrBytes = null;
+        _qrError = null;
+      });
       if (existing != null) {
         if (existing.isRejected) {
           setState(() =>
-              _lastRejection = existing.rejectReason ?? 'Pengajuan ditolak.');
+              _lastRejection = existing.rejectReason ?? 'Pembayaran gagal.');
         } else if (!existing.isVerified) {
+          _loadQr();
           _startPolling();
         }
       }
@@ -80,16 +89,17 @@ class _PaymentPageState extends State<PaymentPage> {
     final current = _payment;
     if (current == null) return;
     try {
-      final latest =
-          await PaymentApi(widget.api).mine(widget.courseId);
+      final latest = await PaymentApi(widget.api).mine(widget.courseId);
       if (!mounted || latest == null || latest.id != current.id) return;
-      setState(() => _payment = latest);
+      setState(() {
+        _payment = latest;
+      });
       if (latest.isVerified) {
         _poll?.cancel();
       } else if (latest.isRejected) {
         _poll?.cancel();
-        setState(
-            () => _lastRejection = latest.rejectReason ?? 'Pengajuan ditolak.');
+        setState(() =>
+            _lastRejection = latest.rejectReason ?? 'Pembayaran gagal.');
       }
     } on ApiException catch (e) {
       if (manual && mounted) {
@@ -127,7 +137,13 @@ class _PaymentPageState extends State<PaymentPage> {
         voucherCode: _discount?.code,
       );
       if (!mounted) return;
-      setState(() => _payment = created);
+      setState(() {
+        _payment = created;
+        _qrBytes = null;
+        _qrError = null;
+      });
+      _loadQr();
+      _startPolling();
     } on ApiException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -137,26 +153,105 @@ class _PaymentPageState extends State<PaymentPage> {
     }
   }
 
-  Future<void> _uploadProof() async {
-    final picked =
-        await ImagePicker().pickImage(source: ImageSource.gallery);
-    if (picked == null) return;
-    setState(() => _busy = true);
+  /// Unduh PNG QRIS dinamis dari server (nominal tampil otomatis saat dipindai).
+  Future<void> _loadQr() async {
+    final id = _payment?.id;
+    if (id == null) return;
+    setState(() {
+      _qrLoading = true;
+      _qrError = null;
+    });
     try {
-      final bytes = await picked.readAsBytes();
-      final mime = picked.mimeType ?? 'image/jpeg';
-      final sub = SubmissionApi(widget.api);
-      final up = await sub.upload(
-        filename: picked.name,
-        mimeType: mime,
-        kind: 'payment_proof',
-        bytes: bytes,
-      );
-      final updated = await PaymentApi(widget.api)
-          .attachProof(_payment!.id, up.id);
+      final bytes = await PaymentApi(widget.api).qrBytes(id);
+      if (!mounted) return;
+      setState(() => _qrBytes = Uint8List.fromList(bytes));
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _qrError = e.message);
+    } finally {
+      if (mounted) setState(() => _qrLoading = false);
+    }
+  }
+
+  /// Minta QR baru (kedaluwarsa/hilang) lalu muat ulang gambarnya.
+  Future<void> _refreshQr() async {
+    final id = _payment?.id;
+    if (id == null || _refreshing) return;
+    setState(() {
+      _refreshing = true;
+      _qrError = null;
+    });
+    try {
+      final updated = await PaymentApi(widget.api).refreshDoku(id);
       if (!mounted) return;
       setState(() => _payment = updated);
-      _startPolling();
+      await _loadQr();
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _qrError = e.message);
+    } finally {
+      if (mounted) setState(() => _refreshing = false);
+    }
+  }
+
+  /// Sisa waktu QR (dari dokuExpiresAt server). Null = tak diketahui.
+  Duration? get _qrRemaining {
+    final exp = _payment?.dokuExpiresAt;
+    if (exp == null || exp.isEmpty) return null;
+    final end = DateTime.tryParse(exp);
+    if (end == null) return null;
+    final left = end.difference(DateTime.now());
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  bool get _qrExpired {
+    final r = _qrRemaining;
+    return r != null && r == Duration.zero;
+  }
+
+  String get _qrCountdown {
+    final r = _qrRemaining;
+    if (r == null) return '';
+    final s = r.inSeconds;
+    final m = (s ~/ 60).toString().padLeft(2, '0');
+    final rest = (s % 60).toString().padLeft(2, '0');
+    return '$m:$rest';
+  }
+
+  Future<void> _confirmCancel() async {
+    final current = _payment;
+    if (current == null) return;
+    final yes = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Batalkan pengajuan?'),
+        content: Text(
+            'Antrean ${current.invoice} (${formatIDR(current.amountExpected)}) akan dihapus permanen. Anda bisa membuat QR baru kapan pun.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(false),
+              child: const Text('Tidak')),
+          FilledButton(
+              onPressed: () => Navigator.of(ctx).pop(true),
+              child: const Text('Ya, batalkan')),
+        ],
+      ),
+    );
+    if (yes != true || !mounted) return;
+    setState(() => _busy = true);
+    try {
+      await PaymentApi(widget.api).cancel(current.id);
+      if (!mounted) return;
+      _poll?.cancel();
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      } else {
+        setState(() {
+          _payment = null;
+          _qrBytes = null;
+          _qrError = null;
+        });
+      }
     } on ApiException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -188,7 +283,7 @@ class _PaymentPageState extends State<PaymentPage> {
           child: Padding(
             padding: EdgeInsets.all(16),
             child: Text(
-                'Bayar via QRIS statis platform, lalu unggah bukti. Admin memverifikasi; akses dibuka setelah disetujui.'),
+                'Bayar via QRIS dinamis: pindai kode, nominal tampil otomatis, akses dibuka otomatis setelah terkonfirmasi. Tanpa unggah bukti.'),
           ),
         ),
         TextField(
@@ -222,7 +317,7 @@ class _PaymentPageState extends State<PaymentPage> {
         FilledButton(
           onPressed: _busy ? null : _create,
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-          child: Text(_busy ? 'Memproses…' : 'Buat pengajuan pembayaran'),
+          child: Text(_busy ? 'Memproses…' : 'Buat QR pembayaran'),
         ),
       ],
     );
@@ -249,8 +344,7 @@ class _PaymentPageState extends State<PaymentPage> {
                           fontSize: 24, fontWeight: FontWeight.w900)),
                   if (p.voucherCode != null)
                     Text('Voucher: ${p.voucherCode}'),
-                  if (p.promoSlug != null)
-                    Text('Promo: ${p.promoSlug}'),
+                  if (p.promoSlug != null) Text('Promo: ${p.promoSlug}'),
                   const SizedBox(height: 8),
                   Chip(
                     label: Text(_statusLabel(p.status)),
@@ -276,32 +370,96 @@ class _PaymentPageState extends State<PaymentPage> {
                 setState(() {
                   _payment = null;
                   _lastRejection = null;
+                  _qrBytes = null;
+                  _qrError = null;
                 });
               },
-              child: const Text('Ajukan ulang pembayaran'),
+              child: const Text('Buat QR baru'),
             ),
           ],
           if (p.isPending) ...[
             const SizedBox(height: 8),
-            const Text(
-                'Pindai QRIS platform sebesar total, screenshot bukti, lalu unggah di bawah.'),
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: _busy ? null : _uploadProof,
-              icon: const Icon(Icons.upload),
-              label: Text(_busy ? 'Mengunggah…' : 'Unggah bukti bayar'),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    if (_qrLoading)
+                      const SizedBox(
+                        height: 220,
+                        child: Center(child: CircularProgressIndicator()),
+                      )
+                    else if (_qrBytes != null)
+                      Image.memory(_qrBytes!,
+                          width: 220, height: 220, fit: BoxFit.contain)
+                    else ...[
+                      const Icon(Icons.qr_code_2,
+                          size: 64, color: Colors.grey),
+                      const SizedBox(height: 8),
+                      Text(_qrError ?? 'QR belum tersedia.',
+                          textAlign: TextAlign.center),
+                      const SizedBox(height: 8),
+                      OutlinedButton.icon(
+                        onPressed: _loadQr,
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Muat ulang QR'),
+                      ),
+                    ],
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Pindai dengan m-banking / e-wallet apa pun — nominal tampil otomatis.',
+                      textAlign: TextAlign.center,
+                    ),
+                    if (_qrRemaining != null && !_qrExpired) ...[
+                      const SizedBox(height: 4),
+                      Chip(
+                        label: Text('QR berlaku $_qrCountdown'),
+                        backgroundColor: Colors.blue.shade50,
+                      ),
+                    ],
+                    if (_qrExpired) ...[
+                      const SizedBox(height: 4),
+                      const Chip(
+                        label: Text('QR kedaluwarsa'),
+                        backgroundColor: Color(0xFFFFEBEE),
+                      ),
+                      const SizedBox(height: 8),
+                      FilledButton.icon(
+                        onPressed: _refreshing ? null : _refreshQr,
+                        icon: _refreshing
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                    strokeWidth: 2, color: Colors.white))
+                            : const Icon(Icons.refresh),
+                        label: Text(_refreshing
+                            ? 'Memperbarui…'
+                            : 'Buat QR baru'),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
             ),
             const SizedBox(height: 8),
             const Text(
-                'Status diperiksa otomatis tiap 5 detik. Tarik ke bawah untuk periksa manual.',
-                style: TextStyle(fontSize: 11)),
+              'Status diperiksa otomatis tiap 5 detik. Tarik ke bawah untuk periksa manual.',
+              style: TextStyle(fontSize: 11)),
+            TextButton.icon(
+              onPressed: _busy ? null : _confirmCancel,
+              icon: const Icon(Icons.delete_outline,
+                  size: 16, color: Colors.red),
+              label: const Text('Batalkan pengajuan ini',
+                  style: TextStyle(color: Colors.red, fontSize: 12)),
+            ),
           ],
           if (p.isVerified)
             const Card(
               child: Padding(
                 padding: EdgeInsets.all(16),
                 child: Text(
-                    'Pembayaran disetujui. Akses kursus telah dibuka — lanjutkan belajar di Kursusku.'),
+                    'Pembayaran terkonfirmasi DOKU. Akses kursus telah dibuka — lanjutkan belajar di Kursusku.'),
               ),
             ),
         ],
@@ -312,11 +470,11 @@ class _PaymentPageState extends State<PaymentPage> {
   String _statusLabel(String s) {
     switch (s) {
       case 'diverifikasi':
-        return 'Disetujui';
+        return 'Terkonfirmasi';
       case 'ditolak':
-        return 'Ditolak';
+        return 'Gagal';
       default:
-        return 'Menunggu verifikasi';
+        return 'Menunggu pembayaran';
     }
   }
 }

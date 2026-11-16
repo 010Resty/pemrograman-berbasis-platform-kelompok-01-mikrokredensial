@@ -4,6 +4,7 @@
 	import { resolve } from '$app/paths';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import { fetchAdminUsers, type AdminUser } from '$lib/api/admin';
 
 	/**
@@ -41,12 +42,6 @@
 		return Number.isNaN(d.getTime())
 			? iso
 			: d.toLocaleDateString('id-ID', { day: 'numeric', month: 'short', year: 'numeric' });
-	}
-
-	function initials(name: string): string {
-		return (
-			name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
-		);
 	}
 
 	async function load(): Promise<void> {
@@ -186,9 +181,13 @@
 					<article class="flex flex-col rounded-2xl border border-slate-200/70 bg-white p-6 transition-shadow hover:shadow-xl">
 						<div class="mb-4 flex items-start justify-between gap-3">
 							<div class="flex min-w-0 items-center gap-3">
-								<span class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-violet-600 text-sm font-bold text-white" aria-hidden="true">
-									{initials(u.name)}
-								</span>
+								<UserAvatar
+									name={u.name}
+									avatarUrl={u.avatarUrl ?? null}
+									size="h-12 w-12"
+									text="text-sm"
+									rounded="rounded-2xl"
+								/>
 								<div class="min-w-0">
 									<h2 class="truncate text-sm font-bold text-slate-900">{u.name}</h2>
 									<p class="truncate text-xs text-slate-500">{u.email}</p>

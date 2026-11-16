@@ -491,3 +491,65 @@ describe("patungan: batal grup", () => {
     assert.equal(afterCancel.json.code, "GROUP_NOT_FOUND");
   });
 });
+
+describe("patungan: harga khusus promo (override)", () => {
+  it("validasi + grup memakai harga patungan, bukan harga kursus", async () => {
+    const [c] = await db.insert(schema.courses).values({
+      title: "Kursus Patungan Override Panjang",
+      description: "Deskripsi kursus override patungan yang cukup panjang.",
+      category: "Bisnis",
+      level: "Pemula",
+      duration: "4 Bulan",
+      status: "published",
+      priceLabel: "Rp120000",
+      priceNominal: 120000,
+      period: "ongoing",
+      outcomes: ["Hasil belajar pertama yang cukup panjang"],
+      tools: ["Laptop"],
+      createdBy: ids.admin,
+    });
+    const courseId = Number((c as unknown as { insertId: number }).insertId);
+
+    const camp = await api("POST", "/api/v1/admin/promos", tokens.admin, {
+      slug: "patungan-override",
+      title: "Patungan Override Panjang Judul",
+      type: "patungan",
+      status: "active",
+    });
+    assert.equal(camp.http, 201, JSON.stringify(camp.json));
+
+    const add = await api("POST", "/api/v1/admin/promos/patungan-override/courses", tokens.admin, {
+      courseId,
+      patunganPrice: 90000,
+    });
+    assert.equal(add.http, 201, JSON.stringify(add.json));
+
+    const v = await api<{
+      ready: boolean;
+      total: number;
+      creatorShare: number;
+      shares: Record<string, number>;
+      course: { priceNominal: number; effectivePrice: number; patunganPrice: number | null };
+    }>("POST", "/api/v1/patungan/members/validate", tokens.creator, {
+      courseId,
+      usernames: [usernames.m1, usernames.m2],
+    });
+    assert.equal(v.http, 200, JSON.stringify(v.json));
+    assert.equal(v.json.data.ready, true);
+    assert.equal(v.json.data.total, 90000);
+    assert.equal(v.json.data.creatorShare, 30000);
+    assert.equal(v.json.data.course.priceNominal, 120000);
+    assert.equal(v.json.data.course.effectivePrice, 90000);
+    assert.equal(v.json.data.course.patunganPrice, 90000);
+    const sum = v.json.data.creatorShare + Object.values(v.json.data.shares).reduce((a, b) => a + b, 0);
+    assert.equal(sum, 90000);
+
+    const g = await api<GroupDetail>("POST", "/api/v1/patungan/groups", tokens.creator, {
+      courseId,
+      usernames: [usernames.m1, usernames.m2],
+    });
+    assert.equal(g.http, 201, JSON.stringify(g.json));
+    assert.equal(g.json.data.priceNominal, 90000);
+    assert.equal(g.json.data.members.reduce((a, m) => a + m.shareAmount, 0), 90000);
+  });
+});

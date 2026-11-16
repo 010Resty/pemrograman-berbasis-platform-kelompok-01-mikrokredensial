@@ -59,6 +59,12 @@ class ApiClient {
   /// Dipanggil setiap respons 401 agar UI bisa mengembalikan ke login.
   void Function()? onUnauthorized;
 
+  /// Dipanggil saat 401 untuk mencoba silent refresh dulu (rotasi token).
+  /// Kembalikan true bila sesi pulih — request diulang sekali otomatis.
+  /// Null = tanpa silent refresh (perilaku lama: langsung logout).
+  /// Tidak pernah dipanggil untuk /auth/refresh sendiri (anti putar).
+  Future<bool> Function()? onRefreshNeeded;
+
   void close() => _http.close();
 
   Future<T> get<T>(String path, T Function(Object? json) fromData) {
@@ -94,7 +100,35 @@ class ApiClient {
   }
 
   /// Unduh byte mentah dengan header auth (berkas privat, PDF sertifikat).
+  /// 401 → silent refresh sekali → ulangi sekali (mis. unduh saat token pas kedaluwarsa).
   Future<List<int>> downloadBytes(String path) async {
+    try {
+      return await _downloadOnce(path);
+    } on ApiException catch (e) {
+      if (e.httpStatus == 401 &&
+          path != '/auth/refresh' &&
+          onRefreshNeeded != null) {
+        bool ok = false;
+        try {
+          ok = await onRefreshNeeded!();
+        } catch (_) {
+          ok = false;
+        }
+        if (ok) {
+          try {
+            return await _downloadOnce(path);
+          } on ApiException catch (retryErr) {
+            if (retryErr.httpStatus == 401) onUnauthorized?.call();
+            rethrow;
+          }
+        }
+      }
+      if (e.httpStatus == 401) onUnauthorized?.call();
+      rethrow;
+    }
+  }
+
+  Future<List<int>> _downloadOnce(String path) async {
     final url = Uri.parse('$baseUrl${path.startsWith('/') ? path : '/$path'}');
     final headers = <String, String>{'accept': '*/*'};
     final token = _tokenProvider?.call();
@@ -112,7 +146,6 @@ class ApiClient {
       throw ApiException('Backend tidak terjangkau. Periksa server dan alamat API.');
     }
     if (res.statusCode == 401) {
-      onUnauthorized?.call();
       throw ApiException('Sesi berakhir. Masuk kembali.', httpStatus: 401);
     }
     if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -122,7 +155,41 @@ class ApiClient {
     return res.bodyBytes;
   }
 
+  /// Kirim request JSON; 401 → silent refresh sekali → ulangi sekali.
+  /// Refresh gagal (atau 401 lagi) → onUnauthorized agar UI ke login.
   Future<T> _send<T>(
+    String method,
+    String path,
+    Object? body,
+    T Function(Object? json) fromData,
+  ) async {
+    try {
+      return await _perform<T>(method, path, body, fromData);
+    } on ApiException catch (e) {
+      if (e.httpStatus == 401 &&
+          path != '/auth/refresh' &&
+          onRefreshNeeded != null) {
+        bool ok = false;
+        try {
+          ok = await onRefreshNeeded!();
+        } catch (_) {
+          ok = false;
+        }
+        if (ok) {
+          try {
+            return await _perform<T>(method, path, body, fromData);
+          } on ApiException catch (retryErr) {
+            if (retryErr.httpStatus == 401) onUnauthorized?.call();
+            rethrow;
+          }
+        }
+      }
+      if (e.httpStatus == 401) onUnauthorized?.call();
+      rethrow;
+    }
+  }
+
+  Future<T> _perform<T>(
     String method,
     String path,
     Object? body,
@@ -163,9 +230,6 @@ class ApiClient {
     }
 
     final envelope = _parseEnvelope(res);
-    if (res.statusCode == 401) {
-      onUnauthorized?.call();
-    }
     if (res.statusCode < 200 ||
         res.statusCode >= 300 ||
         envelope['status'] != 'success') {

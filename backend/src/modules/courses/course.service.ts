@@ -2,6 +2,7 @@ import { z } from "zod";
 import { eq, and, or, like, inArray, desc, asc } from "drizzle-orm";
 import { db } from "../../db";
 import { auditLogs, courses, courseInstructors, users } from "../../db/schema";
+import { resolveActiveCategoryName } from "../categories/category.service";
 
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
 
@@ -23,6 +24,21 @@ const writeCourseAudit = async (
   });
 };
 
+export class CourseError extends Error {
+  readonly http: number;
+  readonly code: string;
+  constructor(http: number, code: string, message: string) {
+    super(message);
+    this.http = http;
+    this.code = code;
+  }
+}
+
+/**
+ * Daftar kategori bawaan (parity dengan seed migrasi 0026).
+ * Sumber kebenaran runtime adalah tabel `course_categories` (dikelola admin);
+ * konstanta ini hanya fallback dokumentasi, BUKAN validasi.
+ */
 export const CATEGORIES = [
   "Pengembangan Web",
   "Basis Data",
@@ -67,7 +83,9 @@ const urlOrPath = z
 
 export const createCourseSchema = z.object({
   title: z.string().trim().min(10).max(120),
-  category: z.enum(CATEGORIES),
+  // Kategori valid = baris aktif di tabel course_categories (dikelola admin);
+  // pengecekan DB di createCourse/updateCourse (INVALID_CATEGORY bila asing/nonaktif).
+  category: z.string().trim().min(1).max(100),
   level: z.enum(LEVELS).default("Pemula"),
   durationMonths: z.number().int().min(1).max(36),
   description: z.string().trim().min(30).max(5000),
@@ -126,12 +144,21 @@ export const createCourse = async (
   ownerUserId: number,
   input: CreateCourseInput
 ) => {
+  // Kategori harus aktif di tabel kelola-admin (bukan enum kode lagi).
+  const category = await resolveActiveCategoryName(input.category);
+  if (!category) {
+    throw new CourseError(
+      400,
+      "INVALID_CATEGORY",
+      "Kategori tidak dikenal atau sedang nonaktif — pilih dari daftar resmi"
+    );
+  }
   // Transaksi multi-step (drizzle skill): kursus + relasi pengampu harus atomik.
   const courseId = await db.transaction(async (tx) => {
     const [header] = await tx.insert(courses).values({
       title: input.title,
       description: input.description,
-      category: input.category,
+      category,
       level: input.level,
       duration: durationLabel(input.durationMonths),
       image: input.coverUrl?.trim() ? input.coverUrl.trim() : null,
@@ -188,6 +215,7 @@ export interface CourseListFilter {
   period?: string;
   q?: string;
   status?: "draft" | "published" | "archived";
+  level?: string;
 }
 
 export const listCourses = async (
@@ -208,6 +236,9 @@ export const listCourses = async (
   }
   if (filter.category) conditions.push(eq(courses.category, filter.category));
   if (filter.period) conditions.push(eq(courses.period, filter.period));
+  if (filter.level !== undefined && (LEVELS as readonly string[]).includes(filter.level)) {
+    conditions.push(eq(courses.level, filter.level));
+  }
   if (filter.q) {
     const q = escapeLike(filter.q);
     conditions.push(
@@ -300,7 +331,17 @@ export const updateCourse = async (
 ) => {
   const patch: Record<string, unknown> = {};
   if (input.title !== undefined) patch.title = input.title;
-  if (input.category !== undefined) patch.category = input.category;
+  if (input.category !== undefined) {
+    const category = await resolveActiveCategoryName(input.category);
+    if (!category) {
+      throw new CourseError(
+        400,
+        "INVALID_CATEGORY",
+        "Kategori tidak dikenal atau sedang nonaktif — pilih dari daftar resmi"
+      );
+    }
+    patch.category = category;
+  }
   if (input.level !== undefined) patch.level = input.level;
   if (input.durationMonths !== undefined) patch.duration = durationLabel(input.durationMonths);
   if (input.description !== undefined) patch.description = input.description;

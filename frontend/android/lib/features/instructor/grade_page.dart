@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
+import '../../core/file_url.dart';
 import '../../shared_ui.dart';
 import 'instructor_api.dart';
 
@@ -119,6 +120,8 @@ class _GradePageState extends State<GradePage> {
                           itemBuilder: (context, i) {
                             final r = _rows[i];
                             final f = _formFor(r);
+                            final avatar =
+                                resolveAvatarUrl(r.studentAvatarUrl, widget.api.baseUrl);
                             return Card(
                               margin: const EdgeInsets.only(bottom: 12),
                               child: Padding(
@@ -127,12 +130,31 @@ class _GradePageState extends State<GradePage> {
                                   crossAxisAlignment:
                                       CrossAxisAlignment.start,
                                   children: [
-                                    Text(
-                                        r.studentName ??
-                                            'Peserta #${r.id}',
-                                        style: const TextStyle(
-                                            fontWeight:
-                                                FontWeight.bold)),
+                                    Row(
+                                      children: [
+                                        CircleAvatar(
+                                          backgroundImage: avatar != null
+                                              ? NetworkImage(avatar)
+                                              : null,
+                                          child: avatar != null
+                                              ? null
+                                              : Text((r.studentName?.isNotEmpty ??
+                                                      false)
+                                                  ? r.studentName![0]
+                                                      .toUpperCase()
+                                                  : '#'),
+                                        ),
+                                        const SizedBox(width: 8),
+                                        Expanded(
+                                          child: Text(
+                                              r.studentName ??
+                                                  'Peserta #${r.id}',
+                                              style: const TextStyle(
+                                                  fontWeight:
+                                                      FontWeight.bold)),
+                                        ),
+                                      ],
+                                    ),
                                     Text(
                                         '${r.studentNim ?? '-'} · ${formatDateTime(r.submittedAt)} · ${r.status}'),
                                     if (r.score != null)

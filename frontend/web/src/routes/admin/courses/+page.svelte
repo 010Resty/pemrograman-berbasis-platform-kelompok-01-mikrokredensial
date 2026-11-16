@@ -18,6 +18,7 @@
 		type BackendCourse,
 		type CreateCourseInput
 	} from '$lib/api/courses';
+	import { fetchCategories, FALLBACK_CATEGORIES } from '$lib/api/categories';
 	import { BackendRequestError } from '$lib/api/backend';
 
 	/**
@@ -36,16 +37,8 @@
 
 	type Status = 'all' | AdminCourseStatus;
 
-	const CATEGORIES = [
-		'Pengembangan Web',
-		'Basis Data',
-		'Jaringan',
-		'Keamanan',
-		'AI & Data',
-		'Infrastruktur',
-		'Desain',
-		'Bisnis'
-	];
+	/** Kategori resmi dari server (dikelola admin di /admin/kategori); fallback bila offline. */
+	let CATEGORIES = $state<string[]>([...FALLBACK_CATEGORIES]);
 	const LEVELS = ['Pemula', 'Menengah', 'Lanjutan'];
 	const PERIODS = [
 		{ value: 'upcoming', label: 'Mendatang' },
@@ -343,6 +336,16 @@
 		void filter;
 		void debouncedQuery;
 		void load();
+	});
+
+	// Daftar kategori resmi (sekali per mount; fallback bila offline).
+	let catsStarted = false;
+	$effect(() => {
+		if (!browser || catsStarted) return;
+		catsStarted = true;
+		void fetchCategories().then((names) => {
+			if (names.length > 0) CATEGORIES = names;
+		});
 	});
 
 	$effect(() => {

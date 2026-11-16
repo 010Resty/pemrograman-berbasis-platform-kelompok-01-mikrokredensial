@@ -4,13 +4,16 @@
 	import { resolve } from '$app/paths';
 	import { SvelteSet } from 'svelte/reactivity';
 	import '../../../app.css';
-	import Logo from '$lib/components/Logo.svelte';
+	import PublicHeader from '$lib/components/public/PublicHeader.svelte';
+	import PublicFooter from '$lib/components/public/PublicFooter.svelte';
 	import {
 		fetchCourseDetail,
 		fetchCourseTree,
 		type BackendCourse,
 		type CourseAccessState
 	} from '$lib/api/courses';
+import { fileUrl } from '$lib/api/courses';
+import { buildSrcSet } from '$lib/api/responsive';
 	import type { CourseModule } from '$lib/data/courses';
 	import { getModuleMaterials, isMaterialLocked } from '$lib/data/courses';
 	import { fetchMyProgressIds } from '$lib/api/progress';
@@ -50,16 +53,6 @@
 	let notFound = $state(!data.detail && data.notFound);
 	let started = false;
 	let loadSeq = 0;
-
-	let menuOpen = $state(false);
-
-	const mobileLinks = [
-		{ href: '/', label: 'Beranda' },
-		{ href: '/modules', label: 'Pelatihan' },
-		{ href: '/peringkat', label: 'Peringkat' },
-		{ href: '/tentang', label: 'Tentang' },
-		{ href: '/verifikasi', label: 'Verifikasi' }
-	];
 
 	async function load(id: number, opts: { soft?: boolean } = {}): Promise<void> {
 		const my = ++loadSeq;
@@ -194,7 +187,7 @@
 			'@type': 'BreadcrumbList',
 			itemListElement: [
 				{ '@type': 'ListItem', position: 1, name: 'Beranda', item: canonicalPath('/', data.origin) },
-				{ '@type': 'ListItem', position: 2, name: 'Semua Pelatihan', item: canonicalPath('/modules', data.origin) },
+				{ '@type': 'ListItem', position: 2, name: 'Semua Pelatihan', item: canonicalPath('/pelatihan', data.origin) },
 				{
 					'@type': 'ListItem',
 					position: 3,
@@ -217,77 +210,7 @@
 	jsonLd={detailJsonLd}
 />
 
-<header class="sticky top-0 z-50 bg-white shadow-sm">
-	<div class="mx-auto flex h-20 max-w-7xl items-center justify-between gap-3 px-4 sm:px-6 lg:px-8">
-		<a href="/" class="flex shrink-0 items-center gap-3 rounded-lg focus-visible:outline-2 focus-visible:outline-blue-600" aria-label="Aristoteles - Beranda">
-			<Logo size="md" showText={true} textSize="xl" />
-		</a>
-		<nav aria-label="Navigasi utama" class="hidden min-w-0 flex-1 items-center justify-center gap-5 font-semibold text-[13px] text-slate-700 lg:flex xl:gap-7">
-			<a href="/" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">BERANDA</a>
-			<a href="/modules" aria-current="page" class="whitespace-nowrap text-blue-600 transition-colors duration-200 ease-smooth hover:text-blue-700">PELATIHAN</a>
-			<a href="/peringkat" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">PERINGKAT</a>
-			<a href="/tentang" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">TENTANG</a>
-			<a href="/verifikasi" class="whitespace-nowrap transition-colors duration-200 ease-smooth hover:text-blue-600">VERIFIKASI</a>
-		</nav>
-		<div class="hidden shrink-0 items-center gap-2.5 sm:flex">
-			<a
-				href="/login"
-				class="inline-flex min-h-[44px] items-center justify-center rounded-full border border-blue-600 px-5 text-xs font-bold whitespace-nowrap text-blue-700 uppercase transition-all duration-200 ease-smooth hover:bg-blue-50 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-			>
-				Masuk
-			</a>
-			<a
-				href="/register"
-				class="inline-flex min-h-[44px] items-center justify-center gap-2 rounded-full bg-blue-600 px-5 text-xs font-bold whitespace-nowrap text-white uppercase shadow-lg shadow-blue-500/25 transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
-			>
-				Mulai Belajar
-				<i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
-			</a>
-		</div>
-		<button
-			type="button"
-			onclick={() => (menuOpen = !menuOpen)}
-			aria-expanded={menuOpen}
-			aria-controls="mobile-nav"
-			aria-label={menuOpen ? 'Tutup menu navigasi' : 'Buka menu navigasi'}
-			class="flex min-h-11 min-w-11 items-center justify-center rounded-xl p-2 text-slate-700 transition-colors duration-200 ease-smooth hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-blue-600 lg:hidden"
-		>
-			<i class={`fa-solid ${menuOpen ? 'fa-xmark' : 'fa-bars'} text-xl`} aria-hidden="true"></i>
-		</button>
-	</div>
-	<nav
-		id="mobile-nav"
-		aria-label="Navigasi seluler"
-		inert={!menuOpen}
-		class={`grid transition-[grid-template-rows,visibility] duration-300 ease-smooth lg:hidden ${menuOpen ? 'grid-rows-[1fr] visible' : 'grid-rows-[0fr] invisible'}`}
-	>
-		<div class="min-h-0 overflow-hidden">
-			<div class="border-t border-slate-100 bg-white px-4 pt-2 pb-5 sm:px-6">
-				<ul class="divide-y divide-slate-100 text-sm font-semibold text-slate-700">
-					{#each mobileLinks as link (link.href)}
-						<li>
-							<a
-								href={link.href}
-								onclick={() => (menuOpen = false)}
-								class="block rounded-lg px-2 py-3 uppercase tracking-wide transition-colors duration-200 ease-smooth hover:bg-blue-50 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-							>
-								{link.label}
-							</a>
-						</li>
-					{/each}
-				</ul>
-				<div class="mt-3 grid grid-cols-2 gap-2.5 sm:hidden">
-					<a href="/login" class="inline-flex min-h-[44px] items-center justify-center rounded-full border border-blue-600 px-4 text-xs font-bold text-blue-700 uppercase transition-all duration-200 ease-smooth hover:bg-blue-50 active:scale-[0.98]">
-						Masuk
-					</a>
-					<a href="/register" class="inline-flex min-h-[44px] items-center justify-center rounded-full bg-blue-600 px-4 text-xs font-bold text-white uppercase shadow-lg shadow-blue-500/25 transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98]">
-						Mulai Belajar
-					</a>
-				</div>
-			</div>
-		</div>
-	</nav>
-</header>
+<PublicHeader active="pelatihan" />
 
 <main class="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8 lg:px-8">
 	{#if loading}
@@ -321,7 +244,7 @@
 			<h1 class="text-xl font-bold text-slate-900">Pelatihan tidak ditemukan</h1>
 			<p class="mt-1 text-sm text-slate-500">ID pelatihan “{page.params.courseId}” tidak terdaftar.</p>
 			<a
-				href="/modules"
+				href="/pelatihan"
 				class="mt-5 inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98]"
 			>
 				<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Kembali ke Semua Pelatihan
@@ -330,7 +253,7 @@
 	{:else}
 		{@const c = detail}
 		<nav aria-label="Breadcrumb" class="mb-4 flex items-center gap-2 text-xs text-slate-500">
-			<a href="/modules" class="rounded font-semibold text-blue-600 hover:text-blue-700">Semua Pelatihan</a>
+			<a href="/pelatihan" class="rounded font-semibold text-blue-600 hover:text-blue-700">Semua Pelatihan</a>
 			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
 			<span aria-current="page" class="truncate font-medium text-slate-700">{c.title}</span>
 		</nav>
@@ -339,6 +262,8 @@
 			<div class="relative flex min-h-48 flex-col justify-end overflow-hidden sm:min-h-56">
 				<img
 					src={c.image || COVER_FALLBACK}
+					srcset={c.image ? (buildSrcSet(fileUrl(c.image), [800, 1200]) ?? undefined) : undefined}
+					sizes="100vw"
 					alt=""
 					aria-hidden="true"
 					class="absolute inset-0 h-full w-full object-cover"
@@ -508,6 +433,8 @@
 				<div class="relative">
 					<img
 						src={c.image || COVER_FALLBACK}
+						srcset={c.image ? (buildSrcSet(fileUrl(c.image), [400, 800]) ?? undefined) : undefined}
+						sizes="(max-width: 1024px) 100vw, 33vw"
 						alt=""
 						aria-hidden="true"
 						class="h-36 w-full object-cover"
@@ -557,6 +484,4 @@
 	{/if}
 </main>
 
-<footer class="border-t border-slate-800 bg-slate-900 py-8 text-center text-xs text-slate-500">
-	&copy; 2026 Aristoteles Platform Mikrokredensial. Semua hak dilindungi.
-</footer>
+<PublicFooter />

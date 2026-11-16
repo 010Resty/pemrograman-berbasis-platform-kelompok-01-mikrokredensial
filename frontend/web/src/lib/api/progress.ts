@@ -54,6 +54,8 @@ export interface MyCertificate {
 	moduleTitle: string | null;
 	/** Nama instruktur utama kursus (untuk sampul). */
 	instructorName?: string | null;
+	/** URL gambar tanda tangan instruktur utama (null = hanya nama diketik). */
+	signatureUrl?: string | null;
 	status: string;
 	issuedAt: string;
 	revokedAt: string | null;
