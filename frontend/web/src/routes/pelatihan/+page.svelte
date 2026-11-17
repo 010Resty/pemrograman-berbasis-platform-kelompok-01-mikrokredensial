@@ -223,6 +223,7 @@
 	});
 	$effect(() => {
 		if (!browser || promoHighlight.length <= 1) return;
+		if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
 		const id = setInterval(() => {
 			promoIndex = (promoIndex + 1) % promoHighlight.length;
 		}, 6000);
@@ -262,7 +263,7 @@
 <main>
 	<!-- Highlight promo: hanya sampul gambar (tanpa teks), klik → halaman promo -->
 	{#if promoLoading}
-		<section aria-label="Memuat highlight promo" class="border-t border-mist bg-white pb-2">
+		<section role="status" aria-label="Memuat highlight promo" class="border-t border-mist bg-white pb-2">
 			<div class="mx-auto max-w-7xl px-4 pt-10 sm:px-6 lg:px-8">
 				<div class="aspect-[1600/450] animate-pulse rounded-2xl bg-ice"></div>
 			</div>
@@ -315,18 +316,17 @@
 						>
 							<i class="fa-solid fa-chevron-right text-sm" aria-hidden="true"></i>
 						</button>
-						<div class="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-2" role="tablist" aria-label="Pilih highlight promo">
+						<div class="absolute bottom-4 left-1/2 flex -translate-x-1/2 gap-1" role="group" aria-label="Pilih highlight promo">
 							{#each promoHighlight as camp, idx (camp.slug)}
 								<button
 									type="button"
-									role="tab"
-									aria-selected={idx === promoIndex % promoHighlight.length}
-									aria-label={`Tampilkan promo ${idx + 1}`}
+									aria-current={idx === promoIndex % promoHighlight.length}
+									aria-label={`Tampilkan promo ${idx + 1} dari ${promoHighlight.length}`}
 									onclick={() => {
 										promoIndex = idx;
 									}}
-									class={`h-2 rounded-full transition-all duration-200 focus-visible:outline-2 focus-visible:outline-white ${idx === promoIndex % promoHighlight.length ? 'w-8 bg-white' : 'w-2 bg-white/50 hover:bg-white/80'}`}
-								></button>
+									class="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-full focus-visible:outline-2 focus-visible:outline-white"
+								><span class={`block h-2 rounded-full transition-all duration-200 ${idx === promoIndex % promoHighlight.length ? 'w-8 bg-white' : 'w-2 bg-white/50'}`} aria-hidden="true"></span></button>
 							{/each}
 						</div>
 					{/if}
@@ -390,7 +390,7 @@
 										}}
 										role="radio"
 										aria-checked={modulCat === cat}
-										class={`flex min-h-[40px] items-center justify-between rounded-xl px-3.5 text-left text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-royal ${
+										class={`flex min-h-[44px] items-center justify-between rounded-xl px-3.5 text-left text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-royal ${
 											modulCat === cat
 												? 'bg-abyss text-white'
 												: 'text-slate-600 hover:bg-slate-100 hover:text-abyss'
@@ -418,7 +418,7 @@
 										}}
 										role="radio"
 										aria-checked={modulLevel === lv}
-										class={`flex min-h-[40px] items-center justify-between rounded-xl px-3.5 text-left text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-royal ${
+										class={`flex min-h-[44px] items-center justify-between rounded-xl px-3.5 text-left text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-royal ${
 											modulLevel === lv
 												? 'bg-abyss text-white'
 												: 'text-slate-600 hover:bg-slate-100 hover:text-abyss'
@@ -455,7 +455,7 @@
 					</p>
 
 					{#if modulLoading}
-						<div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3" aria-label="Memuat pelatihan">
+						<div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3" role="status" aria-label="Memuat pelatihan">
 							{#each [1, 2, 3, 4, 5, 6] as i (i)}
 								<div class="overflow-hidden rounded-2xl border border-mist bg-white">
 									<div class="h-44 animate-pulse bg-ice"></div>
@@ -519,7 +519,7 @@
 										/>
 										{#if course.duration}
 											<span
-												class="absolute top-3 left-3 rounded-md bg-abyss px-3 py-1 font-heading text-[10px] font-bold text-white uppercase"
+												class="absolute top-3 left-3 rounded-md bg-abyss px-3 py-1 font-heading text-xs font-bold text-white uppercase"
 												>{course.duration}</span
 											>
 										{/if}
@@ -527,7 +527,7 @@
 									<div class="flex flex-1 flex-col justify-between space-y-4 p-5">
 										<div>
 											<div class="mb-2 flex items-center justify-between text-xs text-slate-500">
-												<span class="font-heading font-bold tracking-wide text-royal uppercase">{course.level}</span>
+												<span class="font-heading font-bold tracking-wide text-blue-700 uppercase">{course.level}</span>
 												<span class="flex items-center gap-1"
 													><i class="fa-regular fa-clock" aria-hidden="true"></i> {periodShort(course)}</span
 												>

@@ -239,7 +239,7 @@
 			<!-- Visual produk: pratinjau katalog nyata -->
 			<div class="relative animate-rise" style="animation-delay:180ms">
 				{#if spotLoading}
-					<div class="overflow-hidden rounded-[1.75rem] border border-mist bg-white shadow-xl shadow-slate-900/5" aria-label="Memuat pratinjau kursus">
+					<div class="overflow-hidden rounded-[1.75rem] border border-mist bg-white shadow-xl shadow-slate-900/5" role="status" aria-label="Memuat pratinjau kursus">
 						<div class="h-56 animate-pulse bg-ice"></div>
 						<div class="space-y-3 p-6">
 							<div class="h-4 w-2/3 animate-pulse rounded bg-ice"></div>
@@ -258,10 +258,10 @@
 						</div>
 						<div class="relative rotate-1 overflow-hidden rounded-[1.75rem] border border-mist bg-white shadow-2xl shadow-slate-900/20 transition-transform duration-500 ease-out hover:rotate-0 sm:rotate-2">
 							<div class="flex items-center gap-1.5 border-b border-mist bg-white px-4 py-3" aria-hidden="true">
-								<span class="h-2.5 w-2.5 rounded-full bg-[#ff5f57]"></span>
-								<span class="h-2.5 w-2.5 rounded-full bg-[#febc2e]"></span>
-								<span class="h-2.5 w-2.5 rounded-full bg-[#28c840]"></span>
-								<span class="ml-2 hidden rounded-full bg-slate-100 px-3 py-1 font-mono text-[11px] text-slate-500 sm:block">aristoteles.id/katalog</span>
+								<span class="h-2.5 w-2.5 rounded-full bg-red-400"></span>
+								<span class="h-2.5 w-2.5 rounded-full bg-amber-400"></span>
+								<span class="h-2.5 w-2.5 rounded-full bg-green-500"></span>
+								<span class="ml-2 hidden rounded-full bg-slate-100 px-3 py-1 font-mono text-xs text-slate-500 sm:block">aristoteles.id/katalog</span>
 							</div>
 							<img
 								src={featuredCourse.image || COVER_FALLBACK}
@@ -272,7 +272,7 @@
 							/>
 							<div class="p-6">
 								<div class="flex items-center justify-between gap-3">
-									<p class="rounded-full bg-ice px-3 py-1 font-heading text-[11px] font-bold tracking-[0.1em] text-royal uppercase">{featuredCourse.category ?? 'Umum'}</p>
+									<p class="rounded-full bg-ice px-3 py-1 font-heading text-xs font-bold tracking-[0.1em] text-royal uppercase">{featuredCourse.category ?? 'Umum'}</p>
 									<p class="text-xs font-semibold text-slate-500">{featuredCourse.level}</p>
 								</div>
 								<p class="mt-3 font-heading text-xl leading-snug font-bold text-abyss">
@@ -436,7 +436,7 @@
 						<div class="min-w-0">
 							<p class="flex flex-wrap items-center gap-2 font-heading text-sm font-bold text-abyss">
 								Nama Instruktur
-								<span class="rounded-md bg-ice px-2 py-0.5 font-heading text-[10px] font-bold tracking-wider text-royal uppercase">Contoh</span>
+								<span class="rounded-md bg-ice px-2 py-0.5 font-heading text-xs font-bold tracking-wider text-royal uppercase">Contoh</span>
 							</p>
 							<p class="mt-0.5 text-xs font-medium text-slate-500">Bidang keahlian · contoh tampilan profil</p>
 						</div>

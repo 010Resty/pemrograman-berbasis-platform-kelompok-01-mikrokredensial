@@ -31,7 +31,7 @@ export interface TentangSubPage {
 	id: string;
 	title: string;
 	desc: string;
-	href: '/tentang/arti-nama' | '/tentang/cara-kerja' | '/tentang/untuk-siapa' | '/tentang/keunggulan';
+	href: '/tentang/arti-nama' | '/tentang/cara-kerja' | '/tentang/kontak' | '/tentang/keunggulan';
 	icon: string;
 }
 
@@ -51,11 +51,11 @@ export const TENTANG_SUBPAGES: TentangSubPage[] = [
 		icon: 'fa-route'
 	},
 	{
-		id: 'untuk-siapa',
-		title: 'Untuk Siapa',
-		desc: 'Portal peserta, instruktur, dan admin',
-		href: '/tentang/untuk-siapa',
-		icon: 'fa-users'
+		id: 'kontak',
+		title: 'Kontak Kami',
+		desc: 'Hubungi tim ARISTOTELES',
+		href: '/tentang/kontak',
+		icon: 'fa-envelope'
 	},
 	{
 		id: 'keunggulan',

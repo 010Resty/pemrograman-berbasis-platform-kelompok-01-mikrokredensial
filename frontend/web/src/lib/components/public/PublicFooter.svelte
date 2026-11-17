@@ -36,7 +36,7 @@
 			<ul class="mt-4 space-y-2.5 text-sm">
 				<li><a href={resolve('/tentang/arti-nama')} class="transition-colors duration-200 hover:text-white">Tentang ARISTOTELES</a></li>
 				<li><a href={resolve('/tentang/cara-kerja')} class="transition-colors duration-200 hover:text-white">Cara kerja</a></li>
-				<li><a href={resolve('/tentang/untuk-siapa')} class="transition-colors duration-200 hover:text-white">Untuk siapa</a></li>
+				<li><a href={resolve('/tentang/kontak')} class="transition-colors duration-200 hover:text-white">Kontak kami</a></li>
 				<li><a href={resolve('/tentang/keunggulan')} class="transition-colors duration-200 hover:text-white">Keunggulan</a></li>
 				<li><a href={resolve('/syarat-ketentuan')} class="transition-colors duration-200 hover:text-white">Syarat &amp; ketentuan</a></li>
 				<li><a href={resolve('/kebijakan-privasi')} class="transition-colors duration-200 hover:text-white">Kebijakan privasi</a></li>

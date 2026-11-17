@@ -15,15 +15,9 @@
 	interface Props {
 		active: 'promo' | 'pelatihan' | 'peringkat' | 'tentang' | 'verifikasi' | 'menjadi-instruktur';
 		showSearch?: boolean;
-		/**
-		 * Daftar item dropdown menu Promo. Bila tidak diisi, dipakai daftar
-		 * bawaan (shortcut tiap bagian landing) sehingga dropdown tetap bisa
-		 * diakses dari halaman publik mana pun, bukan hanya di landing.
-		 */
-		promoItems?: PromoItem[];
 	}
 
-	let { active, showSearch = true, promoItems }: Props = $props();
+	let { active, showSearch = true }: Props = $props();
 	let menuOpen = $state(false);
 	let promoOpen = $state(false);
 	let mobilePromoOpen = $state(false);
@@ -33,22 +27,20 @@
 	let tentangWrap: HTMLDivElement | undefined = $state(undefined);
 
 	/**
-	 * Shortcut ke tiap bagian halaman promo khusus — dipakai saat halaman tidak
-	 * mengoper `promoItems` sendiri, sehingga dropdown Promo bisa diakses
-	 * dari halaman publik mana pun.
+	 * Item dropdown Promo: 3 halaman jenis. Sengaja tanpa daftar kampanye
+	 * agar tidak duplikat/generic (judul kampanye demo sama dengan badge-nya).
+	 * Kampanye baru tetap punya halaman sendiri via /promo/[slug] + sidebar.
 	 */
-	const defaultPromoItems: PromoItem[] = [
-		{ id: 'flash-sale', title: 'Flash Sale', desc: 'Diskon spesial dalam periode terbatas', href: `${resolve('/promo')}#flash-sale` },
-		{ id: 'unggulan', title: 'Pilihan Unggulan', desc: 'Kurasi pilihan dan pelatihan terbit terbaru', href: `${resolve('/promo')}#unggulan` },
-		{ id: 'patungan', title: 'Promo Patungan', desc: 'Checkout kelas bareng, bayar lebih hemat', href: `${resolve('/promo')}#patungan` }
+	const promoMenuItems: PromoItem[] = [
+		{ id: 'jenis-diskon', title: 'Flash Sale', desc: 'Diskon spesial dalam periode terbatas', href: resolve('/promo/diskon') },
+		{ id: 'jenis-kurasi', title: 'Pilihan Unggulan', desc: 'Kurasi pilihan dan pelatihan terbit terbaru', href: resolve('/promo/kurasi') },
+		{ id: 'jenis-patungan', title: 'Promo Patungan', desc: 'Checkout kelas bareng, bayar lebih hemat', href: resolve('/promo/patungan') }
 	];
-
-	const promoMenuItems = $derived(promoItems ?? defaultPromoItems);
 
 	const tentangMenuItems = [
 		{ id: 'arti-nama', title: 'Arti Nama', desc: 'Makna dan singkatan ARISTOTELES', href: '/tentang/arti-nama' as const },
 		{ id: 'cara-kerja', title: 'Cara Kerja', desc: 'Empat langkah menuju sertifikat', href: '/tentang/cara-kerja' as const },
-		{ id: 'untuk-siapa', title: 'Untuk Siapa', desc: 'Portal peserta, instruktur, dan admin', href: '/tentang/untuk-siapa' as const },
+		{ id: 'kontak', title: 'Kontak Kami', desc: 'Hubungi tim ARISTOTELES', href: '/tentang/kontak' as const },
 		{ id: 'keunggulan', title: 'Keunggulan', desc: 'Kurikulum industri dan mentor praktisi', href: '/tentang/keunggulan' as const }
 	];
 
@@ -123,12 +115,12 @@
 							onkeydown={(e) => {
 								if (e.key === 'Escape') promoOpen = false;
 							}}
-							class="relative flex cursor-pointer items-center gap-1.5 rounded-lg px-4 py-2 transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-royal {active === link.id
+							class="relative flex min-h-[44px] cursor-pointer items-center gap-1.5 rounded-lg px-4 py-2 transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-royal {active === link.id
 								? 'text-royal'
 								: 'text-slate-600 hover:text-abyss'}"
 						>
 							{link.label}
-							<i class={`fa-solid fa-chevron-down text-[10px] transition-transform duration-200 ${promoOpen ? 'rotate-180' : ''}`} aria-hidden="true"></i>
+							<i class={`fa-solid fa-chevron-down text-xs transition-transform duration-200 ${promoOpen ? 'rotate-180' : ''}`} aria-hidden="true"></i>
 						</button>
 						{#if promoOpen}
 							<div class="absolute top-full left-1/2 z-50 w-[540px] max-w-[calc(100vw-2rem)] -translate-x-1/2 pt-2.5">
@@ -153,7 +145,7 @@
 													<span class="flex items-center gap-2">
 														<span class="text-sm font-bold text-abyss">{item.title}</span>
 														{#if item.badge}
-															<span class="rounded-full bg-royal px-2 py-0.5 text-[10px] font-bold tracking-wider text-white uppercase">{item.badge}</span>
+															<span class="rounded-full bg-royal px-2 py-0.5 text-xs font-bold tracking-wider text-white uppercase">{item.badge}</span>
 														{/if}
 													</span>
 													{#if item.desc}
@@ -181,12 +173,12 @@
 							onkeydown={(e) => {
 								if (e.key === 'Escape') tentangOpen = false;
 							}}
-							class="relative flex cursor-pointer items-center gap-1.5 rounded-lg px-4 py-2 transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-royal {active === link.id
+							class="relative flex min-h-[44px] cursor-pointer items-center gap-1.5 rounded-lg px-4 py-2 transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-royal {active === link.id
 								? 'text-royal'
 								: 'text-slate-600 hover:text-abyss'}"
 						>
 							{link.label}
-							<i class={`fa-solid fa-chevron-down text-[10px] transition-transform duration-200 ${tentangOpen ? 'rotate-180' : ''}`} aria-hidden="true"></i>
+							<i class={`fa-solid fa-chevron-down text-xs transition-transform duration-200 ${tentangOpen ? 'rotate-180' : ''}`} aria-hidden="true"></i>
 						</button>
 						{#if tentangOpen}
 							<div class="absolute top-full left-1/2 z-50 w-[540px] max-w-[calc(100vw-2rem)] -translate-x-1/2 pt-2.5">
@@ -226,7 +218,7 @@
 					<a
 						href={link.href}
 						aria-current={active === link.id ? 'page' : undefined}
-						class="relative rounded-lg px-4 py-2 transition-colors duration-200 {active === link.id
+						class="relative inline-flex min-h-[44px] items-center rounded-lg px-4 py-2 transition-colors duration-200 {active === link.id
 							? 'text-royal'
 							: 'text-slate-600 hover:text-abyss'}"
 					>
@@ -249,13 +241,13 @@
 			{/if}
 			<a
 				href={resolve('/login')}
-				class="inline-flex min-h-[42px] items-center justify-center rounded-[10px] border border-mist bg-white px-5 font-heading text-sm font-bold text-abyss transition-colors duration-200 hover:border-royal hover:text-royal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+				class="inline-flex min-h-[44px] items-center justify-center rounded-[10px] border border-mist bg-white px-5 font-heading text-sm font-bold text-abyss transition-colors duration-200 hover:border-royal hover:text-royal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
 			>
 				Masuk
 			</a>
 			<a
 				href={resolve('/register')}
-				class="inline-flex min-h-[42px] items-center justify-center rounded-[10px] bg-royal px-5 font-heading text-sm font-bold text-white shadow-sm transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+				class="inline-flex min-h-[44px] items-center justify-center rounded-[10px] bg-royal px-5 font-heading text-sm font-bold text-white shadow-sm transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
 			>
 				Daftar
 			</a>
@@ -308,7 +300,7 @@
 												{/if}
 											</span>
 												{#if item.badge}
-													<span class="shrink-0 rounded-md bg-abyss px-2 py-0.5 font-heading text-[11px] font-bold text-white">{item.badge}</span>
+													<span class="shrink-0 rounded-md bg-abyss px-2 py-0.5 font-heading text-xs font-bold text-white">{item.badge}</span>
 												{/if}
 											</a>
 										</li>

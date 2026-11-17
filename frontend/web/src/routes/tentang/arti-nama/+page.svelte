@@ -7,6 +7,7 @@
 	import { resolve } from '$app/paths';
 	import { reveal } from '$lib/actions/reveal';
 	import { TENTANG_NAME_PARTS, TENTANG_PRINCIPLES, TENTANG_SUBPAGES } from '$lib/data/tentang';
+	import layananBg from '$lib/assets/layanan.jpg';
 
 	const siblings = TENTANG_SUBPAGES.filter((s) => s.id !== 'arti-nama');
 
@@ -44,33 +45,32 @@
 
 <main>
 	<!-- Hero -->
-	<section class="relative overflow-hidden bg-white">
-		<div class="pointer-events-none absolute inset-0" aria-hidden="true">
-			<div class="absolute -top-32 left-1/2 h-72 w-[36rem] -translate-x-1/2 rounded-full bg-ice blur-3xl"></div>
-		</div>
+	<section class="relative overflow-hidden bg-navy">
+		<img src={layananBg} alt="Empat orang berdiskusi mengelilingi laptop dalam sesi kerja kolaboratif" class="absolute inset-0 h-full w-full object-cover" loading="eager" fetchpriority="high" />
+		<div class="absolute inset-0 bg-gradient-to-b from-navy/85 via-navy/75 to-navy/85" aria-hidden="true"></div>
 		<div class="relative mx-auto max-w-7xl px-4 py-14 text-center sm:px-6 sm:py-20 lg:px-8">
-			<p class="flex items-center justify-center gap-3 font-heading text-xs font-bold tracking-[0.18em] text-royal uppercase">
-				<span class="h-px w-8 bg-royal" aria-hidden="true"></span>
+			<p class="flex items-center justify-center gap-3 font-heading text-xs font-bold tracking-[0.18em] text-ice uppercase">
+				<span class="h-px w-8 bg-ice/60" aria-hidden="true"></span>
 				Tentang Aristoteles
-				<span class="h-px w-8 bg-royal" aria-hidden="true"></span>
+				<span class="h-px w-8 bg-ice/60" aria-hidden="true"></span>
 			</p>
-			<h1 class="mx-auto mt-4 max-w-3xl font-heading text-4xl leading-tight font-extrabold tracking-tight text-abyss sm:text-5xl">
+			<h1 class="mx-auto mt-4 max-w-3xl font-heading text-4xl leading-tight font-extrabold tracking-tight text-balance text-white sm:text-5xl">
 				Ubah Rasa Ingin Tahu Menjadi Keahlian yang Bermakna
 			</h1>
-			<p class="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-slate-600 sm:text-base">
+			<p class="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-slate-300 sm:text-base">
 				ARISTOTELES adalah platform pembelajaran mikrokredensial: dari memilih pelatihan hingga
 				memperoleh sertifikat. Terstruktur, terukur, dan berkelanjutan.
 			</p>
 			<div class="mt-8 flex flex-col justify-center gap-3 sm:flex-row">
 				<a
 					href={resolve('/pelatihan')}
-					class="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-royal px-8 font-heading text-sm font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+					class="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-xl bg-royal px-8 font-heading text-sm font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
 				>
 					Lihat Pelatihan <i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
 				</a>
 				<a
 					href={resolve('/verifikasi')}
-					class="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-xl border border-mist bg-white px-8 font-heading text-sm font-bold text-abyss transition-colors duration-200 hover:border-royal hover:text-royal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+					class="inline-flex min-h-[52px] items-center justify-center gap-2 rounded-xl border border-white/25 bg-white/5 px-8 font-heading text-sm font-bold text-white backdrop-blur transition-colors duration-200 hover:border-white/60 hover:bg-white/15 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
 				>
 					Verifikasi Sertifikat
 				</a>
@@ -81,7 +81,17 @@
 	<!-- Arti nama -->
 	<section aria-labelledby="arti-nama-heading" class="border-y border-mist bg-ice/60">
 		<div class="mx-auto max-w-7xl px-4 py-14 sm:px-6 sm:py-16 lg:px-8">
-			<div class="grid items-start gap-10 lg:grid-cols-2">
+			<div class="grid items-stretch gap-10 lg:grid-cols-2">
+				<div use:reveal class="relative min-h-[300px] overflow-hidden rounded-2xl shadow-xl shadow-slate-900/10 lg:min-h-[440px]">
+					<img src={layananBg} alt="Tim berdiskusi mengelilingi laptop dalam sesi kerja kolaboratif" class="absolute inset-0 h-full w-full object-cover" loading="lazy" />
+					<div class="absolute inset-0 bg-gradient-to-t from-navy/85 via-navy/20 to-transparent" aria-hidden="true"></div>
+					<div class="absolute right-4 bottom-4 left-4">
+						<p class="inline-flex items-center gap-2 rounded-xl bg-white/10 px-4 py-2.5 font-heading text-xs font-bold text-white backdrop-blur">
+							<i class="fa-solid fa-flask text-teal" aria-hidden="true"></i>
+							Laboratorium Pendidikan Era AI
+						</p>
+					</div>
+				</div>
 				<div>
 					<p class="flex items-center gap-3 font-heading text-xs font-bold tracking-[0.18em] text-royal uppercase">
 						<span class="h-px w-8 bg-royal" aria-hidden="true"></span>
@@ -99,20 +109,20 @@
 						relevan dengan dunia kerja modern.
 					</p>
 				</div>
-				<div class="rounded-2xl border border-mist bg-white p-6 sm:p-8">
-					<dl class="space-y-5">
-						{#each TENTANG_NAME_PARTS as item (item.k)}
-							<div class="flex gap-4">
-								<span
-									class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-ice text-sm text-royal"
-									aria-hidden="true"
-								>
-									<i class="fa-solid fa-flask"></i>
+				<div use:reveal class="overflow-hidden rounded-2xl bg-navy text-white shadow-xl shadow-slate-900/20">
+					<dl class="divide-y divide-white/10">
+						{#each TENTANG_NAME_PARTS as item, i (item.k)}
+							<div class="group flex items-center gap-4 p-5 transition-colors duration-200 hover:bg-white/5 sm:gap-5 sm:p-6">
+								<span class="font-heading w-12 shrink-0 text-center text-4xl font-extrabold text-white/15 transition-colors duration-200 group-hover:text-teal sm:w-16 sm:text-5xl" aria-hidden="true">
+									{item.k.charAt(0)}
 								</span>
-								<div>
-									<dt class="font-heading text-sm font-bold text-abyss">{item.k}</dt>
-									<dd class="mt-0.5 text-sm leading-relaxed text-slate-600">{item.v}</dd>
+								<div class="min-w-0 flex-1">
+									<dt class="font-heading text-sm font-bold sm:text-base">{item.k}</dt>
+									<dd class="mt-0.5 text-xs leading-relaxed text-slate-300 sm:text-sm">{item.v}</dd>
 								</div>
+								<span class="shrink-0 font-heading text-xs font-bold text-slate-500 tabular-nums" aria-hidden="true">
+									{String(i + 1).padStart(2, '0')}
+								</span>
 							</div>
 						{/each}
 					</dl>
