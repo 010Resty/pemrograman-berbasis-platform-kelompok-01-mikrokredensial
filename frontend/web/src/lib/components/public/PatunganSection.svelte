@@ -52,11 +52,11 @@
 			<p class="text-sm text-slate-300">
 				Bentuk grup {PATUNGAN_MIN_ANGGOTA}–{PATUNGAN_MAX_ANGGOTA} orang, tiap anggota membayar iurannya
 				sendiri-sendiri. Akses kursus dibuka untuk semua setelah <strong class="text-white">semua lunas</strong> —
-				tanpa akses parsial.
+				tanpa akses parsial. Grup berlaku 3 hari sejak dibuat.
 			</p>
 			<p role="note" class="mx-auto max-w-xl rounded-xl border border-white/15 bg-white/5 px-4 py-2.5 text-xs font-semibold text-slate-200">
-				Anggota diidentifikasi lewat <strong class="text-white">username</strong> dan wajib sudah punya akun.
-				Iuran resmi dihitung server saat grup dibuat.
+				Anggota diidentifikasi lewat <strong class="text-white">username</strong> dan wajib sudah punya akun —
+				mereka mendapat undangan dan harus menerimanya dulu. Iuran resmi dihitung server saat grup dibuat.
 			</p>
 		</div>
 
@@ -147,7 +147,7 @@
 				<div class="rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur sm:p-8">
 					<h3 class="font-heading text-base font-extrabold text-white">Cara kerja patungan</h3>
 					<ol class="mt-4 space-y-4">
-						{#each [{ t: 'Bentuk grup', d: 'Pilih pelatihan promo patungan, tentukan 2–15 anggota. Kamu otomatis jadi anggota #1.' }, { t: 'Masukkan username anggota', d: 'Setiap username dicek ke server — hanya akun yang benar-benar ada yang bisa ikut.' }, { t: 'Tiap anggota bayar sendiri', d: 'Iuran per orang dihitung server. Unggah bukti bayar masing-masing untuk diverifikasi admin.' }, { t: 'Semua lunas → akses dibuka', d: 'Akses kursus diberikan ke seluruh anggota sekaligus. Sebagian lunas = belum ada akses.' }] as s, i (s.t)}
+						{#each [{ t: 'Bentuk grup', d: 'Pilih pelatihan promo patungan, tentukan 2–15 anggota. Kamu otomatis jadi anggota #1. Komposisi grup final — tidak bisa tambah anggota.' }, { t: 'Undang lewat username', d: 'Setiap username dicek ke server. Anggota mendapat undangan dan harus menerimanya; grup kedaluwarsa 3 hari bila tidak lengkap.' }, { t: 'Tiap anggota bayar sendiri', d: 'Iuran dibuka setelah semua menerima undangan. Unggah bukti bayar masing-masing untuk diverifikasi admin.' }, { t: 'Semua lunas → akses dibuka', d: 'Akses kursus diberikan ke seluruh anggota sekaligus. Sebagian lunas = belum ada akses.' }] as s, i (s.t)}
 							<li class="flex items-start gap-3.5">
 								<span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-ice/15 font-heading text-sm font-extrabold text-ice" aria-hidden="true">{i + 1}</span>
 								<div>

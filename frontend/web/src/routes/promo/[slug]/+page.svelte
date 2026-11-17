@@ -187,10 +187,10 @@
 			>
 				{#snippet actions()}
 					<a
-						href={resolve('/promo')}
+						href={resolve('/pelatihan')}
 						class="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-5 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-royal"
 					>
-						<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Semua promo
+						<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Lihat katalog
 					</a>
 				{/snippet}
 			</EmptyState>
@@ -204,7 +204,7 @@
 			</div>
 			<div class="relative mx-auto max-w-7xl px-4 py-14 sm:px-6 lg:px-8">
 				<p class="flex flex-wrap items-center gap-2">
-					<a href={resolve('/promo')} class="text-xs font-bold text-slate-300 hover:text-white">Promo</a>
+					<a href={resolve(`/promo/${camp.type}`)} class="text-xs font-bold text-slate-300 hover:text-white">Promo</a>
 					<span class="text-slate-500" aria-hidden="true">/</span>
 					<span class="rounded-full bg-white/10 px-3 py-1 font-heading text-[11px] font-bold tracking-wider text-white uppercase">
 						{typeLabel}

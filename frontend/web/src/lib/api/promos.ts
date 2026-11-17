@@ -11,6 +11,49 @@ import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svel
 export type PromoType = 'diskon' | 'kurasi' | 'patungan';
 export type PromoStatus = 'draft' | 'active' | 'archived';
 
+/** Registri 3 halaman jenis promo. Kampanye baru dari admin otomatis masuk
+ *  halaman jenisnya + dropdown + sidebar tanpa ubah kode (semua baca live). */
+export interface PromoTypeMeta {
+  type: PromoType;
+  /** Segmen path halaman jenis: /promo/<slug> dan /user/promo/<slug>. */
+  slug: 'diskon' | 'kurasi' | 'patungan';
+  title: string;
+  tagline: string;
+  description: string;
+  icon: string;
+}
+
+export const PROMO_TYPES: PromoTypeMeta[] = [
+  {
+    type: 'diskon',
+    slug: 'diskon',
+    title: 'Flash Sale',
+    tagline: 'Hemat Lebih Banyak',
+    description: 'Diskon spesial dalam periode terbatas. Harga coret adalah harga resmi, harga merah adalah harga bayar.',
+    icon: 'fa-bolt'
+  },
+  {
+    type: 'kurasi',
+    slug: 'kurasi',
+    title: 'Pilihan Unggulan',
+    tagline: 'Sorotan Pilihan Editor',
+    description: 'Kurasi khusus dari tim Aristoteles. Bila belum ada kurasi, tampilkan yang terbaru.',
+    icon: 'fa-star'
+  },
+  {
+    type: 'patungan',
+    slug: 'patungan',
+    title: 'Promo Patungan',
+    tagline: 'Belajar Bareng, Bayar Patungan',
+    description: 'Pelatihan yang terdaftar dalam promo patungan admin. Bentuk grup, bagi totalnya, dan bayar per orang.',
+    icon: 'fa-people-group'
+  }
+];
+
+export function promoTypeMeta(type: string | null | undefined): PromoTypeMeta {
+  return PROMO_TYPES.find((t) => t.type === type) ?? PROMO_TYPES[0]!;
+}
+
 export interface PromoCourse {
 	courseId: number;
 	title: string;

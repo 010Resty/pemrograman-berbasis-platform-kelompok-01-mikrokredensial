@@ -7,8 +7,10 @@
 	import SeoHead from '$lib/components/SeoHead.svelte';
 	import { reveal } from '$lib/actions/reveal';
 	import {
+		acceptPatunganInvite,
 		adminCancelPatunganGroup,
 		cancelPatunganGroup,
+		declinePatunganInvite,
 		fetchPatunganGroup,
 		type PatunganGroupDetail
 	} from '$lib/api/patungan';
@@ -32,6 +34,22 @@
 	let payBusy = $state(false);
 	let cancelReason = $state('');
 	let cancelBusy = $state(false);
+	let inviteBusy = $state(false);
+	let inviteError = $state('');
+
+	const pendingInvites = $derived(group?.members.filter((m) => m.inviteStatus === 'pending') ?? []);
+	const expiresLabel = $derived.by(() => {
+		if (!group?.expiresAt) return null;
+		const d = new Date(group.expiresAt);
+		if (Number.isNaN(d.getTime())) return null;
+		return d.toLocaleDateString('id-ID', {
+			day: 'numeric',
+			month: 'short',
+			year: 'numeric',
+			hour: '2-digit',
+			minute: '2-digit'
+		});
+	});
 
 	const me = $derived(getCurrentUser());
 	const myMembership = $derived(group?.members.find((m) => m.username === me?.username) ?? null);
@@ -137,6 +155,24 @@
 		void navigator.clipboard?.writeText(window.location.href).catch(() => {});
 	}
 
+	async function respondInvite(accept: boolean): Promise<void> {
+		inviteError = '';
+		if (!group) return;
+		inviteBusy = true;
+		try {
+			if (accept) {
+				group = await acceptPatunganInvite(group.id);
+			} else {
+				const res = await declinePatunganInvite(group.id);
+				group = res.group;
+			}
+		} catch (e) {
+			inviteError = e instanceof Error ? e.message : 'Gagal menjawab undangan.';
+		} finally {
+			inviteBusy = false;
+		}
+	}
+
 	$effect(() => {
 		if (!browser) return;
 		if (!Number.isInteger(groupId) || groupId <= 0) {
@@ -164,7 +200,7 @@
 <main class="bg-ice/60">
 	<div class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
 		<nav aria-label="Kembali" class="mb-6 flex items-center justify-between gap-3">
-			<a href={resolve('/promo#patungan')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-royal hover:text-royal-hover">
+			<a href={resolve('/promo/patungan')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-royal hover:text-royal-hover">
 				<i class="fa-solid fa-arrow-left text-xs" aria-hidden="true"></i> Kembali ke Promo
 			</a>
 			<a href={resolve('/patungan/saya')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-slate-600 hover:text-royal">
@@ -204,6 +240,8 @@
 							<span class="rounded-lg bg-amber-400/20 px-3 py-1 font-heading text-[11px] font-bold tracking-wider text-amber-200 uppercase">Pending · {group.paidCount}/{group.memberCount} lunas</span>
 						{:else if group.status === 'complete'}
 							<span class="rounded-lg bg-emerald-400/20 px-3 py-1 font-heading text-[11px] font-bold tracking-wider text-emerald-200 uppercase">Complete — akses dibuka</span>
+						{:else if group.status === 'expired'}
+							<span class="rounded-lg bg-white/10 px-3 py-1 font-heading text-[11px] font-bold tracking-wider text-slate-300 uppercase">Kedaluwarsa</span>
 						{:else}
 							<span class="rounded-lg bg-white/10 px-3 py-1 font-heading text-[11px] font-bold tracking-wider text-slate-300 uppercase">Dibatalkan</span>
 						{/if}
@@ -212,6 +250,7 @@
 					<p class="mt-1 text-sm text-slate-300">
 						Total {formatIDR(group.priceNominal)} · {group.memberCount} anggota · {group.course.priceLabel}
 						{#if group.campaign} · {group.campaign.title}{/if}
+						{#if group.status === 'pending' && expiresLabel} · s.d. {expiresLabel}{/if}
 					</p>
 					<div class="mt-3 h-2 overflow-hidden rounded-full bg-white/10" role="img" aria-label={`${group.paidCount} dari ${group.memberCount} anggota lunas`}>
 						<div class="h-full rounded-full bg-teal" style="width:{group.memberCount > 0 ? (group.paidCount / group.memberCount) * 100 : 0}%"></div>
@@ -228,10 +267,40 @@
 						<div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600">
 							Grup ini dibatalkan{#if group.cancelReason}: {group.cancelReason}{/if}. Iuran yang sudah diverifikasi ditangani manual oleh admin.
 						</div>
+					{:else if group.status === 'expired'}
+						<div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600">
+							Masa berlaku grup sudah habis (3 hari sejak dibuat). Buat grup baru atau ikuti grup lain untuk tetap patungan.
+						</div>
+					{:else if !group.locked}
+						<div class="rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
+							Menunggu {pendingInvites.length} anggota menerima undangan — iuran dibuka setelah semua menerima{#if expiresLabel}, paling lambat {expiresLabel}{/if}. Belum ada akses kursus sebelum lengkap.
+						</div>
 					{:else}
 						<div class="rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
 							Menunggu pelunasan semua anggota ({group.paidCount}/{group.memberCount}). Belum ada akses kursus sebelum lengkap.
 						</div>
+					{/if}
+
+					{#if group.status === 'pending' && myMembership && myMembership.inviteStatus === 'pending'}
+						<section aria-label="Undangan grup patungan" class="rounded-2xl border border-royal/25 bg-royal/5 p-5">
+							<h2 class="font-heading text-sm font-extrabold text-abyss">Kamu diundang ke grup ini</h2>
+							<p class="mt-1 text-xs text-slate-500">
+								Terima undangan untuk ikut patungan {group.course.title} — iuranmu {formatIDR(myMembership.shareAmount)}.
+								Menolak mengeluarkanmu dari grup dan iuran anggota lain dihitung ulang.
+							</p>
+							<div class="mt-3 flex flex-wrap gap-2">
+								<button type="button" onclick={() => void respondInvite(true)} disabled={inviteBusy} class="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-6 py-2.5 font-heading text-xs font-bold text-white hover:bg-royal-hover disabled:opacity-50">
+									{#if inviteBusy}<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>{:else}<i class="fa-solid fa-check" aria-hidden="true"></i>{/if}
+									Terima undangan
+								</button>
+								<button type="button" onclick={() => void respondInvite(false)} disabled={inviteBusy} class="inline-flex min-h-[44px] items-center gap-2 rounded-xl border border-mist bg-white px-6 py-2.5 font-heading text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-50">
+									Tolak
+								</button>
+							</div>
+							{#if inviteError}
+								<p role="alert" class="mt-2 text-xs font-semibold text-red-600">{inviteError}</p>
+							{/if}
+						</section>
 					{/if}
 
 					<!-- Anggota -->
@@ -248,6 +317,8 @@
 											@{m.username}
 											{#if m.isCreator}<span class="ml-1 rounded-md bg-royal/10 px-1.5 py-0.5 text-[10px] font-bold text-royal uppercase">Ketua</span>{/if}
 											{#if m.username === me?.username}<span class="ml-1 rounded-md bg-teal/10 px-1.5 py-0.5 text-[10px] font-bold text-teal uppercase">Kamu</span>{/if}
+											{#if m.inviteStatus === 'pending'}<span class="ml-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-700 uppercase">Diundang</span>{/if}
+											{#if m.inviteStatus === 'declined'}<span class="ml-1 rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500 uppercase">Menolak</span>{/if}
 										</p>
 										<p class="truncate text-xs text-slate-500">{m.name}</p>
 									</div>
@@ -263,7 +334,19 @@
 					</section>
 
 					<!-- Bayar iuran saya -->
-					{#if group.status === 'pending' && myMembership && (myMembership.paymentStatus === 'unpaid' || myMembership.paymentStatus === 'ditolak')}
+					{#if group.status === 'pending' && myMembership && myMembership.inviteStatus === 'declined'}
+						<div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs font-semibold text-slate-600">
+							Kamu menolak undangan grup ini — iuran tidak diperlukan.
+						</div>
+					{:else if group.status === 'pending' && myMembership && myMembership.inviteStatus !== 'accepted'}
+						<div class="rounded-xl border border-royal/25 bg-royal/5 px-4 py-3 text-xs font-semibold text-abyss">
+							Terima undangan grup di atas dulu untuk membuka pembayaran iuranmu.
+						</div>
+					{:else if group.status === 'pending' && myMembership && !group.locked}
+						<div class="rounded-xl border border-amber-300/60 bg-amber-50 px-4 py-3 text-xs font-semibold text-amber-800">
+							Pembayaran dibuka setelah semua anggota menerima undangan ({pendingInvites.length} tersisa).
+						</div>
+					{:else if group.status === 'pending' && myMembership && (myMembership.paymentStatus === 'unpaid' || myMembership.paymentStatus === 'ditolak')}
 						<section aria-label="Bayar iuran saya" class="rounded-2xl border border-royal/25 bg-royal/5 p-5">
 							<h2 class="font-heading text-sm font-extrabold text-abyss">Bayar iuranmu: {formatIDR(myMembership.shareAmount)}</h2>
 							{#if myMembership.paymentStatus === 'ditolak'}

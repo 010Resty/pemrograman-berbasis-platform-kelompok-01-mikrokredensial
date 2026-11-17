@@ -109,10 +109,10 @@
 		>
 			{#snippet actions()}
 				<a
-					href={resolve('/user/promo')}
+					href={resolve('/user/semua-kursus')}
 					class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 				>
-					<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Semua promo
+					<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Lihat katalog
 				</a>
 			{/snippet}
 		</EmptyState>

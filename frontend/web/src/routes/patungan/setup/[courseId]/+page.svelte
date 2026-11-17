@@ -183,7 +183,7 @@
 <main class="bg-ice/60">
 	<div class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
 		<nav aria-label="Kembali" class="mb-6">
-			<a href={resolve('/promo#patungan')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-royal hover:text-royal-hover">
+			<a href={resolve('/promo/patungan')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-royal hover:text-royal-hover">
 				<i class="fa-solid fa-arrow-left text-xs" aria-hidden="true"></i> Kembali ke Promo
 			</a>
 		</nav>
@@ -203,6 +203,10 @@
 				{#if promoPrice !== null}
 					<p class="mt-1 text-xs font-bold text-amber-300">Harga khusus patungan: {formatIDR(promoPrice)} total grup (bukan harga satuan)</p>
 				{/if}
+				<p class="mt-2 max-w-xl text-xs leading-relaxed text-slate-300">
+					Anggota yang kamu tulis mendapat undangan dan harus menerimanya — iuran dibuka setelah
+					semua menerima. Komposisi grup final saat dibuat; grup kedaluwarsa 3 hari bila tidak lengkap.
+				</p>
 			</div>
 
 			<div class="space-y-6 px-6 py-6 sm:px-8">
@@ -215,7 +219,7 @@
 					<div class="rounded-2xl border border-dashed border-mist bg-white p-8 text-center">
 						<p class="font-heading text-sm font-bold text-abyss">Kursus ini tidak masuk promo patungan.</p>
 						<p class="mx-auto mt-1 max-w-md text-sm text-slate-500">Hanya kursus yang dipilih admin yang bisa ikut patungan.</p>
-						<a href={resolve('/promo#patungan')} class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-6 py-2.5 font-heading text-xs font-bold text-white hover:bg-royal-hover">
+						<a href={resolve('/promo/patungan')} class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-6 py-2.5 font-heading text-xs font-bold text-white hover:bg-royal-hover">
 							Lihat promo patungan
 						</a>
 					</div>

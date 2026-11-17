@@ -7,14 +7,16 @@ import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svel
  * klien hanya cermin.
  */
 
-export type PatunganGroupStatus = 'pending' | 'complete' | 'cancelled';
+export type PatunganGroupStatus = 'pending' | 'complete' | 'cancelled' | 'expired';
 export type PatunganPaymentStatus = 'unpaid' | 'menunggu' | 'diverifikasi' | 'ditolak';
+export type PatunganInviteStatus = 'pending' | 'accepted' | 'declined';
 
 export interface PatunganMember {
 	userId: number;
 	username: string;
 	name: string;
 	position: number;
+	inviteStatus: PatunganInviteStatus;
 	shareAmount: number;
 	paymentStatus: PatunganPaymentStatus;
 	paidAt: string | null;
@@ -34,6 +36,10 @@ export interface PatunganGroupDetail {
 	cancelReason: string | null;
 	completedAt: string | null;
 	createdAt: string;
+	/** Batas terima/bayar; null = grup lama. */
+	expiresAt: string | null;
+	/** True bila semua anggota aktif sudah menerima undangan (iuran boleh dibayar). */
+	locked: boolean;
 	members: PatunganMember[];
 }
 
@@ -44,6 +50,10 @@ export interface PatunganGroupSummary {
 	memberCount: number;
 	priceNominal: number;
 	paidCount: number;
+	inviteStatus: PatunganInviteStatus;
+	myPaymentStatus: PatunganPaymentStatus;
+	myShare: number;
+	expiresAt: string | null;
 	createdAt: string;
 	completedAt: string | null;
 	courseId: number;
@@ -121,6 +131,19 @@ export interface CancelPatunganResult {
 		paymentStatus: PatunganPaymentStatus;
 		paymentId: number | null;
 	}>;
+}
+
+/** Terima undangan grup patungan. */
+export function acceptPatunganInvite(groupId: number): Promise<PatunganGroupDetail> {
+	return authed(`/patungan/groups/${groupId}/accept`, 'POST', {});
+}
+
+/** Tolak undangan grup patungan (tanpa tambah anggota baru; iuran dihitung ulang). */
+export function declinePatunganInvite(groupId: number): Promise<{
+	cancelled: boolean;
+	group: PatunganGroupDetail;
+}> {
+	return authed(`/patungan/groups/${groupId}/decline`, 'POST', {});
 }
 
 /** Batal grup (pembuat selama belum ada iuran / admin). */

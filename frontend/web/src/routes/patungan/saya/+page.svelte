@@ -50,7 +50,7 @@
 <main class="bg-ice/60">
 	<div class="mx-auto max-w-3xl px-4 py-10 sm:px-6 lg:px-8 lg:py-14">
 		<nav aria-label="Kembali" class="mb-6">
-			<a href={resolve('/promo#patungan')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-royal hover:text-royal-hover">
+			<a href={resolve('/promo/patungan')} class="inline-flex min-h-[44px] items-center gap-2 font-heading text-sm font-bold text-royal hover:text-royal-hover">
 				<i class="fa-solid fa-arrow-left text-xs" aria-hidden="true"></i> Kembali ke Promo
 			</a>
 		</nav>
@@ -95,7 +95,7 @@
 				<div class="rounded-2xl border border-dashed border-mist bg-white p-12 text-center">
 					<p class="font-heading text-sm font-bold text-abyss">Belum ada grup patungan.</p>
 					<p class="mx-auto mt-1 max-w-md text-sm text-slate-500">Buat grup baru dari halaman promo patungan.</p>
-					<a href={resolve('/promo#patungan')} class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-6 py-2.5 font-heading text-xs font-bold text-white hover:bg-royal-hover">
+					<a href={resolve('/promo/patungan')} class="mt-4 inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-6 py-2.5 font-heading text-xs font-bold text-white hover:bg-royal-hover">
 						Lihat promo patungan
 					</a>
 				</div>
@@ -111,8 +111,13 @@
 											<span class="rounded-md bg-amber-100 px-2 py-0.5 font-heading text-[10px] font-bold tracking-wider text-amber-800 uppercase">Pending · {g.paidCount}/{g.memberCount}</span>
 										{:else if g.status === 'complete'}
 											<span class="rounded-md bg-emerald-100 px-2 py-0.5 font-heading text-[10px] font-bold tracking-wider text-emerald-800 uppercase">Complete</span>
+										{:else if g.status === 'expired'}
+											<span class="rounded-md bg-slate-100 px-2 py-0.5 font-heading text-[10px] font-bold tracking-wider text-slate-600 uppercase">Kedaluwarsa</span>
 										{:else}
 											<span class="rounded-md bg-slate-100 px-2 py-0.5 font-heading text-[10px] font-bold tracking-wider text-slate-600 uppercase">Dibatalkan</span>
+										{/if}
+										{#if g.inviteStatus === 'pending' && g.status === 'pending'}
+											<span class="rounded-md bg-royal px-2 py-0.5 font-heading text-[10px] font-bold tracking-wider text-white uppercase">Undangan — perlu jawaban</span>
 										{/if}
 									</div>
 									<p class="mt-1 truncate font-heading text-base font-bold text-abyss group-hover:text-teal">{g.courseTitle ?? `Kursus #${g.courseId}`}</p>

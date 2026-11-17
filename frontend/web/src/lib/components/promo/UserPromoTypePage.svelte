@@ -3,18 +3,23 @@
 	import { resolve } from '$app/paths';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
-	import { fetchPromos, type PromoCampaign } from '$lib/api/promos';
+	import { fetchPromos, PROMO_TYPES, promoTypeMeta, type PromoCampaign, type PromoType } from '$lib/api/promos';
 	import { fetchMyEnrollments } from '$lib/api/progress';
 	import { formatIDR } from '$lib/data/payment';
 
 	/**
-	 * Etalase promo untuk peserta: kampanye aktif kurasi admin + harga coret
+	 * Etalase promo peserta per jenis: kampanye aktif dari server + harga coret
 	 * server + tombol beli. Diskon diterapkan OTOMATIS di pembayaran
 	 * (server sumber kebenaran; klien hanya cermin) — tanpa kode kupon.
+	 * Kampanye admin baru otomatis tampil tanpa ubah kode.
 	 */
 
+	let { type }: { type: PromoType } = $props();
+
+	const meta = $derived(promoTypeMeta(type));
+
 	const COVER_FALLBACK =
-		'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=800&q=80';
+		'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=600&q=80';
 
 	let promos = $state<PromoCampaign[]>([]);
 	let enrolledIds = $state(new Set<number>());
@@ -41,7 +46,7 @@
 				fetchMyEnrollments().catch(() => [])
 			]);
 			if (my !== loadSeq) return;
-			promos = camps.filter((c) => c.courses.length > 0);
+			promos = camps.filter((c) => c.type === type && c.courses.length > 0);
 			enrolledIds = new Set(enr.map((e) => e.courseId));
 		} catch (e) {
 			if (my !== loadSeq) return;
@@ -61,21 +66,33 @@
 </script>
 
 <svelte:head>
-	<title>Promo — Aristoteles Platform</title>
+	<title>{meta.title} — Promo — Aristoteles Platform</title>
 	<meta
 		name="description"
-		content="Promo kursus aktif untuk peserta: diskon otomatis saat pembayaran, tanpa kode kupon."
+		content={`${meta.title}: ${meta.description} Diskon diterapkan otomatis saat pembayaran.`}
 	/>
 </svelte:head>
 
 <div class="page-wrap page-stack">
 	<PageHeader
 		eyebrow="Menu Utama · Promo"
-		title="Promo"
+		title={meta.title}
 		description={loading
 			? 'Memuat promo aktif…'
-			: `${promos.length} kampanye · ${totalCourses} kursus diskon. Diskon diterapkan otomatis saat pembayaran.`}
-	/>
+			: `${promos.length} kampanye · ${totalCourses} kursus. ${meta.description}`}
+	>
+		{#snippet actions()}
+			{#each PROMO_TYPES.filter((t) => t.type !== type) as t (t.type)}
+				<a
+					href={resolve(`/user/promo/${t.slug}`)}
+					class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+				>
+					<i class={`fa-solid ${t.slug === 'diskon' ? 'fa-bolt' : t.slug === 'kurasi' ? 'fa-star' : 'fa-people-group'}`} aria-hidden="true"></i>
+					{t.title}
+				</a>
+			{/each}
+		{/snippet}
+	</PageHeader>
 
 	{#if loading}
 		<div class="grid grid-cols-1 gap-5 md:grid-cols-2" aria-label="Memuat promo">
@@ -105,8 +122,8 @@
 		<div class="rounded-2xl border border-dashed border-slate-300 bg-white">
 			<EmptyState
 				icon="fa-tags"
-				title="Belum ada promo aktif"
-				description="Saat ini tidak ada kampanye diskon. Jelajahi katalog atau tukarkan kode voucher di Kursusku."
+				title={`Belum ada ${meta.title.toLowerCase()} aktif`}
+				description="Saat ini tidak ada kampanye jenis ini. Jelajahi katalog atau tukarkan kode voucher di Kursusku."
 			>
 				{#snippet actions()}
 					<a
