@@ -70,7 +70,13 @@ export const users = mysqlTable("users", {
   isActive: boolean("is_active").notNull().default(true),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
+},
+  (table) => ({
+    // Filter daftar admin: role / isActive (admin.service.ts).
+    userRoleIdx: index("users_role_idx").on(table.role),
+    userActiveIdx: index("users_is_active_idx").on(table.isActive),
+  })
+);
 
 // Sesi refresh untuk klien mobile (Flutter): token opaque sekali pakai
 // (rotasi), hanya hash SHA-256 yang disimpan — mirip undangan instruktur.
@@ -98,6 +104,11 @@ export const refreshTokens = mysqlTable(
   },
   (table) => ({
     refreshUserIdx: index("refresh_tokens_user_idx").on(table.userId),
+    // Hot path mobile: userId + belum dicabut (refresh.service.ts).
+    refreshUserRevokedIdx: index("refresh_tokens_user_revoked_idx").on(
+      table.userId,
+      table.revokedAt
+    ),
   })
 );
 
@@ -128,6 +139,10 @@ export const instructorInvitations = mysqlTable(
   },
   (table) => ({
   emailIdx: index("instructor_invitations_email_idx").on(table.email),
+  // Daftar admin filter status (invitation.service.ts listInvitations).
+  invitationStatusIdx: index("instructor_invitations_status_idx").on(
+    table.status
+  ),
 })
 );
 
@@ -161,7 +176,17 @@ export const courses = mysqlTable("courses", {
   }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
+},
+(table) => ({
+  // Katalog + dasbor: filter status/kategori/pemilik (course.service.ts).
+  courseStatusIdx: index("courses_status_idx").on(table.status),
+  courseCategoryIdx: index("courses_category_idx").on(table.category),
+  courseCreatedByIdx: index("courses_created_by_idx").on(table.createdBy),
+  courseStatusCategoryIdx: index("courses_status_category_idx").on(
+    table.status,
+    table.category
+  ),
+}));
 
 // Kategori kursus yang dikelola admin (sumber kebenaran dropdown/filter).
 // `courses.category` menyimpan NAMA kategori (varchar, tanpa FK) agar kursus
@@ -211,6 +236,10 @@ export const courseInstructors = mysqlTable(
     pk: primaryKey({
       columns: [table.courseId, table.userId],
     }),
+    // Arah sebaliknya: kursus per instruktur (listMyCourses, dasbor).
+    courseInstructorUserIdx: index("course_instructors_user_idx").on(
+      table.userId
+    ),
   })
 );
 
@@ -247,7 +276,10 @@ export const subModules = mysqlTable("sub_modules", {
   position: int("position").notNull(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
-});
+},
+(table) => ({
+  subModuleIdx: index("sub_modules_module_idx").on(table.moduleId),
+}));
 
 export const materials = mysqlTable("materials", {
   id: int("id").autoincrement().primaryKey(),
@@ -289,6 +321,7 @@ export const materials = mysqlTable("materials", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
 }, (table) => ({
   moduleIdx: index("materials_module_idx").on(table.moduleId),
+  materialSubModuleIdx: index("materials_submodule_idx").on(table.subModuleId),
 }));
 
 // Metadata berkas yang disimpan di disk server (Opsi A).
@@ -328,7 +361,11 @@ export const files = mysqlTable("files", {
   url: varchar("url", { length: 500 }).notNull(),
   sha256: varchar("sha256", { length: 64 }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+},
+(table) => ({
+  // Lookup berkas per pemilik (profil, unggahan saya).
+  fileOwnerIdx: index("files_owner_idx").on(table.ownerUserId),
+}));
 
 // Varian responsif gambar hasil optimasi (untuk srcset frontend).
 // Satu baris per lebar: file turunan dari `files` yang sama, dihapus
@@ -572,6 +609,8 @@ export const submissions = mysqlTable(
       table.materialId,
       table.userId
     ),
+    // Riwayat per peserta + antrean nilai per materi (dashboard, certificates).
+    submissionUserIdx: index("submissions_user_idx").on(table.userId),
   })
 );
 
@@ -635,6 +674,10 @@ export const vouchers = mysqlTable(
   },
   (table) => ({
     courseIdx: index("vouchers_course_idx").on(table.courseId),
+    // Filter daftar admin (voucher.service.ts): status / kind / assigned.
+    voucherStatusIdx: index("vouchers_status_idx").on(table.status),
+    voucherKindIdx: index("vouchers_kind_idx").on(table.kind),
+    voucherAssignedIdx: index("vouchers_assigned_idx").on(table.assignedUserId),
   })
 );
 
@@ -668,6 +711,11 @@ export const voucherRedemptions = mysqlTable(
       table.voucherCode,
       table.userId
     ),
+    // Laporan admin per kursus + riwayat per peserta.
+    redemptionCourseIdx: index("voucher_redemptions_course_idx").on(
+      table.courseId
+    ),
+    redemptionUserIdx: index("voucher_redemptions_user_idx").on(table.userId),
   })
 );
 
@@ -745,6 +793,15 @@ export const payments = mysqlTable(
     paymentPatunganGroupIdx: index("payments_patungan_group_idx").on(
       table.patunganGroupId
     ),
+    // Antrean admin (status / kursus) + daftar milik sendiri (userId+status).
+    paymentStatusIdx: index("payments_status_idx").on(table.status),
+    paymentCourseIdx: index("payments_course_idx").on(table.courseId),
+    paymentUserStatusIdx: index("payments_user_status_idx").on(
+      table.userId,
+      table.status
+    ),
+    // Rekonsiliasi promo patungan (promo.service.ts).
+    paymentPromoSlugIdx: index("payments_promo_slug_idx").on(table.promoSlug),
   })
 );
 
@@ -762,7 +819,16 @@ export const auditLogs = mysqlTable("audit_logs", {
   targetIdStr: varchar("target_id_str", { length: 100 }),
   metadata: json("metadata").$type<Record<string, unknown>>(),
   createdAt: timestamp("created_at").defaultNow().notNull(),
-});
+},
+(table) => ({
+  // Riwayat kurikulum per materi + filter aksi/aktor (curricula.service.ts).
+  auditActionIdx: index("audit_logs_action_idx").on(table.action),
+  auditActorIdx: index("audit_logs_actor_idx").on(table.actorUserId),
+  auditTargetIdx: index("audit_logs_target_idx").on(
+    table.targetType,
+    table.targetIdInt
+  ),
+}));
 
 // Sertifikat per modul (K-05) + satu baris per (peserta, kursus) untuk
 // sertifikat tingkat kursus (moduleId NULL; terbit bila semua modul tuntas).
@@ -838,13 +904,17 @@ export const certificates = mysqlTable(
       table.moduleId
     ),
     // Optimasi baca instruktur: filter courseId+status (riwayat/summary) dan moduleId.
-    // Perlu `drizzle-kit generate` + migrasi agar aktif di DB (tanpa migrasi hanya dokumen).
     courseStatusIdx: index("certificates_course_status_idx").on(
       table.courseId,
       table.status
     ),
     moduleIdx: index("certificates_module_idx").on(table.moduleId),
     issuedIdx: index("certificates_issued_idx").on(table.issuedAt),
+    // Sertifikat milik peserta per kursus (profil / verifikasi kelulusan).
+    certificateUserCourseIdx: index("certificates_user_course_idx").on(
+      table.userId,
+      table.courseId
+    ),
   })
 );
 
@@ -913,7 +983,10 @@ export const instructorApplications = mysqlTable(
   },
   (table) => ({
     emailIdx: index("instructor_applications_email_idx").on(table.email),
-    statusIdx: index("instructor_applications_status_idx").on(table.status),
+    // Antrean admin: filter status + urut terbaru (application.service.ts).
+    applicationStatusCreatedIdx: index(
+      "instructor_applications_status_created_idx"
+    ).on(table.status, table.createdAt),
   })
 );
 
@@ -959,6 +1032,8 @@ export const promoCampaigns = mysqlTable(
   },
   (table) => ({
     promoStatusIdx: index("promo_campaigns_status_idx").on(table.status),
+    // Filter tipe patungan + status aktif (patungan.service.ts).
+    promoTypeIdx: index("promo_campaigns_type_idx").on(table.type),
   })
 );
 
@@ -1036,6 +1111,14 @@ export const promoCourseProposals = mysqlTable(
     proposalStatusIdx: index("promo_proposals_status_idx").on(table.status),
     proposalCourseIdx: index("promo_proposals_course_idx").on(table.courseId),
     proposalCampaignIdx: index("promo_proposals_campaign_idx").on(table.campaignId),
+    // Antrean "usulan saya" per instruktur + filter kampanye+status.
+    proposalProposedByIdx: index("promo_proposals_proposed_by_idx").on(
+      table.proposedBy
+    ),
+    proposalCampaignStatusIdx: index("promo_proposals_campaign_status_idx").on(
+      table.campaignId,
+      table.status
+    ),
   })
 );
 
@@ -1061,9 +1144,12 @@ export const patunganGroups = mysqlTable(
     memberCount: int("member_count").notNull(),
     // Snapshot nominal kursus saat grup dibuat (iuran dihitung dari ini).
     priceNominal: int("price_nominal").notNull(),
-    status: mysqlEnum("status", ["pending", "complete", "cancelled"])
+    status: mysqlEnum("status", ["pending", "complete", "cancelled", "expired"])
       .notNull()
       .default("pending"),
+    // Batas waktu fase pending (dibuat + 3x24 jam). Lewat batas → expired
+    // otomatis (lazy saat dibaca); slot anggota bebas ikut grup lain.
+    expiresAt: timestamp("expires_at"),
     createdBy: int("created_by").references(() => users.id, {
       onDelete: "set null",
       onUpdate: "cascade",
@@ -1080,12 +1166,20 @@ export const patunganGroups = mysqlTable(
   (table) => ({
     patunganGroupCourseIdx: index("patungan_groups_course_idx").on(table.courseId),
     patunganGroupStatusIdx: index("patungan_groups_status_idx").on(table.status),
+    // Rekonsiliasi kuota kampanye (promo.service.ts): slug + status.
+    patunganGroupPromoSlugIdx: index("patungan_groups_promo_slug_idx").on(
+      table.promoSlug,
+      table.status
+    ),
   })
 );
 
 // Anggota grup patungan. `position` 0 = pembuat grup.
+// `inviteStatus`: pending (diundang) → accepted (boleh bayar) | declined (keluar).
+// Pembuat otomatis accepted. Tolak hanya bisa sebelum ada iuran masuk;
+// nominal iuran dihitung ulang dari anggota aktif (non-declined).
 // `paymentStatus`: unpaid → menunggu (bukti diunggah) → diverifikasi/ditolak.
-// Grup complete hanya bila SEMUA anggota diverifikasi.
+// Grup complete hanya bila SEMUA anggota aktif diverifikasi.
 export const patunganGroupMembers = mysqlTable(
   "patungan_group_members",
   {
@@ -1102,6 +1196,9 @@ export const patunganGroupMembers = mysqlTable(
         onUpdate: "cascade",
       }),
     position: int("position").notNull().default(0),
+    inviteStatus: mysqlEnum("invite_status", ["pending", "accepted", "declined"])
+      .notNull()
+      .default("pending"),
     // Iuran anggota ini (total habis dibagi; jumlah = priceNominal grup).
     shareAmount: int("share_amount").notNull(),
     paymentStatus: mysqlEnum("payment_status", [
@@ -1121,5 +1218,9 @@ export const patunganGroupMembers = mysqlTable(
   (table) => ({
     pk: primaryKey({ columns: [table.groupId, table.userId] }),
     patunganMemberUserIdx: index("patungan_members_user_idx").on(table.userId),
+    // Cek kelengkapan grup: semua anggota diverifikasi (patungan.service.ts).
+    patunganMemberGroupPaymentIdx: index(
+      "patungan_members_group_payment_idx"
+    ).on(table.groupId, table.paymentStatus),
   })
 );

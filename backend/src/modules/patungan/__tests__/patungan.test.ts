@@ -1,5 +1,5 @@
 import "./test-env";
-import { after, before, describe, it } from "node:test";
+import { after, before, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import path from "node:path";
@@ -12,6 +12,7 @@ import { and, eq } from "drizzle-orm";
 import { db, pool } from "../../../db/index";
 import * as schema from "../../../db/schema";
 import app from "../../../app";
+import { resetRateLimitForTest } from "../../../middlewares/rate-limit.middleware";
 
 /**
  * Grup patungan end-to-end: username tervalidasi, iuran sendiri-sendiri,
@@ -42,6 +43,10 @@ const usernames: Record<string, string> = {
   m2: "anggota.dua",
   m3: "anggota.tiga",
   outsider: "orang.luar",
+  uKetua: "ketua.undang",
+  uA: "tamu.satu",
+  uB: "tamu.dua",
+  uC: "tamu.tiga",
 };
 
 async function api<T>(
@@ -80,11 +85,14 @@ interface GroupDetail {
   memberCount: number;
   priceNominal: number;
   paidCount: number;
+  locked?: boolean;
+  expiresAt?: string | null;
   members: Array<{
     userId: number;
     username: string;
     name: string;
     position: number;
+    inviteStatus?: string;
     shareAmount: number;
     paymentStatus: string;
   }>;
@@ -120,6 +128,10 @@ before(async () => {
   ids.m2 = await mkUser("Anggota Dua", usernames.m2, "m2@patungan.io", "student");
   ids.m3 = await mkUser("Anggota Tiga", usernames.m3, "m3@patungan.io", "student");
   ids.outsider = await mkUser("Orang Luar", usernames.outsider, "luar@patungan.io", "student");
+  ids.uKetua = await mkUser("Ketua Undang", usernames.uKetua, "ketua@undang.io", "student");
+  ids.uA = await mkUser("Tamu Satu", usernames.uA, "tamu1@undang.io", "student");
+  ids.uB = await mkUser("Tamu Dua", usernames.uB, "tamu2@undang.io", "student");
+  ids.uC = await mkUser("Tamu Tiga", usernames.uC, "tamu3@undang.io", "student");
 
   const mkCourse = async (title: string, price: number) => {
     const [c] = await db.insert(schema.courses).values({
@@ -153,6 +165,10 @@ before(async () => {
     m2: "m2@patungan.io",
     m3: "m3@patungan.io",
     outsider: "luar@patungan.io",
+    uKetua: "ketua@undang.io",
+    uA: "tamu1@undang.io",
+    uB: "tamu2@undang.io",
+    uC: "tamu3@undang.io",
   })) {
     tokens[key] = await login(email);
   }
@@ -341,6 +357,24 @@ describe("patungan: bayar sendiri-sendiri + lunas semua baru akses", () => {
     groupId = g2.json.data.id;
     for (const m of g2.json.data.members) shares[m.username] = m.shareAmount;
 
+    // Alur baru: undangan harus diterima dulu; bayar sebelum terkunci ditolak.
+    const earlyPay = await api(
+      "POST",
+      `/api/v1/courses/${ids.paid}/payments`,
+      tokens.outsider,
+      { patunganGroupId: groupId }
+    );
+    assert.equal(earlyPay.http, 403);
+    assert.equal(earlyPay.json.code, "GROUP_NOT_LOCKED");
+
+    const acceptM3 = await api("POST", `/api/v1/patungan/groups/${groupId}/accept`, tokens.m3);
+    assert.equal(acceptM3.http, 200, JSON.stringify(acceptM3.json));
+    const locked = acceptM3.json.data as GroupDetail;
+    assert.equal(
+      locked.members.find((m) => m.username === usernames.m3)?.inviteStatus,
+      "accepted"
+    );
+
     const pay = await api<PaymentRow>(
       "POST",
       `/api/v1/courses/${ids.paid}/payments`,
@@ -454,6 +488,9 @@ describe("patungan: batal grup", () => {
     assert.equal(g3.http, 201, JSON.stringify(g3.json));
 
     // Masukkan iuran menunggu, lalu pembuat tidak boleh cancel sendiri.
+    // m1 terima undangan dulu (syarat kunci grup sebelum bayar).
+    const acceptM1 = await api("POST", `/api/v1/patungan/groups/${g3.json.data.id}/accept`, tokens.m1);
+    assert.equal(acceptM1.http, 200, JSON.stringify(acceptM1.json));
     const pay = await api<PaymentRow>("POST", `/api/v1/courses/${ids.paid}/payments`, tokens.m1, {
       patunganGroupId: g3.json.data.id,
     });
@@ -551,5 +588,146 @@ describe("patungan: harga khusus promo (override)", () => {
     assert.equal(g.http, 201, JSON.stringify(g.json));
     assert.equal(g.json.data.priceNominal, 90000);
     assert.equal(g.json.data.members.reduce((a, m) => a + m.shareAmount, 0), 90000);
+  });
+});
+
+describe("patungan: terima/tolak undangan + kunci grup", () => {
+  beforeEach(() => resetRateLimitForTest());
+  let groupId = 0;
+
+  it("undangan baru berstatus pending; pembuat accepted", async () => {
+    const r = await api<GroupDetail>("POST", "/api/v1/patungan/groups", tokens.uKetua, {
+      courseId: ids.paid,
+      usernames: [usernames.uA, usernames.uB],
+    });
+    assert.equal(r.http, 201, JSON.stringify(r.json));
+    groupId = r.json.data.id;
+    const byName = new Map(r.json.data.members.map((m) => [m.username, m]));
+    assert.equal(byName.get(usernames.uKetua)?.inviteStatus, "accepted");
+    assert.equal(byName.get(usernames.uA)?.inviteStatus, "pending");
+    assert.equal(byName.get(usernames.uB)?.inviteStatus, "pending");
+    assert.equal(r.json.data.locked, false);
+    assert.ok(r.json.data.expiresAt, "expiresAt harus diset");
+  });
+
+  it("bukan anggota tidak bisa terima undangan", async () => {
+    const r = await api("POST", `/api/v1/patungan/groups/${groupId}/accept`, tokens.uC);
+    assert.equal(r.http, 403);
+  });
+
+  it("terima undangan mengubah status; tolak menghitung ulang iuran", async () => {
+    const a1 = await api<GroupDetail>("POST", `/api/v1/patungan/groups/${groupId}/accept`, tokens.uA);
+    assert.equal(a1.http, 200, JSON.stringify(a1.json));
+    assert.equal(
+      (a1.json.data.members as GroupDetail["members"]).find((m) => m.username === usernames.uA)?.inviteStatus,
+      "accepted"
+    );
+
+    const d2 = await api<{
+      cancelled: boolean;
+      group: GroupDetail;
+    }>("POST", `/api/v1/patungan/groups/${groupId}/decline`, tokens.uB);
+    assert.equal(d2.http, 200, JSON.stringify(d2.json));
+    assert.equal(d2.json.data.cancelled, false);
+    const members = d2.json.data.group.members;
+    assert.equal(members.find((m) => m.username === usernames.uB)?.inviteStatus, "declined");
+    // 150000 / 2 anggota aktif = 75000 per orang.
+    const active = members.filter((m) => m.inviteStatus !== "declined");
+    assert.equal(active.length, 2);
+    for (const m of active) assert.equal(m.shareAmount, 75000);
+    assert.equal(d2.json.data.group.locked, true);
+    const sum = active.reduce((a, m) => a + m.shareAmount, 0);
+    assert.equal(sum, 150000);
+  });
+
+  it("jawab dua kali ditolak", async () => {
+    const again = await api("POST", `/api/v1/patungan/groups/${groupId}/accept`, tokens.uA);
+    assert.equal(again.http, 409);
+    assert.equal(again.json.code, "INVITE_DECIDED");
+  });
+
+  it("rapikan grup uji (batal; belum ada iuran)", async () => {
+    const c = await api("POST", `/api/v1/patungan/groups/${groupId}/cancel`, tokens.uKetua, {
+      reason: "rapikan uji",
+    });
+    assert.equal(c.http, 200);
+  });
+});
+
+describe("patungan: tolak hingga kurang dari 2 → auto-cancel", () => {
+  beforeEach(() => resetRateLimitForTest());
+  it("grup bubar otomatis dan bisa bikin baru lagi", async () => {
+    const r = await api<GroupDetail>("POST", "/api/v1/patungan/groups", tokens.uA, {
+      courseId: ids.paid,
+      usernames: [usernames.uB],
+    });
+    assert.equal(r.http, 201, JSON.stringify(r.json));
+    const gid = r.json.data.id;
+
+    const d = await api<{ cancelled: boolean; group: GroupDetail }>(
+      "POST",
+      `/api/v1/patungan/groups/${gid}/decline`,
+      tokens.uB
+    );
+    assert.equal(d.http, 200, JSON.stringify(d.json));
+    assert.equal(d.json.data.cancelled, true);
+    assert.equal(d.json.data.group.status, "cancelled");
+  });
+});
+
+describe("patungan: kedaluwarsa grup pending", () => {
+  beforeEach(() => resetRateLimitForTest());
+  let groupId = 0;
+
+  it("grup lewat batas menjadi expired; terima & bayar ditolak 410", async () => {
+    const r = await api<GroupDetail>("POST", "/api/v1/patungan/groups", tokens.uB, {
+      courseId: ids.paid,
+      usernames: [usernames.uA],
+    });
+    assert.equal(r.http, 201, JSON.stringify(r.json));
+    groupId = r.json.data.id;
+
+    await db
+      .update(schema.patunganGroups)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.patunganGroups.id, groupId));
+
+    const detail = await api<GroupDetail>("GET", `/api/v1/patungan/groups/${groupId}`, tokens.uB);
+    assert.equal(detail.http, 200);
+    assert.equal(detail.json.data.status, "expired");
+
+    const accept = await api("POST", `/api/v1/patungan/groups/${groupId}/accept`, tokens.uA);
+    assert.equal(accept.http, 410);
+    assert.equal(accept.json.code, "GROUP_EXPIRED");
+
+    const pay = await api("POST", `/api/v1/courses/${ids.paid}/payments`, tokens.uB, {
+      patunganGroupId: groupId,
+    });
+    assert.equal(pay.http, 410);
+    assert.equal(pay.json.code, "GROUP_EXPIRED");
+  });
+});
+
+describe("patungan: tolak dikunci setelah ada iuran", () => {
+  beforeEach(() => resetRateLimitForTest());
+  it("anggota tidak bisa keluar bila iuran sudah masuk", async () => {
+    const r = await api<GroupDetail>("POST", "/api/v1/patungan/groups", tokens.uKetua, {
+      courseId: ids.paid,
+      usernames: [usernames.uC],
+    });
+    assert.equal(r.http, 201, JSON.stringify(r.json));
+    const gid = r.json.data.id;
+
+    const a = await api("POST", `/api/v1/patungan/groups/${gid}/accept`, tokens.uC);
+    assert.equal(a.http, 200);
+
+    const pay = await api<PaymentRow>("POST", `/api/v1/courses/${ids.paid}/payments`, tokens.uKetua, {
+      patunganGroupId: gid,
+    });
+    assert.equal(pay.http, 201, JSON.stringify(pay.json));
+
+    const d = await api("POST", `/api/v1/patungan/groups/${gid}/decline`, tokens.uC);
+    assert.equal(d.http, 403);
+    assert.equal(d.json.code, "DECLINE_LOCKED");
   });
 });

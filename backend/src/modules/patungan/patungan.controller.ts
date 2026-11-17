@@ -6,9 +6,11 @@ import { AuthenticatedRequest } from "../../middlewares/auth.middleware";
 import { normalizeUsername } from "../../utils/username";
 import {
   PatunganError,
+  acceptInvite,
   cancelGroupSchema,
   cancelPatunganGroup,
   createPatunganGroup,
+  declineInvite,
   getPatunganGroupDetail,
   listMyPatunganGroups,
   resolveGroupMembers,
@@ -185,6 +187,47 @@ export const detailHandler = async (req: AuthenticatedRequest, res: Response, ne
     next(e);
   }
 };
+
+// ---------- Terima / tolak undangan ----------
+
+const inviteAction = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+  kind: "accept" | "decline"
+) => {
+  try {
+    const me = uid(req);
+    if (me === null) {
+      res.status(401).json({ status: "error", message: "Token autentikasi diperlukan", data: null });
+      return;
+    }
+    const groupId = Number(req.params.id);
+    if (!Number.isInteger(groupId) || groupId <= 0) {
+      res.status(404).json({ status: "error", message: "Grup patungan tidak ditemukan", data: null });
+      return;
+    }
+    const role = typeof req.user?.role === "string" ? req.user.role : "student";
+    const data =
+      kind === "accept"
+        ? await acceptInvite(me, groupId, role)
+        : await declineInvite(me, groupId, role);
+    res.status(200).json({
+      status: "success",
+      message: kind === "accept" ? "Undangan patungan diterima" : "Undangan patungan ditolak",
+      data,
+    });
+  } catch (e) {
+    if (patunganError(res, e)) return;
+    next(e);
+  }
+};
+
+export const acceptHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) =>
+  inviteAction(req, res, next, "accept");
+
+export const declineHandler = async (req: AuthenticatedRequest, res: Response, next: NextFunction) =>
+  inviteAction(req, res, next, "decline");
 
 // ---------- Batal grup ----------
 

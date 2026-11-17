@@ -6,8 +6,10 @@ import {
 } from "../../middlewares/rate-limit.middleware";
 import {
   adminCancelHandler,
+  acceptHandler,
   cancelHandler,
   createHandler,
+  declineHandler,
   detailHandler,
   myGroupsHandler,
   validateHandler,
@@ -26,5 +28,8 @@ router.get("/patungan/groups/:id", authenticate, detailHandler);
 // Batal: pembuat (selama belum ada iuran masuk) atau admin.
 router.post("/patungan/groups/:id/cancel", authenticate, patunganSubmitLimiter(), cancelHandler);
 router.post("/admin/patungan/groups/:id/cancel", ...admin, adminCancelHandler);
+// Terima / tolak undangan (anggota yang diundang).
+router.post("/patungan/groups/:id/accept", authenticate, patunganSubmitLimiter(), acceptHandler);
+router.post("/patungan/groups/:id/decline", authenticate, patunganSubmitLimiter(), declineHandler);
 
 export default router;

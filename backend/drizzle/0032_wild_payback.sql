@@ -1,0 +1,33 @@
+DROP INDEX `instructor_applications_status_idx` ON `instructor_applications`;--> statement-breakpoint
+CREATE INDEX `audit_logs_action_idx` ON `audit_logs` (`action`);--> statement-breakpoint
+CREATE INDEX `audit_logs_actor_idx` ON `audit_logs` (`actor_user_id`);--> statement-breakpoint
+CREATE INDEX `audit_logs_target_idx` ON `audit_logs` (`target_type`,`target_id_int`);--> statement-breakpoint
+CREATE INDEX `certificates_user_course_idx` ON `certificates` (`user_id`,`course_id`);--> statement-breakpoint
+CREATE INDEX `course_instructors_user_idx` ON `course_instructors` (`user_id`);--> statement-breakpoint
+CREATE INDEX `courses_status_idx` ON `courses` (`status`);--> statement-breakpoint
+CREATE INDEX `courses_category_idx` ON `courses` (`category`);--> statement-breakpoint
+CREATE INDEX `courses_created_by_idx` ON `courses` (`created_by`);--> statement-breakpoint
+CREATE INDEX `courses_status_category_idx` ON `courses` (`status`,`category`);--> statement-breakpoint
+CREATE INDEX `files_owner_idx` ON `files` (`owner_user_id`);--> statement-breakpoint
+CREATE INDEX `instructor_applications_status_created_idx` ON `instructor_applications` (`status`,`created_at`);--> statement-breakpoint
+CREATE INDEX `instructor_invitations_status_idx` ON `instructor_invitations` (`status`);--> statement-breakpoint
+CREATE INDEX `materials_submodule_idx` ON `materials` (`sub_module_id`);--> statement-breakpoint
+CREATE INDEX `patungan_members_group_payment_idx` ON `patungan_group_members` (`group_id`,`payment_status`);--> statement-breakpoint
+CREATE INDEX `patungan_groups_promo_slug_idx` ON `patungan_groups` (`promo_slug`,`status`);--> statement-breakpoint
+CREATE INDEX `payments_status_idx` ON `payments` (`status`);--> statement-breakpoint
+CREATE INDEX `payments_course_idx` ON `payments` (`course_id`);--> statement-breakpoint
+CREATE INDEX `payments_user_status_idx` ON `payments` (`user_id`,`status`);--> statement-breakpoint
+CREATE INDEX `payments_promo_slug_idx` ON `payments` (`promo_slug`);--> statement-breakpoint
+CREATE INDEX `promo_campaigns_type_idx` ON `promo_campaigns` (`type`);--> statement-breakpoint
+CREATE INDEX `promo_proposals_proposed_by_idx` ON `promo_course_proposals` (`proposed_by`);--> statement-breakpoint
+CREATE INDEX `promo_proposals_campaign_status_idx` ON `promo_course_proposals` (`campaign_id`,`status`);--> statement-breakpoint
+CREATE INDEX `refresh_tokens_user_revoked_idx` ON `refresh_tokens` (`user_id`,`revoked_at`);--> statement-breakpoint
+CREATE INDEX `sub_modules_module_idx` ON `sub_modules` (`module_id`);--> statement-breakpoint
+CREATE INDEX `submissions_user_idx` ON `submissions` (`user_id`);--> statement-breakpoint
+CREATE INDEX `users_role_idx` ON `users` (`role`);--> statement-breakpoint
+CREATE INDEX `users_is_active_idx` ON `users` (`is_active`);--> statement-breakpoint
+CREATE INDEX `voucher_redemptions_course_idx` ON `voucher_redemptions` (`course_id`);--> statement-breakpoint
+CREATE INDEX `voucher_redemptions_user_idx` ON `voucher_redemptions` (`user_id`);--> statement-breakpoint
+CREATE INDEX `vouchers_status_idx` ON `vouchers` (`status`);--> statement-breakpoint
+CREATE INDEX `vouchers_kind_idx` ON `vouchers` (`kind`);--> statement-breakpoint
+CREATE INDEX `vouchers_assigned_idx` ON `vouchers` (`assigned_user_id`);

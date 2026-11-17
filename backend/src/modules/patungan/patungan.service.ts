@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, ne } from "drizzle-orm";
 import { db } from "../../db";
 import {
   auditLogs,
@@ -57,6 +57,12 @@ export const cancelGroupSchema = z
     reason: z.string().trim().max(500).optional(),
   })
   .strict();
+
+/** Masa berlaku grup pending: dibuat + 3x24 jam. Lewat batas → expired (lazy). */
+export const PATUNGAN_EXPIRY_MS = 3 * 24 * 3600 * 1000;
+
+export type PatunganInviteStatus = "pending" | "accepted" | "declined";
+export type PatunganGroupStatus = "pending" | "complete" | "cancelled" | "expired";
 
 // ---------- Kampanye patungan aktif untuk satu kursus ----------
 
@@ -239,7 +245,7 @@ export const resolveGroupMembers = async (
     );
   }
 
-  // Satu user maksimal di satu grup non-selesai per kursus.
+  // Satu user maksimal di satu grup non-selesai per kursus (undangan aktif saja).
   const busy = await db
     .select({ userId: patunganGroupMembers.userId })
     .from(patunganGroupMembers)
@@ -248,6 +254,7 @@ export const resolveGroupMembers = async (
       and(
         eq(patunganGroups.courseId, courseId),
         eq(patunganGroups.status, "pending"),
+        ne(patunganGroupMembers.inviteStatus, "declined"),
         inArray(patunganGroupMembers.userId, allIds)
       )
     );
@@ -311,6 +318,7 @@ export const createPatunganGroup = async (creatorId: number, courseId: number, r
           memberCount: all.length,
           priceNominal: resolved.course.effectivePrice,
           status: "pending",
+          expiresAt: new Date(Date.now() + PATUNGAN_EXPIRY_MS),
           createdBy: creatorId,
         });
         const id = Number((h as unknown as { insertId: number }).insertId);
@@ -319,6 +327,8 @@ export const createPatunganGroup = async (creatorId: number, courseId: number, r
             groupId: id,
             userId: m.userId,
             position: i,
+            // Pembuat langsung accepted; anggota lain wajib terima undangan dulu.
+            inviteStatus: i === 0 ? ("accepted" as const) : ("pending" as const),
             shareAmount: resolved.shares[i] as number,
             paymentStatus: "unpaid" as const,
           }))
@@ -353,7 +363,7 @@ export const createPatunganGroup = async (creatorId: number, courseId: number, r
 export interface PatunganGroupDetail {
   id: number;
   code: string;
-  status: "pending" | "complete" | "cancelled";
+  status: PatunganGroupStatus;
   course: { id: number; title: string; priceLabel: string };
   campaign: { slug: string; title: string } | null;
   memberCount: number;
@@ -363,11 +373,16 @@ export interface PatunganGroupDetail {
   cancelReason: string | null;
   completedAt: Date | null;
   createdAt: Date;
+  /** Batas terima/bayar; null = grup lama pra-fitri. */
+  expiresAt: Date | null;
+  /** True bila semua anggota aktif sudah menerima undangan (iuran boleh dibayar). */
+  locked: boolean;
   members: Array<{
     userId: number;
     username: string;
     name: string;
     position: number;
+    inviteStatus: PatunganInviteStatus;
     shareAmount: number;
     paymentStatus: "unpaid" | "menunggu" | "diverifikasi" | "ditolak";
     paidAt: Date | null;
@@ -383,6 +398,7 @@ const toDetail = (
     username: string;
     name: string;
     position: number;
+    inviteStatus: PatunganInviteStatus;
     shareAmount: number;
     paymentStatus: "unpaid" | "menunggu" | "diverifikasi" | "ditolak";
     paidAt: Date | null;
@@ -400,6 +416,9 @@ const toDetail = (
   cancelReason: g.cancelReason,
   completedAt: g.completedAt,
   createdAt: g.createdAt,
+  expiresAt: g.expiresAt,
+  // Terkunci = tidak ada undangan pending (declined dikeluarkan dari hitungan).
+  locked: !memberRows.some((m) => m.inviteStatus === "pending"),
   members: memberRows
     .slice()
     .sort((a, b) => a.position - b.position)
@@ -422,6 +441,7 @@ const loadGroupDetail = async (groupId: number): Promise<PatunganGroupDetail | n
       username: users.username,
       name: users.name,
       position: patunganGroupMembers.position,
+      inviteStatus: patunganGroupMembers.inviteStatus,
       shareAmount: patunganGroupMembers.shareAmount,
       paymentStatus: patunganGroupMembers.paymentStatus,
       paidAt: patunganGroupMembers.paidAt,
@@ -454,9 +474,31 @@ const assertGroupAccess = async (viewerId: number, role: string, groupId: number
 };
 
 export const getPatunganGroupDetail = async (viewerId: number, role: string, groupId: number) =>
-  assertGroupAccess(viewerId, role, groupId);
+  expireGroupIfDue(groupId).then(() => assertGroupAccess(viewerId, role, groupId));
 
 export const listMyPatunganGroups = async (userId: number) => {
+  // Lazy-expiry: grup pending milik sendiri yang lewat batas langsung expired.
+  try {
+    const mine = await db
+      .select({ groupId: patunganGroupMembers.groupId })
+      .from(patunganGroupMembers)
+      .where(eq(patunganGroupMembers.userId, userId));
+    const ids = [...new Set(mine.map((m) => m.groupId))];
+    if (ids.length > 0) {
+      await db
+        .update(patunganGroups)
+        .set({ status: "expired" })
+        .where(
+          and(
+            eq(patunganGroups.status, "pending"),
+            lt(patunganGroups.expiresAt, new Date()),
+            inArray(patunganGroups.id, ids)
+          )
+        );
+    }
+  } catch {
+    /* best-effort; daftar tetap dibaca */
+  }
   const rows = await db
     .select({
       id: patunganGroups.id,
@@ -464,6 +506,10 @@ export const listMyPatunganGroups = async (userId: number) => {
       status: patunganGroups.status,
       memberCount: patunganGroups.memberCount,
       priceNominal: patunganGroups.priceNominal,
+      inviteStatus: patunganGroupMembers.inviteStatus,
+      myPaymentStatus: patunganGroupMembers.paymentStatus,
+      myShare: patunganGroupMembers.shareAmount,
+      expiresAt: patunganGroups.expiresAt,
       createdAt: patunganGroups.createdAt,
       completedAt: patunganGroups.completedAt,
       courseId: patunganGroups.courseId,
@@ -485,6 +531,205 @@ export const listMyPatunganGroups = async (userId: number) => {
     })
   );
   return withCounts;
+};
+
+// ---------- Kedaluwarsa (lazy) ----------
+
+/**
+ * Transisikan grup pending yang lewat expires_at menjadi expired + audit.
+ * Idempoten (bersaing aman via guard status). Grup lama tanpa expires_at
+ * tidak tersentuh.
+ */
+export const expireGroupIfDue = async (groupId: number): Promise<boolean> => {
+  const rows = await db
+    .select({ status: patunganGroups.status, expiresAt: patunganGroups.expiresAt })
+    .from(patunganGroups)
+    .where(eq(patunganGroups.id, groupId))
+    .limit(1);
+  const g = rows[0];
+  if (!g || g.status !== "pending" || !g.expiresAt) return false;
+  if (g.expiresAt.getTime() > Date.now()) return false;
+  const affected = await db.transaction(async (tx) => {
+    const [h] = await tx
+      .update(patunganGroups)
+      .set({ status: "expired" })
+      .where(and(eq(patunganGroups.id, groupId), eq(patunganGroups.status, "pending")));
+    const n = Number((h as unknown as { affectedRows: number }).affectedRows ?? 0);
+    if (n > 0) {
+      await writePatunganAudit(tx, {
+        actorUserId: null,
+        action: "patungan.expire",
+        targetIdInt: groupId,
+        metadata: { groupId },
+      });
+    }
+    return n;
+  });
+  return affected > 0;
+};
+
+// ---------- Terima / tolak undangan ----------
+
+async function requirePendingInvite(groupId: number, userId: number) {
+  await expireGroupIfDue(groupId);
+  const gRows = await db
+    .select()
+    .from(patunganGroups)
+    .where(eq(patunganGroups.id, groupId))
+    .limit(1);
+  const g = gRows[0];
+  if (!g) throw new PatunganError(404, "GROUP_NOT_FOUND", "Grup patungan tidak ditemukan");
+  if (g.status === "expired") {
+    throw new PatunganError(
+      410,
+      "GROUP_EXPIRED",
+      "Masa berlaku grup sudah habis — buat atau ikuti grup baru"
+    );
+  }
+  if (g.status !== "pending") {
+    throw new PatunganError(409, "GROUP_NOT_PENDING", `Grup sudah ${g.status}`);
+  }
+  const mRows = await db
+    .select()
+    .from(patunganGroupMembers)
+    .where(
+      and(eq(patunganGroupMembers.groupId, groupId), eq(patunganGroupMembers.userId, userId))
+    )
+    .limit(1);
+  const m = mRows[0];
+  if (!m) throw new PatunganError(403, "GROUP_FORBIDDEN", "Anda bukan anggota grup ini");
+  if (m.inviteStatus !== "pending") {
+    throw new PatunganError(409, "INVITE_DECIDED", "Undangan ini sudah dijawab");
+  }
+  return { g, m };
+}
+
+/** Menerima undangan patungan (anggota non-pembuat). */
+export const acceptInvite = async (userId: number, groupId: number, role = "student") => {
+  await requirePendingInvite(groupId, userId);
+  await db.transaction(async (tx) => {
+    await tx
+      .update(patunganGroupMembers)
+      .set({ inviteStatus: "accepted" })
+      .where(
+        and(eq(patunganGroupMembers.groupId, groupId), eq(patunganGroupMembers.userId, userId))
+      );
+    await writePatunganAudit(tx, {
+      actorUserId: userId,
+      action: "patungan.accept",
+      targetIdInt: groupId,
+      metadata: { groupId },
+    });
+  });
+  return getPatunganGroupDetail(userId, role, groupId);
+};
+
+/**
+ * Menolak undangan patungan. Hanya bila belum ada iuran masuk (nominal
+ * anggota lain bisa berubah) dan sisa anggota aktif tetap >= 2; bila
+ * kurang, grup dibatalkan otomatis. Iuran anggota aktif dihitung ulang.
+ */
+export const declineInvite = async (userId: number, groupId: number, role = "student") => {
+  const expired = await expireGroupIfDue(groupId);
+  const gRows = await db
+    .select()
+    .from(patunganGroups)
+    .where(eq(patunganGroups.id, groupId))
+    .limit(1);
+  const g = gRows[0];
+  if (!g) throw new PatunganError(404, "GROUP_NOT_FOUND", "Grup patungan tidak ditemukan");
+  if (expired || g.status === "expired") {
+    throw new PatunganError(410, "GROUP_EXPIRED", "Masa berlaku grup sudah habis — buat atau ikuti grup baru");
+  }
+  if (g.status !== "pending") {
+    throw new PatunganError(409, "GROUP_NOT_PENDING", `Grup sudah ${g.status}`);
+  }
+  const mRows = await db
+    .select()
+    .from(patunganGroupMembers)
+    .where(
+      and(eq(patunganGroupMembers.groupId, groupId), eq(patunganGroupMembers.userId, userId))
+    )
+    .limit(1);
+  const m = mRows[0];
+  if (!m) throw new PatunganError(403, "GROUP_FORBIDDEN", "Anda bukan anggota grup ini");
+  if (m.inviteStatus === "declined") {
+    throw new PatunganError(409, "INVITE_DECIDED", "Undangan ini sudah dijawab");
+  }
+  const progressed = await db
+    .select({ userId: patunganGroupMembers.userId })
+    .from(patunganGroupMembers)
+    .where(
+      and(
+        eq(patunganGroupMembers.groupId, groupId),
+        ne(patunganGroupMembers.paymentStatus, "unpaid")
+      )
+    )
+    .limit(1);
+  if (progressed[0]) {
+    throw new PatunganError(
+      403,
+      "DECLINE_LOCKED",
+      "Sudah ada iuran masuk — hubungi pembuat atau admin untuk keluar dari grup"
+    );
+  }
+  const actives = await db
+    .select({ userId: patunganGroupMembers.userId, position: patunganGroupMembers.position })
+    .from(patunganGroupMembers)
+    .where(
+      and(
+        eq(patunganGroupMembers.groupId, groupId),
+        ne(patunganGroupMembers.inviteStatus, "declined")
+      )
+    )
+    .orderBy(asc(patunganGroupMembers.position));
+  const remaining = actives.filter((a) => a.userId !== userId);
+  if (remaining.length < PATUNGAN_MIN_MEMBERS) {
+    await db.transaction(async (tx) => {
+      await tx
+        .update(patunganGroups)
+        .set({
+          status: "cancelled",
+          cancelledBy: userId,
+          cancelReason: "Anggota kurang dari batas minimal setelah penolakan undangan",
+        })
+        .where(and(eq(patunganGroups.id, groupId), eq(patunganGroups.status, "pending")));
+      await writePatunganAudit(tx, {
+        actorUserId: userId,
+        action: "patungan.auto-cancel",
+        targetIdInt: groupId,
+        metadata: { groupId, reason: "member-below-minimum" },
+      });
+    });
+    return { cancelled: true as const, group: await getPatunganGroupDetail(userId, role, groupId) };
+  }
+  await db.transaction(async (tx) => {
+    await tx
+      .update(patunganGroupMembers)
+      .set({ inviteStatus: "declined" })
+      .where(
+        and(eq(patunganGroupMembers.groupId, groupId), eq(patunganGroupMembers.userId, userId))
+      );
+    const shares = splitShares(g.priceNominal, remaining.length);
+    for (let i = 0; i < remaining.length; i++) {
+      await tx
+        .update(patunganGroupMembers)
+        .set({ shareAmount: shares[i] })
+        .where(
+          and(
+            eq(patunganGroupMembers.groupId, groupId),
+            eq(patunganGroupMembers.userId, remaining[i]!.userId)
+          )
+        );
+    }
+    await writePatunganAudit(tx, {
+      actorUserId: userId,
+      action: "patungan.decline",
+      targetIdInt: groupId,
+      metadata: { groupId, remaining: remaining.map((r) => r.userId) },
+    });
+  });
+  return { cancelled: false as const, group: await getPatunganGroupDetail(userId, role, groupId) };
 };
 
 // ---------- Batal grup ----------
@@ -587,18 +832,52 @@ export const getPendingGroupForMember = async (
   groupId: number,
   userId: number
 ): Promise<{ group: typeof patunganGroups.$inferSelect; shareAmount: number }> => {
-  const gRows = await db.select().from(patunganGroups).where(eq(patunganGroups.id, groupId)).limit(1);
+  const expired = await expireGroupIfDue(groupId);
+  const gRows = await db
+    .select()
+    .from(patunganGroups)
+    .where(eq(patunganGroups.id, groupId))
+    .limit(1);
   const g = gRows[0];
-  if (!g || g.status !== "pending") {
+  if (!g) throw new PatunganError(404, "GROUP_NOT_FOUND", "Grup patungan tidak ditemukan atau tidak aktif");
+  if (expired || g.status === "expired") {
+    throw new PatunganError(
+      410,
+      "GROUP_EXPIRED",
+      "Masa berlaku grup sudah habis — buat atau ikuti grup baru"
+    );
+  }
+  if (g.status !== "pending") {
     throw new PatunganError(404, "GROUP_NOT_FOUND", "Grup patungan tidak ditemukan atau tidak aktif");
   }
   const mRows = await db
-    .select({ shareAmount: patunganGroupMembers.shareAmount })
+    .select({ shareAmount: patunganGroupMembers.shareAmount, inviteStatus: patunganGroupMembers.inviteStatus })
     .from(patunganGroupMembers)
     .where(and(eq(patunganGroupMembers.groupId, groupId), eq(patunganGroupMembers.userId, userId)))
     .limit(1);
   const m = mRows[0];
   if (!m) throw new PatunganError(403, "PATUNGAN_NOT_MEMBER", "Anda bukan anggota grup ini");
+  if (m.inviteStatus === "declined") {
+    throw new PatunganError(403, "INVITE_DECLINED", "Anda menolak undangan grup ini");
+  }
+  if (m.inviteStatus !== "accepted") {
+    throw new PatunganError(403, "INVITE_PENDING", "Terima undangan grup dulu sebelum membayar iuran");
+  }
+  // Iuran dibuka hanya setelah SEMUA anggota menerima undangan (nominal final).
+  const waiting = await db
+    .select({ userId: patunganGroupMembers.userId })
+    .from(patunganGroupMembers)
+    .where(
+      and(eq(patunganGroupMembers.groupId, groupId), eq(patunganGroupMembers.inviteStatus, "pending"))
+    )
+    .limit(1);
+  if (waiting[0]) {
+    throw new PatunganError(
+      403,
+      "GROUP_NOT_LOCKED",
+      "Pembayaran dibuka setelah semua anggota menerima undangan"
+    );
+  }
   return { group: g, shareAmount: m.shareAmount };
 };
 
@@ -630,10 +909,17 @@ export const tryCompleteGroup = async (tx: DbTx, adminId: number | null, groupId
   const locked = await tx.select().from(patunganGroups).where(eq(patunganGroups.id, groupId)).for("update").limit(1);
   const g = locked[0];
   if (!g || g.status !== "pending") return false;
+  // Hanya anggota aktif (non-declined) yang dihitung; penolakan hanya bisa
+  // terjadi sebelum ada pembayaran sehingga di titik ini tak ada yang declined.
   const members = await tx
     .select({ userId: patunganGroupMembers.userId, paymentStatus: patunganGroupMembers.paymentStatus })
     .from(patunganGroupMembers)
-    .where(eq(patunganGroupMembers.groupId, groupId))
+    .where(
+      and(
+        eq(patunganGroupMembers.groupId, groupId),
+        ne(patunganGroupMembers.inviteStatus, "declined")
+      )
+    )
     .for("update");
   if (members.length === 0) return false;
   if (members.some((m) => m.paymentStatus !== "diverifikasi")) return false;

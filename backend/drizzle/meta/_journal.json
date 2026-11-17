@@ -225,6 +225,20 @@
       "when": 1795000000002,
       "tag": "0031_doku_qris",
       "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "5",
+      "when": 1795000000003,
+      "tag": "0032_wild_payback",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "5",
+      "when": 1795000000004,
+      "tag": "0033_kind_maverick",
+      "breakpoints": true
     }
   ]
 }
