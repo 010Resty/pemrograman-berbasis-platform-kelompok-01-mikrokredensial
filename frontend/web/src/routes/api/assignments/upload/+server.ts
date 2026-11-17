@@ -1,4 +1,5 @@
 import { json } from '@sveltejs/kit';
+import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 
 /**
@@ -11,7 +12,10 @@ import type { RequestHandler } from './$types';
 const MAX_PDF_BYTES = 10 * 1024 * 1024;
 
 function backendBase(): string {
-	return process.env.BACKEND_URL || process.env.PUBLIC_API_BASE_URL || 'http://localhost:3000';
+	const raw = (env.BACKEND_URL || env.PUBLIC_API_BASE_URL || 'http://localhost:3000')
+		.trim()
+		.replace(/\/+$/, '');
+	return raw.replace(/\/api\/v1$/, '');
 }
 
 function isPdfMagic(buf: Uint8Array): boolean {

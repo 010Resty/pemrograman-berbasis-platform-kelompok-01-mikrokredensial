@@ -3,7 +3,10 @@ import { env } from '$env/dynamic/private';
 import type { RequestHandler } from './$types';
 
 function backendBase(): string {
-	return env.BACKEND_URL || env.PUBLIC_API_BASE_URL || 'http://localhost:3000';
+	const raw = (env.BACKEND_URL || env.PUBLIC_API_BASE_URL || 'http://localhost:3000')
+		.trim()
+		.replace(/\/+$/, '');
+	return raw.replace(/\/api\/v1$/, '');
 }
 
 const DECISIONS = ['passed', 'failed', 'revision_requested'] as const;
