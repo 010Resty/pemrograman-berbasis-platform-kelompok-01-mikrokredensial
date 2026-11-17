@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../../core/api_client.dart';
 import '../../core/auth_api.dart';
 import '../../core/session.dart';
+import '../../theme/app_tokens.dart';
 import 'auth_scaffold.dart';
 import 'auth_widgets.dart';
 
@@ -79,31 +80,32 @@ class _VerifyEmailPageState extends State<VerifyEmailPage> {
       children: [
         if (_error != null) ...[
           AuthErrorBanner(message: _error!, onRetry: _submit),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
         ],
         if (_info != null) ...[
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.secondaryContainer,
-              borderRadius: BorderRadius.circular(12),
+              color: Colors.white,
+              border:
+                  Border.all(color: AppColors.primaryBorder),
+              borderRadius: BorderRadius.circular(AppRadius.lg),
             ),
-            child: Text(_info!),
+            child: Text(_info!, style: AppText.body),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
         ],
         TextField(
           controller: _code,
           keyboardType: TextInputType.number,
           maxLength: 6,
           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-          decoration: const InputDecoration(
-            labelText: 'Kode OTP',
-            border: OutlineInputBorder(),
+          decoration: authFieldDecoration(
+            label: 'Kode OTP',
             counterText: '',
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpacing.lg),
         AnimatedBuilder(
           animation: widget.session,
           builder: (context, _) => AuthPrimaryButton(
@@ -112,11 +114,15 @@ class _VerifyEmailPageState extends State<VerifyEmailPage> {
             onPressed: _submit,
           ),
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         OutlinedButton(
           onPressed: _busy ? null : _resend,
-          style:
-              OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+            ),
+          ),
           child: const Text('Kirim ulang kode'),
         ),
       ],

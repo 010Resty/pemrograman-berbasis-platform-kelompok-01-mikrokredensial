@@ -187,12 +187,19 @@ class CatalogApi {
 
   final ApiClient _api;
 
-  Future<List<PublicCourse>> list({String? q}) async {
-    final query = q == null || q.trim().isEmpty
-        ? '?limit=100'
-        : '?limit=100&q=${Uri.encodeQueryComponent(q.trim())}';
+  Future<List<PublicCourse>> list({String? q, String? category, String? level}) async {
+    final params = <String>['limit=100'];
+    if (q != null && q.trim().isNotEmpty) {
+      params.add('q=${Uri.encodeQueryComponent(q.trim())}');
+    }
+    if (category != null && category.isNotEmpty) {
+      params.add('category=${Uri.encodeQueryComponent(category)}');
+    }
+    if (level != null && level.isNotEmpty) {
+      params.add('level=${Uri.encodeQueryComponent(level)}');
+    }
     final data = await _api.get<List<Object?>>(
-      '/courses$query',
+      '/courses?${params.join('&')}',
       (json) {
         if (json is List) return apiList(json);
         final m = (json as Map?)?.cast<String, Object?>();
@@ -200,6 +207,22 @@ class CatalogApi {
       },
     );
     return data.map(PublicCourse.fromJson).toList();
+  }
+
+  /// Daftar kategori aktif (sumber dropdown/filter chip).
+  Future<List<String>> categories() async {
+    try {
+      final data = await _api.get<List<Object?>>(
+        '/categories',
+        (json) => apiList(json),
+      );
+      return [
+        for (final e in data)
+          '${(e as Map?)?.cast<String, Object?>()['name'] ?? ''}'
+      ].where((e) => e.isNotEmpty).toList();
+    } on ApiException {
+      return [];
+    }
   }
 
   Future<CourseDetail> detail(int id) async {
@@ -212,6 +235,9 @@ class CatalogApi {
     return CourseDetail.fromJson(detail);
   }
 
+  /// Tree kurikulum. Request se-level dijalankan konkuren (R4):
+  /// modules → [submodules...] → [materials...] pararel per level,
+  /// bukan satu-per-satu. Struktur hasil identik dengan versi serial.
   Future<List<TreeModule>> tree(int courseId) async {
     Future<List<Object?>> getList(String path, String key) async {
       return _api.get<List<Object?>>(
@@ -220,29 +246,33 @@ class CatalogApi {
       );
     }
 
-    final modules = await getList('/courses/$courseId/modules', 'modules');
-    final out = <TreeModule>[];
-    for (final mod in modules) {
+    Future<TreeSub> buildSub(Object? s) async {
+      final sm = (s as Map?)?.cast<String, Object?>() ?? {};
+      final mats =
+          await getList('/submodules/${sm['id']}/materials', 'materials');
+      return TreeSub(
+        id: '${sm['id'] ?? ''}',
+        title: '${sm['title'] ?? ''}',
+        materials: mats.map(TreeMaterial.fromJson).toList(),
+      );
+    }
+
+    Future<TreeModule> buildModule(Object? mod) async {
       final mm = (mod as Map?)?.cast<String, Object?>() ?? {};
       final mid = mm['id'];
-      final subs = await getList('/modules/$mid/submodules', 'submodules');
-      final subList = <TreeSub>[];
-      for (final s in subs) {
-        final sm = (s as Map?)?.cast<String, Object?>() ?? {};
-        final mats = await getList('/submodules/${sm['id']}/materials', 'materials');
-        subList.add(TreeSub(
-          id: '${sm['id'] ?? ''}',
-          title: '${sm['title'] ?? ''}',
-          materials: mats.map(TreeMaterial.fromJson).toList(),
-        ));
-      }
-      out.add(TreeModule(
+      final subs =
+          await getList('/modules/$mid/submodules', 'submodules');
+      final subList = await Future.wait(subs.map(buildSub));
+      return TreeModule(
         id: '$mid',
         title: '${mm['title'] ?? ''}',
         subModules: subList,
-      ));
+      );
     }
-    return out;
+
+    final modules =
+        await getList('/courses/$courseId/modules', 'modules');
+    return Future.wait(modules.map(buildModule));
   }
 
   Future<MaterialDetail> material(int id) {

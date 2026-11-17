@@ -1,17 +1,19 @@
 import 'package:flutter/material.dart';
 
+import 'theme/app_tokens.dart';
+
 /// Status umum: loading / error + coba lagi / kosong. Dipakai semua layar
 /// agar tidak ada angka atau daftar palsu saat backend tidak terjangkau.
 class StateViews {
   static Widget loading([String label = 'Memuat…']) => Center(
         child: Padding(
-          padding: const EdgeInsets.all(32),
+          padding: const EdgeInsets.all(AppSpacing.xxxl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const CircularProgressIndicator(),
-              const SizedBox(height: 12),
-              Text(label),
+              const SizedBox(height: AppSpacing.md),
+              Text(label, style: AppText.caption),
             ],
           ),
         ),
@@ -19,17 +21,26 @@ class StateViews {
 
   static Widget error(String message, VoidCallback onRetry) => Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(AppSpacing.xxl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.cloud_off_outlined, size: 48),
-              const SizedBox(height: 12),
-              const Text('Gagal memuat',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(message, textAlign: TextAlign.center),
-              const SizedBox(height: 12),
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: Colors.red.shade50,
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                ),
+                child: Icon(Icons.cloud_off_outlined,
+                    size: 32, color: Colors.red.shade400),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              const Text('Gagal memuat', style: AppText.section),
+              const SizedBox(height: AppSpacing.xs),
+              Text(message,
+                  textAlign: TextAlign.center, style: AppText.caption),
+              const SizedBox(height: AppSpacing.lg),
               FilledButton.icon(
                 onPressed: onRetry,
                 icon: const Icon(Icons.refresh),
@@ -40,22 +51,74 @@ class StateViews {
         ),
       );
 
-  static Widget empty(String title, String subtitle, {IconData icon = Icons.inbox_outlined}) =>
+  static Widget empty(String title, String subtitle,
+          {IconData icon = Icons.inbox_outlined}) =>
       Center(
         child: Padding(
-          padding: const EdgeInsets.all(24),
+          padding: const EdgeInsets.all(AppSpacing.xxl),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 48, color: Colors.grey),
-              const SizedBox(height: 12),
-              Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
-              const SizedBox(height: 4),
-              Text(subtitle, textAlign: TextAlign.center),
+              Container(
+                width: 64,
+                height: 64,
+                decoration: BoxDecoration(
+                  color: AppColors.primarySoft,
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
+                ),
+                child: Icon(icon,
+                    size: 32, color: AppColors.primary),
+              ),
+              const SizedBox(height: AppSpacing.md),
+              Text(title, style: AppText.section),
+              const SizedBox(height: AppSpacing.xs),
+              Text(subtitle,
+                  textAlign: TextAlign.center, style: AppText.caption),
             ],
           ),
         ),
       );
+}
+
+/// Banner mode offline — dipakai semua layar ber-cache.
+class OfflineChip extends StatelessWidget {
+  const OfflineChip({super.key, this.label = 'Mode offline — data terakhir'});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md, vertical: AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.warningSoft,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.warning.withValues(alpha: 0.3)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.cloud_off_outlined,
+              size: 18, color: AppColors.warning),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.warning)),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Padding bawah aman untuk gesture-nav Android.
+EdgeInsets pagePadding(BuildContext context, {double base = 16}) {
+  final bottom = MediaQuery.of(context).padding.bottom;
+  return EdgeInsets.fromLTRB(base, base, base, base + bottom + 8);
 }
 
 String formatIDR(num value) {

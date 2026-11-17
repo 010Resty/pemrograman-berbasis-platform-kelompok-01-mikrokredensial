@@ -14,23 +14,43 @@ lib/
     models.dart        # AppUser, AppRole, AuthPayload (cermin kontrak shared)
     auth_api.dart      # endpoint auth 1:1 kontrak (tanpa logika bisnis)
     session.dart       # access di memori, refresh di secure storage
+  widgets/
+    app_logo.dart      # logo + wordmark (cermin web Logo.svelte)
+    auth_background.dart # gradien biru + bercak (latar semua layar auth)
+    app_top_bar.dart   # TopAppBar peserta + SectionHeader (judul + aksi)
+    course_card.dart   # kartu kursus bersama (tanpa rating/instruktur palsu)
+    activity_tile.dart # baris timeline aktivitas (tanpa skor/kejadian palsu)
+    google_g_icon.dart # ikon "G" multicolor (tanpa dep baru)
+    section_header.dart # judul section + aksi "Lihat Semua"
   shared_ui.dart       # state loading/error/kosong, formatIDR, konfirmasi
   features/
     auth/              # splash, login, register, verify OTP, lupa/reset
-    home/              # router + home per peran (bottom navigation ≤5 tab + halaman "Lainnya")
-    catalog/           # Semua Kursus, Kursusku, detail kursus, materi, kuis, tugas
-    payment/           # bayar QRIS, notifikasi, unggah bukti, polling
+    home/              # router + home per peran + beranda peserta + top bar
+    catalog/           # Semua Kursus (Jelajahi), Kursusku, detail kursus,
+                       # materi, kuis, tugas + progres per kursus (real)
+    activity/          # timeline pembayaran + sertifikat (+ filter)
+    promo/             # daftar + detail kampanye promo (tanpa kuota palsu)
+    payment/           # bayar QRIS, unggah bukti, polling
     certificate/       # sertifikat saya, unduh PDF, verifikasi publik
-    profile/           # lihat + ubah profil (termasuk voucher diskon)
+    profile/           # lihat + ubah profil (+ avatar, kata sandi, keluar)
     instructor/        # kursusku, antrean penilaian + rubrik, sertifikat
     admin/             # dasbor, laporan, peserta, undangan, voucher, verifikasi bayar
 test/
   envelope_test.dart   # unit parser envelope + model (tanpa jaringan)
   api_contract_test.dart # kontrak endpoint vs mock HTTP (tanpa backend)
   bottom_nav_test.dart # widget bottom nav per peran + menu "Lainnya" (tanpa jaringan)
+  activity_feed_test.dart # gabung + urut + label grup timeline (tanpa backend)
+  promo_api_test.dart  # parsing promo + detail 404 → null (tanpa backend)
+  student_dashboard_test.dart # render beranda + pintasan redirect tab (mock HTTP)
+  ...
 ```
 
 Kontrak acuan: `frontend/shared/` (envelope, 80 endpoint, skenario K-01–K-08).
+
+Aset brand (`assets/logo/`, disalin dari `frontend/web/src/lib/assets/logo/`;
+tiap platform membundel asetnya sendiri):
+- `aristoteleslogo.png` — logo utama (dipakai `AppLogo` di splash + auth).
+- `unira.jpeg` — logo ko-branding UNIRA (siap dipakai bila layar butuh).
 
 ## Cara jalan
 

@@ -4,6 +4,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../core/api_client.dart';
 import '../../core/file_url.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import '../learning/submission_api.dart';
 import 'instructor_api.dart';
 
@@ -38,14 +39,16 @@ class _InstCertificatesPageState extends State<InstCertificatesPage> {
     });
     try {
       final api = InstructorApi(widget.api);
-      final summary = await api.certSummary();
-      final rows = await api.certificates();
-      final sig = await api.mySignature();
+      final results = await Future.wait([
+        api.certSummary(),
+        api.certificates(),
+        api.mySignature(),
+      ]);
       if (!mounted) return;
       setState(() {
-        _summary = summary;
-        _rows = rows;
-        _sig = sig;
+        _summary = results[0] as InstCertificateSummary;
+        _rows = results[1] as List<InstCertificateRecord>;
+        _sig = results[2] as InstructorSignature?;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -126,7 +129,14 @@ class _InstCertificatesPageState extends State<InstCertificatesPage> {
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView(
-                    padding: const EdgeInsets.all(12),
+                    padding: EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md +
+                          MediaQuery.of(context).padding.bottom +
+                          AppSpacing.sm,
+                    ),
                     children: [
                       _SignatureCard(
                         sig: _sig,
@@ -135,7 +145,7 @@ class _InstCertificatesPageState extends State<InstCertificatesPage> {
                         onUpload: _uploadSignature,
                         onRemove: _removeSignature,
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppSpacing.sm),
                       if (_summary != null)
                         Row(
                           children: [
@@ -144,13 +154,13 @@ class _InstCertificatesPageState extends State<InstCertificatesPage> {
                                     label: 'Aktif',
                                     value:
                                         '${_summary!.issuedActiveCount}')),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: AppSpacing.sm),
                             Expanded(
                                 child: _StatCard(
                                     label: 'Memenuhi',
                                     value:
                                         '${_summary!.eligibleCount}')),
-                            const SizedBox(width: 8),
+                            const SizedBox(width: AppSpacing.sm),
                             Expanded(
                                 child: _StatCard(
                                     label: 'Dicabut',
@@ -158,37 +168,51 @@ class _InstCertificatesPageState extends State<InstCertificatesPage> {
                                         '${_summary!.revokedCount}')),
                           ],
                         ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppSpacing.sm),
                       if (_rows.isEmpty)
                         StateViews.empty('Belum ada sertifikat',
                             'Sertifikat terbit otomatis setelah syarat modul terpenuhi.')
                       else
                         for (final r in _rows)
                           Card(
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.md),
+                              side:
+                                  BorderSide(color: AppColors.border),
+                            ),
                             child: ListTile(
                               leading: Builder(builder: (context) {
                                 final avatar = resolveAvatarUrl(
                                     r.studentAvatarUrl, widget.api.baseUrl);
                                 if (avatar != null) {
                                   return CircleAvatar(
-                                      backgroundImage:
-                                          NetworkImage(avatar));
+                                      // R5: decode secukupnya (avatar daftar).
+                                      backgroundImage: ResizeImage(
+                                          NetworkImage(avatar),
+                                          width: 96,
+                                          height: 96),
+                                      onBackgroundImageError:
+                                          (Object err, StackTrace? stack) {});
                                 }
                                 return Icon(
                                     r.status == 'revoked'
                                         ? Icons.cancel
                                         : Icons.verified,
                                     color: r.status == 'revoked'
-                                        ? Colors.red
-                                        : Colors.green);
+                                        ? AppColors.rose
+                                        : AppColors.success);
                               }),
                               title: Text(r.studentName),
                               subtitle: Text(
-                                  '${r.courseTitle}${r.moduleTitle != null ? ' · ${r.moduleTitle}' : ''}\n${r.code} · ${r.status}'),
+                                  '${r.courseTitle}${r.moduleTitle != null ? ' · ${r.moduleTitle}' : ''}\n${r.code} · ${r.status}',
+                                  style: AppText.small),
                               isThreeLine: true,
-                              trailing:
-                                  const Icon(Icons.arrow_forward_ios,
-                                      size: 16),
+                              trailing: const Icon(
+                                  Icons.arrow_forward_ios,
+                                  size: 16,
+                                  color: AppColors.muted),
                               onTap: () async {
                                 await Navigator.of(context).push(
                                   MaterialPageRoute(
@@ -229,39 +253,70 @@ class _SignatureCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final url = resolveAvatarUrl(sig?.url, baseUrl);
     return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: AppColors.border),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text('Tanda tangan sertifikat',
                 style:
                     TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
+            const SizedBox(height: AppSpacing.xs),
             const Text(
                 'Tercetak di PDF sertifikat kursus yang Anda tandatangani. Tanpa ini, PDF memakai nama diketik.',
-                style: TextStyle(fontSize: 12)),
-            const SizedBox(height: 8),
+                style: AppText.small),
+            const SizedBox(height: AppSpacing.sm),
             Container(
               height: 72,
               width: double.infinity,
               alignment: Alignment.center,
               decoration: BoxDecoration(
-                border: Border.all(color: Colors.grey.shade300),
-                borderRadius: BorderRadius.circular(8),
-                color: Colors.grey.shade50,
+                border: Border.all(color: AppColors.border),
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                color: Colors.white,
               ),
               child: url != null
-                  ? Image.network(url, height: 64, fit: BoxFit.contain)
+                  // R5: decode secukupnya (pratinjau kecil).
+                  ? Image.network(url,
+                      height: 64,
+                      fit: BoxFit.contain,
+                      cacheWidth: 256,
+                      loadingBuilder: (context, child, progress) {
+                        if (progress == null) return child;
+                        return const SizedBox(
+                          height: 64,
+                          child: Center(
+                            child: SizedBox.square(
+                              dimension: 20,
+                              child: CircularProgressIndicator(
+                                  strokeWidth: 2),
+                            ),
+                          ),
+                        );
+                      },
+                      errorBuilder: (context, err, stack) =>
+                          const Text('Gagal memuat pratinjau',
+                              style: AppText.small))
                   : const Text('Belum ada tanda tangan',
-                      style:
-                          TextStyle(fontSize: 12, color: Colors.grey)),
+                      style: AppText.small),
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Row(
               children: [
                 Expanded(
                   child: FilledButton.icon(
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size.fromHeight(48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius:
+                            BorderRadius.circular(AppRadius.md),
+                      ),
+                    ),
                     onPressed: busy ? null : onUpload,
                     icon: const Icon(Icons.upload),
                     label: Text(busy
@@ -272,12 +327,15 @@ class _SignatureCard extends StatelessWidget {
                   ),
                 ),
                 if (sig?.fileId != null) ...[
-                  const SizedBox(width: 8),
+                  const SizedBox(width: AppSpacing.sm),
                   IconButton(
                     tooltip: 'Lepas tanda tangan',
+                    style: IconButton.styleFrom(
+                      minimumSize: const Size(48, 48),
+                    ),
                     onPressed: busy ? null : onRemove,
                     icon: const Icon(Icons.delete_outline,
-                        color: Colors.red),
+                        color: AppColors.rose),
                   ),
                 ],
               ],
@@ -298,14 +356,19 @@ class _StatCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: AppColors.border),
+      ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(AppSpacing.md),
         child: Column(
           children: [
             Text(value,
                 style: const TextStyle(
                     fontSize: 22, fontWeight: FontWeight.bold)),
-            Text(label, style: const TextStyle(fontSize: 12)),
+            Text(label, style: AppText.small),
           ],
         ),
       ),
@@ -394,16 +457,23 @@ class _InstCertDetailPageState extends State<_InstCertDetailPage> {
                   : Builder(builder: (context) {
                       final c = _cert!;
                       return ListView(
-                        padding: const EdgeInsets.all(16),
+                        padding: EdgeInsets.fromLTRB(
+                          AppSpacing.lg,
+                          AppSpacing.lg,
+                          AppSpacing.lg,
+                          AppSpacing.lg +
+                              MediaQuery.of(context).padding.bottom +
+                              AppSpacing.sm,
+                        ),
                         children: [
                           Text(c.studentName,
                               style: const TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold)),
-                          Text(c.courseTitle),
+                          Text(c.courseTitle, style: AppText.body),
                           if (c.moduleTitle != null)
-                            Text(c.moduleTitle!),
-                          const SizedBox(height: 8),
+                            Text(c.moduleTitle!, style: AppText.small),
+                          const SizedBox(height: AppSpacing.sm),
                           Text('Kode: ${c.code}',
                               style:
                                   const TextStyle(fontFamily: 'monospace')),
@@ -411,10 +481,11 @@ class _InstCertDetailPageState extends State<_InstCertDetailPage> {
                           Text(
                               'Terbit: ${formatDateTime(c.issuedAt)}'),
                           if (c.revokeReason != null)
-                            Text('Alasan cabut: ${c.revokeReason}'),
+                            Text('Alasan cabut: ${c.revokeReason}',
+                                style: AppText.small),
                           if (c.status == 'aktif' ||
                               c.status == 'issued') ...[
-                            const SizedBox(height: 16),
+                            const SizedBox(height: AppSpacing.lg),
                             TextField(
                               controller: _reason,
                               maxLines: 2,
@@ -424,9 +495,15 @@ class _InstCertDetailPageState extends State<_InstCertDetailPage> {
                                 border: OutlineInputBorder(),
                               ),
                             ),
-                            const SizedBox(height: 8),
+                            const SizedBox(height: AppSpacing.sm),
                             FilledButton.icon(
                               style: FilledButton.styleFrom(
+                                  minimumSize:
+                                      const Size.fromHeight(48),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(
+                                        AppRadius.md),
+                                  ),
                                   backgroundColor: Theme.of(context)
                                       .colorScheme
                                       .error),

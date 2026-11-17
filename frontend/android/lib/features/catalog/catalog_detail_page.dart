@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import '../learning/enrollment_api.dart';
 import '../payment/payment_page.dart';
 import '../profile/profile_api.dart';
@@ -44,12 +45,15 @@ class _CatalogDetailPageState extends State<CatalogDetailPage> {
     });
     try {
       final api = CatalogApi(widget.api);
-      final detail = await api.detail(widget.courseId);
-      final access = await EnrollmentApi(widget.api).access(widget.courseId);
+      // Dua request independen: jalan konkuren via Future.wait.
+      final results = await Future.wait<dynamic>([
+        api.detail(widget.courseId),
+        EnrollmentApi(widget.api).access(widget.courseId),
+      ]);
       if (!mounted) return;
       setState(() {
-        _course = detail;
-        _access = access;
+        _course = results[0] as CourseDetail;
+        _access = results[1] as CourseAccess;
       });
     } on ApiException catch (e) {
       if (!mounted) return;
@@ -111,83 +115,114 @@ class _CatalogDetailPageState extends State<CatalogDetailPage> {
     final c = _course!;
     final access = _access;
     final hasAccess = access?.hasAccess == true || access?.isManager == true;
-    return ListView(
-      padding: const EdgeInsets.all(16),
-      children: [
-        Text(c.title,
-            style: Theme.of(context)
-                .textTheme
-                .headlineSmall
-                ?.copyWith(fontWeight: FontWeight.bold)),
-        const SizedBox(height: 4),
-        Text('${c.category ?? 'Umum'} · ${c.level}',
-            style: Theme.of(context).textTheme.bodyMedium),
-        const SizedBox(height: 8),
-        Text(
-          c.isFree ? 'GRATIS' : c.priceLabel,
-          style: TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: c.isFree ? Colors.green.shade700 : null,
-          ),
-        ),
-        if ((c.description ?? '').isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(c.description!),
-        ],
-        const SizedBox(height: 16),
-        if (hasAccess)
-          const Card(
-            child: ListTile(
-              leading: Icon(Icons.check_circle, color: Colors.green),
-              title: Text('Anda sudah memiliki akses kursus ini.'),
-            ),
-          )
-        else if (c.isFree)
-          FilledButton.icon(
-            onPressed: _enrollFree,
-            icon: const Icon(Icons.play_arrow),
-            label: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text('Daftar gratis & mulai belajar'),
-            ),
-          )
-        else ...[
-          OutlinedButton.icon(
-            onPressed: _enrollFree,
-            icon: const Icon(Icons.play_arrow),
-            label: const Text('Coba daftar'),
-          ),
-          const SizedBox(height: 8),
-          TextField(
-            controller: _voucher,
-            textCapitalization: TextCapitalization.characters,
-            decoration: const InputDecoration(
-              labelText: 'Punya kode voucher? Tukar di sini',
-              border: OutlineInputBorder(),
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        children: [
+          Text(c.title, style: AppText.title.copyWith(fontSize: 20)),
+          const SizedBox(height: AppSpacing.xs),
+          Text('${c.category ?? 'Umum'} · ${c.level}',
+              style: AppText.caption),
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            c.isFree ? 'GRATIS' : c.priceLabel,
+            style: TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: c.isFree ? AppColors.success : AppColors.ink,
             ),
           ),
-          const SizedBox(height: 8),
-          OutlinedButton.icon(
-            onPressed: _redeem,
-            icon: const Icon(Icons.confirmation_number_outlined),
-            label: const Text('Tukar voucher'),
-          ),
-          const SizedBox(height: 8),
-          FilledButton.icon(
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => PaymentPage(api: widget.api, courseId: c.id),
+          if ((c.description ?? '').isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text(c.description!, style: AppText.body),
+          ],
+          const SizedBox(height: AppSpacing.lg),
+          if (hasAccess)
+            Card(
+              margin: EdgeInsets.zero,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                side: BorderSide(color: AppColors.border),
+              ),
+              child: const ListTile(
+                leading:
+                    Icon(Icons.check_circle, color: AppColors.success),
+                title: Text('Anda sudah memiliki akses kursus ini.',
+                    style: AppText.bodyStrong),
+              ),
+            )
+          else if (c.isFree)
+            FilledButton.icon(
+              onPressed: _enrollFree,
+              icon: const Icon(Icons.play_arrow),
+              label: const Padding(
+                padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+                child: Text('Daftar gratis & mulai belajar'),
+              ),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+              ),
+            )
+          else ...[
+            OutlinedButton.icon(
+              onPressed: _enrollFree,
+              icon: const Icon(Icons.play_arrow),
+              label: const Text('Coba daftar'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
               ),
             ),
-            icon: const Icon(Icons.qr_code),
-            label: const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text('Bayar via QRIS'),
+            const SizedBox(height: AppSpacing.sm),
+            TextField(
+              controller: _voucher,
+              textCapitalization: TextCapitalization.characters,
+              decoration: const InputDecoration(
+                labelText: 'Punya kode voucher? Tukar di sini',
+                border: OutlineInputBorder(),
+              ),
             ),
-          ),
+            const SizedBox(height: AppSpacing.sm),
+            OutlinedButton.icon(
+              onPressed: _redeem,
+              icon: const Icon(Icons.confirmation_number_outlined),
+              label: const Text('Tukar voucher'),
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            FilledButton.icon(
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => PaymentPage(api: widget.api, courseId: c.id),
+                ),
+              ),
+              icon: const Icon(Icons.qr_code),
+              label: const Padding(
+                padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+                child: Text('Bayar via QRIS'),
+              ),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+              ),
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 }

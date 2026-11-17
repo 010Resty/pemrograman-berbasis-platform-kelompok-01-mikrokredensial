@@ -54,21 +54,23 @@ class SessionManager extends ChangeNotifier {
     }
   }
 
-  Future<void> login({required String email, required String password}) async {
+  Future<void> login(
+      {required String email, required String password, bool rememberMe = true}) async {
     _setBusy(true);
     try {
       final payload = await _auth.login(email: email.trim(), password: password);
-      await _applyPayload(payload);
+      await _applyPayload(payload, persist: rememberMe);
     } finally {
       _setBusy(false);
     }
   }
 
   /// Terapkan pasangan sesi yang sudah ada (mis. hasil verifikasi OTP).
-  Future<void> loginWithPayload(AuthPayload payload) async {
+  Future<void> loginWithPayload(AuthPayload payload,
+      {bool rememberMe = true}) async {
     _setBusy(true);
     try {
-      await _applyPayload(payload);
+      await _applyPayload(payload, persist: rememberMe);
     } finally {
       _setBusy(false);
     }
@@ -120,13 +122,17 @@ class SessionManager extends ChangeNotifier {
     }
   }
 
-  Future<void> _applyPayload(AuthPayload payload) async {
+  /// Terapkan pasangan sesi. `persist=false` ("Ingat Saya" mati) berarti
+  /// token hanya di memori — aplikasi lupa sesi setelah ditutup.
+  Future<void> _applyPayload(AuthPayload payload, {bool persist = true}) async {
     _accessToken = payload.accessToken;
     _user = payload.user;
-    if (payload.refreshToken != null && payload.refreshToken!.isNotEmpty) {
-      await _storage.write(key: _kRefresh, value: payload.refreshToken);
+    if (persist) {
+      if (payload.refreshToken != null && payload.refreshToken!.isNotEmpty) {
+        await _storage.write(key: _kRefresh, value: payload.refreshToken);
+      }
+      await _storage.write(key: _kUser, value: jsonEncode(payload.user.toJson()));
     }
-    await _storage.write(key: _kUser, value: jsonEncode(payload.user.toJson()));
     notifyListeners();
   }
 

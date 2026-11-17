@@ -10,14 +10,22 @@ import 'features/auth/password_pages.dart';
 import 'features/auth/register_page.dart';
 import 'features/auth/verify_email_page.dart';
 import 'features/home/home_router.dart';
+import 'theme/app_theme.dart';
 
 /// ARISTOTELES Android — login-first, tanpa rute publik.
 ///
 /// Navigasi dikelola satu [Navigator] dengan tumpukan layar auth.
 /// Setelah sesi valid, [SplashGate]/[HomeRouter] mengambil alih.
 void main() {
-  final api = ApiClient();
+  // Token provider diikat ke sesi (late-binding): ApiClient butuh sesi
+  // untuk header Authorization, sesi butuh ApiClient untuk AuthApi —
+  // holder ini memutus ketergantungan sirkularnya. Tanpa ini TIDAK ADA
+  // request ber-token yang membawa header (login sukses lalu langsung
+  // logout oleh 401 + refresh yang terbakar sia-sia).
+  SessionManager? sessionHolder;
+  final api = ApiClient(tokenProvider: () => sessionHolder?.accessToken);
   final session = SessionManager(authApi: AuthApi(api));
+  sessionHolder = session;
   api.onUnauthorized = () => session.clear();
   // 401 → coba rotasi refresh token dulu (single-flight); hanya bila gagal
   // sesi dibersihkan dan pengguna diarahkan ke login.
@@ -56,10 +64,7 @@ class _AristotelesAppState extends State<AristotelesApp> {
     return MaterialApp(
       title: 'ARISTOTELES',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.indigo),
-        useMaterial3: true,
-      ),
+      theme: AppTheme.light(),
       home: SplashGate(
         session: widget.session,
         onAuthenticated: () => HomeRouter(

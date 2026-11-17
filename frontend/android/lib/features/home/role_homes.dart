@@ -2,21 +2,22 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../core/models.dart';
+import '../activity/activity_page.dart';
 import '../admin/admin_dashboard_page.dart';
 import '../admin/admin_pages.dart';
 import '../admin/admin_reports_page.dart';
 import '../catalog/catalog_page.dart';
 import '../catalog/kursusku_page.dart';
-import '../certificate/certificates_page.dart';
 import '../instructor/inst_certificates_page.dart';
 import '../instructor/instructor_courses_page.dart';
 import '../instructor/review_queue_page.dart';
-import '../payment/notifications_page.dart';
-import '../payment/payment_history_page.dart';
 import '../profile/profile_page.dart';
 import 'role_home.dart';
+import 'student_dashboard.dart';
+import 'student_top_bar.dart';
 
-/// Beranda peserta: 4 tab (menu sekunder dikelompokkan di "Lainnya").
+/// Beranda peserta: 5 tab ala mockup (Beranda, Jelajahi, Kursus Saya,
+/// Aktivitas, Profil). Header TopAppBar + bell/dot + avatar.
 class StudentHome extends StatelessWidget {
   const StudentHome(
       {super.key,
@@ -36,40 +37,40 @@ class StudentHome extends StatelessWidget {
       user: user,
       onLogout: onLogout,
       onLogoutAll: onLogoutAll,
-      tabs: [
+      headerBuilder: (goToTab) => StudentTopBar(
+        api: api,
+        user: user,
+        subtitle: 'Microcredentials',
+        onOpenTab: goToTab,
+        bellTabIndex: 3,
+        profileTabIndex: 4,
+      ),
+      tabsBuilder: (goToTab) => [
         BottomNavTab(
-            label: 'Kursusku',
-            icon: Icons.school,
-            page: KursuskuPage(api: api)),
+            label: 'Beranda',
+            icon: Icons.home,
+            page: StudentDashboard(
+                api: api, user: user, onOpenTab: goToTab)),
         BottomNavTab(
-            label: 'Katalog',
-            icon: Icons.library_books,
-            page: CatalogPage(api: api)),
+            label: 'Jelajahi',
+            icon: Icons.explore,
+            page: CatalogPage(api: api, showAppBar: false)),
         BottomNavTab(
-            label: 'Notifikasi',
-            icon: Icons.notifications_outlined,
-            page: NotificationsPage(api: api)),
+            label: 'Kursus Saya',
+            icon: Icons.menu_book,
+            page: KursuskuPage(api: api, showAppBar: false)),
         BottomNavTab(
-          label: 'Lainnya',
-          icon: Icons.more_horiz,
-          page: MoreMenuPage(title: 'Lainnya', entries: [
-            MoreMenuEntry(
-                icon: Icons.receipt_long,
-                title: 'Riwayat Pembayaran',
-                desc: 'Lanjutkan yang menunggu, lihat status verifikasi.',
-                page: PaymentHistoryPage(api: api)),
-            MoreMenuEntry(
-                icon: Icons.verified,
-                title: 'Sertifikat',
-                desc: 'Unduh PDF dan verifikasi publik.',
-                page: CertificatesPage(api: api)),
-            MoreMenuEntry(
-                icon: Icons.person,
-                title: 'Profil Saya',
-                desc: 'Lihat dan ubah data diri.',
-                page: ProfilePage(api: api)),
-          ]),
-        ),
+            label: 'Aktivitas',
+            icon: Icons.timeline,
+            page: ActivityPage(api: api, showAppBar: false)),
+        BottomNavTab(
+            label: 'Profil',
+            icon: Icons.account_circle,
+            page: ProfilePage(
+                api: api,
+                showAppBar: false,
+                onLogout: onLogout,
+                onLogoutAll: onLogoutAll)),
       ],
     );
   }
@@ -95,15 +96,22 @@ class TeacherHome extends StatelessWidget {
       user: user,
       onLogout: onLogout,
       onLogoutAll: onLogoutAll,
-      tabs: [
+      headerBuilder: (goToTab) => StudentTopBar(
+        api: api,
+        user: user,
+        subtitle: 'Portal Instruktur',
+        onLogout: onLogout,
+        onLogoutAll: onLogoutAll,
+      ),
+      tabsBuilder: (goToTab) => [
         BottomNavTab(
             label: 'Kursusku',
             icon: Icons.book,
-            page: InstructorCoursesPage(api: api)),
+            page: InstructorCoursesPage(api: api, showAppBar: false)),
         BottomNavTab(
             label: 'Penilaian',
             icon: Icons.fact_check,
-            page: ReviewQueuePage(api: api)),
+            page: ReviewQueuePage(api: api, showAppBar: false)),
         BottomNavTab(
           label: 'Lainnya',
           icon: Icons.more_horiz,
@@ -117,7 +125,10 @@ class TeacherHome extends StatelessWidget {
                 icon: Icons.person,
                 title: 'Profil Saya',
                 desc: 'Lihat dan ubah data diri.',
-                page: ProfilePage(api: api)),
+                page: ProfilePage(
+                    api: api,
+                    onLogout: onLogout,
+                    onLogoutAll: onLogoutAll)),
           ]),
         ),
       ],
@@ -145,19 +156,26 @@ class AdminHome extends StatelessWidget {
       user: user,
       onLogout: onLogout,
       onLogoutAll: onLogoutAll,
-      tabs: [
+      headerBuilder: (goToTab) => StudentTopBar(
+        api: api,
+        user: user,
+        subtitle: 'Portal Admin',
+        onLogout: onLogout,
+        onLogoutAll: onLogoutAll,
+      ),
+      tabsBuilder: (goToTab) => [
         BottomNavTab(
             label: 'Dasbor',
             icon: Icons.dashboard,
-            page: AdminDashboardPage(api: api)),
+            page: AdminDashboardPage(api: api, showAppBar: false)),
         BottomNavTab(
             label: 'Laporan',
             icon: Icons.bar_chart_outlined,
-            page: AdminReportsPage(api: api)),
+            page: AdminReportsPage(api: api, showAppBar: false)),
         BottomNavTab(
             label: 'Verifikasi',
             icon: Icons.payments,
-            page: AdminPaymentsPage(api: api)),
+            page: AdminPaymentsPage(api: api, showAppBar: false)),
         BottomNavTab(
           label: 'Lainnya',
           icon: Icons.more_horiz,
@@ -171,7 +189,10 @@ class AdminHome extends StatelessWidget {
                 icon: Icons.person,
                 title: 'Profil Saya',
                 desc: 'Lihat dan ubah data diri.',
-                page: ProfilePage(api: api)),
+                page: ProfilePage(
+                    api: api,
+                    onLogout: onLogout,
+                    onLogoutAll: onLogoutAll)),
           ]),
         ),
       ],

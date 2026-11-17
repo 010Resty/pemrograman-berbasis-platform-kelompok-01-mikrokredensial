@@ -34,9 +34,14 @@ class RoleBottomNavScaffold extends StatefulWidget {
     required this.user,
     required this.onLogout,
     this.onLogoutAll,
-    required this.tabs,
-  }) : assert(tabs.length >= 2, 'Minimal 2 tab.'),
-       assert(tabs.length <= 5, 'Maksimal 5 tab agar tetap ringkas.');
+    this.header,
+    this.headerBuilder,
+    this.tabs,
+    this.tabsBuilder,
+  })  : assert(tabs != null || tabsBuilder != null,
+            'Isi tabs atau tabsBuilder.'),
+        assert((tabs?.length ?? 2) >= 2, 'Minimal 2 tab.'),
+        assert((tabs?.length ?? 5) <= 5, 'Maksimal 5 tab agar tetap ringkas.');
 
   final AppUser user;
   final Future<void> Function() onLogout;
@@ -44,7 +49,21 @@ class RoleBottomNavScaffold extends StatefulWidget {
   /// Keluar dari SEMUA perangkat (`POST /auth/logout` tanpa token).
   /// Null = fitur tak tersedia (dialog hanya 1 opsi, kompatibel lama).
   final Future<void> Function()? onLogoutAll;
-  final List<BottomNavTab> tabs;
+
+  /// Header kustom (mis. TopAppBar modern). Null = bangun via headerBuilder
+  /// atau fallback identitas lama.
+  final Widget? header;
+
+  /// Header yang butuh pindah tab (bell/avatar tanpa menumpuk route).
+  final Widget Function(void Function(int index) goToTab)? headerBuilder;
+
+  /// Daftar tab statis (dipakai bila tabsBuilder null).
+  final List<BottomNavTab>? tabs;
+
+  /// Pembangun tab dengan akses pindah tab (dipakai Beranda agar
+  /// pintasan bisa redirect ke tab, bukan menumpuk halaman).
+  final List<BottomNavTab> Function(void Function(int index) goToTab)?
+      tabsBuilder;
 
   @override
   State<RoleBottomNavScaffold> createState() => _RoleBottomNavScaffoldState();
@@ -52,6 +71,28 @@ class RoleBottomNavScaffold extends StatefulWidget {
 
 class _RoleBottomNavScaffoldState extends State<RoleBottomNavScaffold> {
   int _index = 0;
+  late final List<BottomNavTab> _tabs;
+  Widget? _header;
+
+  void _goToTab(int i) {
+    if (i >= 0 && i < _tabs.length) {
+      setState(() => _index = i);
+    }
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    // Di-resolve sekali agar instance halaman tiap tab tetap sama
+    // (IndexedStack menjaga state: posisi scroll, dsb.).
+    final builder = widget.tabsBuilder;
+    _tabs = builder != null ? builder(_goToTab) : widget.tabs!;
+    final hb = widget.headerBuilder;
+    if (widget.header == null && hb != null) {
+      // Header butuh goToTab — resolve sekali seperti tabs.
+      _header = hb(_goToTab);
+    }
+  }
 
   Future<void> _confirmLogout() async {
     final all = widget.onLogoutAll;
@@ -133,23 +174,41 @@ class _RoleBottomNavScaffoldState extends State<RoleBottomNavScaffold> {
       body: SafeArea(
         child: Column(
           children: [
-            _UserHeader(user: widget.user, onLogout: _confirmLogout),
+            widget.header ??
+                _header ??
+                _UserHeader(user: widget.user, onLogout: _confirmLogout),
             Expanded(
               child: IndexedStack(
                 index: _index,
-                children: [for (final t in widget.tabs) t.page],
+                children: [for (final t in _tabs) t.page],
               ),
             ),
           ],
         ),
       ),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: [
-          for (final t in widget.tabs)
-            NavigationDestination(icon: Icon(t.icon), label: t.label),
-        ],
+      // Bar putih transparan + ikon & label biru untuk tab aktif,
+      // tanpa pil indikator keunguan bawaan M3 (lihat AppTheme).
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          color: Colors.white.withValues(alpha: 0.94),
+          border: Border(
+              top: BorderSide(color: Colors.grey.shade200)),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x0F000000),
+              blurRadius: 12,
+              offset: Offset(0, -4),
+            ),
+          ],
+        ),
+        child: NavigationBar(
+          selectedIndex: _index,
+          onDestinationSelected: (i) => setState(() => _index = i),
+          destinations: [
+            for (final t in _tabs)
+              NavigationDestination(icon: Icon(t.icon), label: t.label),
+          ],
+        ),
       ),
     );
   }
@@ -167,11 +226,19 @@ class _UserHeader extends StatelessWidget {
     return Card(
       margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
       child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
         leading: CircleAvatar(
+          backgroundColor: const Color(0xFFE5EEFF),
+          foregroundColor: const Color(0xFF004AC6),
           child: Text(user.name.isEmpty ? '?' : user.name[0].toUpperCase()),
         ),
-        title: Text(user.name),
-        subtitle: Text('${user.email} · ${_roleLabel(user.role)}'),
+        title: Text(user.name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w700)),
+        subtitle: Text('${user.email} · ${_roleLabel(user.role)}',
+            maxLines: 1, overflow: TextOverflow.ellipsis),
         trailing: IconButton(
           tooltip: 'Keluar',
           icon: const Icon(Icons.logout),
@@ -192,22 +259,39 @@ class MoreMenuPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bottom = MediaQuery.of(context).padding.bottom;
     return Scaffold(
       appBar: AppBar(title: Text(title)),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + bottom),
         children: [
-          for (final e in entries)
+          for (final e in entries) ...[
             Card(
               child: ListTile(
-                leading: Icon(e.icon),
-                title: Text(e.title),
+                contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 4),
+                leading: Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF004AC6).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(e.icon,
+                      size: 20, color: const Color(0xFF004AC6)),
+                ),
+                title: Text(e.title,
+                    style:
+                        const TextStyle(fontWeight: FontWeight.w700)),
                 subtitle: Text(e.desc),
-                trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+                trailing:
+                    const Icon(Icons.arrow_forward_ios, size: 16),
                 onTap: () => Navigator.of(context)
                     .push(MaterialPageRoute(builder: (_) => e.page)),
               ),
             ),
+            const SizedBox(height: 8),
+          ],
         ],
       ),
     );

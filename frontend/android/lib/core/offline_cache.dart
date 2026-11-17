@@ -67,6 +67,27 @@ class OfflineCache {
     }
   }
 
+  /// True bila cache [key] ada dan masih segar untuk [ttl].
+  /// Helper baca-ringkas tanpa mengubah TTL (TTL tetap milik pemanggil).
+  Future<bool> isFresh(String key, Duration ttl) async {
+    return (await readJson(key, ttl)) != null;
+  }
+
+  /// Waktu simpan cache [key], atau null bila tak ada / rusak.
+  /// Tidak menilai kebasian — bandingkan sendiri dengan TTL yang berlaku.
+  Future<DateTime?> savedAt(String key) async {
+    try {
+      final dir = await _dir();
+      final file = File('${dir.path}/${_name(key)}');
+      if (!await file.exists()) return null;
+      final m = (jsonDecode(await file.readAsString()) as Map)
+          .cast<String, Object?>();
+      return DateTime.tryParse('${m['savedAt'] ?? ''}');
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Hapus satu kunci (mis. setelah logout agar data akun tak tertinggal).
   Future<void> clearKey(String key) async {
     try {

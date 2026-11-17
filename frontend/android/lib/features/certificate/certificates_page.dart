@@ -5,7 +5,9 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../core/api_client.dart';
+import '../../core/offline_cache.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import 'certificate_api.dart';
 
 /// Sertifikat saya + unduh PDF + verifikasi publik.
@@ -22,10 +24,23 @@ class _CertificatesPageState extends State<CertificatesPage> {
   List<MyCertificate> _items = [];
   bool _loading = true;
   String? _error;
+  bool _offline = false;
   final _code = TextEditingController();
   VerifyResult? _verifyResult;
   String? _verifyError;
   bool _verifying = false;
+
+  final _cache = OfflineCache();
+  static const _cacheKey = 'cert_list';
+
+  static Map<String, Object?> _toJson(MyCertificate c) => {
+        'id': c.id,
+        'code': c.code,
+        'courseTitle': c.courseTitle,
+        'moduleTitle': c.moduleTitle,
+        'status': c.status,
+        'issuedAt': c.issuedAt,
+      };
 
   @override
   void initState() {
@@ -46,11 +61,40 @@ class _CertificatesPageState extends State<CertificatesPage> {
     });
     try {
       final rows = await CertificateApi(widget.api).mine();
+      // mine() menelan ApiException -> [] saat offline: fallback ke cache.
+      if (rows.isEmpty) {
+        final cached = await _cache.readJson(
+            _cacheKey, OfflineCache.certificatesTtl);
+        final data = cached?.data;
+        if (!mounted) return;
+        if (data is List && data.isNotEmpty) {
+          setState(() {
+            _items = data.map(MyCertificate.fromJson).toList();
+            _offline = true;
+          });
+          return;
+        }
+      }
+      await _cache.saveJson(
+          _cacheKey, rows.map(_toJson).toList());
       if (!mounted) return;
-      setState(() => _items = rows);
+      setState(() {
+        _items = rows;
+        _offline = false;
+      });
     } on ApiException catch (e) {
+      final cached = await _cache.readJson(
+          _cacheKey, OfflineCache.certificatesTtl);
       if (!mounted) return;
-      setState(() => _error = e.message);
+      final data = cached?.data;
+      if (data is List && data.isNotEmpty) {
+        setState(() {
+          _items = data.map(MyCertificate.fromJson).toList();
+          _offline = true;
+        });
+      } else {
+        setState(() => _error = e.message);
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -105,18 +149,35 @@ class _CertificatesPageState extends State<CertificatesPage> {
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView(
-                    padding: const EdgeInsets.all(12),
+                    padding: EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md +
+                          MediaQuery.of(context).padding.bottom +
+                          AppSpacing.sm,
+                    ),
                     children: [
+                      if (_offline)
+                        const OfflineChip(
+                            label:
+                                'Mode offline — menampilkan sertifikat tersimpan.'),
                       Card(
+                        margin: EdgeInsets.zero,
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppRadius.lg),
+                          side: BorderSide(color: AppColors.border),
+                        ),
                         child: Padding(
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(AppSpacing.lg),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               const Text('Verifikasi publik',
-                                  style:
-                                      TextStyle(fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 8),
+                                  style: AppText.section),
+                              const SizedBox(height: AppSpacing.sm),
                               Row(
                                 children: [
                                   Expanded(
@@ -130,8 +191,12 @@ class _CertificatesPageState extends State<CertificatesPage> {
                                       ),
                                     ),
                                   ),
-                                  const SizedBox(width: 8),
+                                  const SizedBox(width: AppSpacing.sm),
                                   FilledButton(
+                                      style: FilledButton.styleFrom(
+                                        minimumSize:
+                                            const Size(64, 48),
+                                      ),
                                       onPressed:
                                           _verifying ? null : _verify,
                                       child: const Text('Cek')),
@@ -139,41 +204,56 @@ class _CertificatesPageState extends State<CertificatesPage> {
                               ),
                               if (_verifyError != null)
                                 Padding(
-                                  padding:
-                                      const EdgeInsets.only(top: 8),
+                                  padding: const EdgeInsets.only(
+                                      top: AppSpacing.sm),
                                   child: Text(_verifyError!,
                                       style: const TextStyle(
-                                          color: Colors.red)),
+                                          fontSize: 12,
+                                          color: AppColors.rose)),
                                 ),
                               if (_verifyResult != null)
                                 Padding(
-                                  padding:
-                                      const EdgeInsets.only(top: 8),
+                                  padding: const EdgeInsets.only(
+                                      top: AppSpacing.sm),
                                   child: Text(
-                                      '${_verifyResult!.recipientName} · ${_verifyResult!.courseTitle}${_verifyResult!.moduleTitle != null ? ' · ${_verifyResult!.moduleTitle}' : ''} — ${_verifyResult!.status}'),
+                                      '${_verifyResult!.recipientName} · ${_verifyResult!.courseTitle}${_verifyResult!.moduleTitle != null ? ' · ${_verifyResult!.moduleTitle}' : ''} — ${_verifyResult!.status}',
+                                      style: AppText.caption),
                                 ),
                             ],
                           ),
                         ),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppSpacing.sm),
                       if (_items.isEmpty)
                         StateViews.empty('Belum ada sertifikat',
                             'Sertifikat terbit otomatis setelah seluruh syarat modul terpenuhi.')
                       else
                         for (final c in _items)
-                          Card(
-                            child: ListTile(
-                              leading: const Icon(Icons.verified,
-                                  color: Colors.green),
-                              title: Text(c.moduleTitle ??
-                                  c.courseTitle),
-                              subtitle: Text(
-                                  '${c.code} · ${formatDateTime(c.issuedAt)} · ${c.status}'),
-                              trailing: IconButton(
-                                tooltip: 'Unduh PDF',
-                                icon: const Icon(Icons.download),
-                                onPressed: () => _download(c),
+                          Padding(
+                            padding: const EdgeInsets.only(
+                                bottom: AppSpacing.sm),
+                            child: Card(
+                              margin: EdgeInsets.zero,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                    AppRadius.lg),
+                                side: BorderSide(
+                                    color: AppColors.border),
+                              ),
+                              child: ListTile(
+                                leading: const Icon(Icons.verified,
+                                    color: AppColors.success),
+                                title: Text(c.moduleTitle ??
+                                    c.courseTitle),
+                                subtitle: Text(
+                                    '${c.code} · ${formatDateTime(c.issuedAt)} · ${c.status}',
+                                    style: AppText.small),
+                                trailing: IconButton(
+                                  tooltip: 'Unduh PDF',
+                                  icon: const Icon(Icons.download),
+                                  onPressed: () => _download(c),
+                                ),
                               ),
                             ),
                           ),

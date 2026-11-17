@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import 'grade_page.dart';
 import 'instructor_api.dart';
 
 /// Antrean penilaian: kursus → tugas menunggu → daftar pengumpulan.
 class ReviewQueuePage extends StatefulWidget {
-  const ReviewQueuePage({super.key, required this.api});
+  const ReviewQueuePage({super.key, required this.api, this.showAppBar = true});
 
   final ApiClient api;
+  final bool showAppBar;
 
   @override
   State<ReviewQueuePage> createState() => _ReviewQueuePageState();
@@ -45,9 +47,7 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Penilaian')),
-      body: _loading
+    final Widget body = _loading
           ? StateViews.loading()
           : _error != null
               ? StateViews.error(_error!, _load)
@@ -59,7 +59,14 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
                               'Tidak ada pengumpulan yang menunggu dinilai.')
                         ])
                       : ListView.builder(
-                          padding: const EdgeInsets.all(12),
+                          padding: EdgeInsets.fromLTRB(
+                            AppSpacing.md,
+                            AppSpacing.md,
+                            AppSpacing.md,
+                            AppSpacing.md +
+                                MediaQuery.of(context).padding.bottom +
+                                AppSpacing.sm,
+                          ),
                           itemCount: _courses.length,
                           itemBuilder: (context, i) {
                             final c = _courses[i];
@@ -67,8 +74,20 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
                               return const SizedBox.shrink();
                             }
                             return Card(
-                              margin: const EdgeInsets.only(bottom: 12),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.md),
+                                side:
+                                    BorderSide(color: AppColors.border),
+                              ),
+                              margin: const EdgeInsets.only(
+                                  bottom: AppSpacing.md),
                               child: ExpansionTile(
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(
+                                      AppRadius.md),
+                                ),
                                 initiallyExpanded: true,
                                 title: Text(c.title,
                                     style: const TextStyle(
@@ -80,10 +99,12 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
                                           maxLines: 2,
                                           overflow: TextOverflow.ellipsis),
                                       subtitle: Text(
-                                          '${t.pending} menunggu · ${t.total} total'),
+                                          '${t.pending} menunggu · ${t.total} total',
+                                          style: AppText.small),
                                       trailing:
                                           const Icon(Icons.arrow_forward_ios,
-                                              size: 16),
+                                              size: 16,
+                                              color: AppColors.muted),
                                       onTap: () async {
                                         await Navigator.of(context).push(
                                           MaterialPageRoute(
@@ -104,7 +125,13 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
                             );
                           },
                         ),
-                ),
-    );
+                );
+    if (widget.showAppBar) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Penilaian')),
+        body: body,
+      );
+    }
+    return body;
   }
 }

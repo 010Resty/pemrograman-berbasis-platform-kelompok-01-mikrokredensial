@@ -119,9 +119,11 @@ class PaymentApi {
   }
 
   /// Daftar milik sendiri untuk bell/notifikasi (tanpa courseId).
-  Future<PaymentList> mineList({String? status, int limit = 20}) async {
+  /// `unseen` hanya menghitung keputusan yang belum dibaca.
+  Future<PaymentList> mineList({String? status, int limit = 20, bool unseen = false}) async {
     final q = StringBuffer('?limit=$limit');
     if (status != null) q.write('&status=$status');
+    if (unseen) q.write('&unseen=1');
     try {
       final data = await _api.get<Object?>(
         '/me/payments$q',

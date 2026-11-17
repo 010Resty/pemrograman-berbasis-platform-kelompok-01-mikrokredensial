@@ -1,15 +1,17 @@
 import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
-import 'admin_pages.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import 'admin_api.dart';
+import 'admin_pages.dart';
 
 /// Dasbor admin: ringkasan + navigasi kelola.
 class AdminDashboardPage extends StatefulWidget {
-  const AdminDashboardPage({super.key, required this.api});
+  const AdminDashboardPage({super.key, required this.api, this.showAppBar = true});
 
   final ApiClient api;
+  final bool showAppBar;
 
   @override
   State<AdminDashboardPage> createState() => _AdminDashboardPageState();
@@ -45,36 +47,47 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Dasbor Admin')),
-      body: _loading
+    final Widget body = _loading
           ? StateViews.loading()
           : _error != null
               ? StateViews.error(_error!, _load)
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView(
-                    padding: const EdgeInsets.all(12),
+                    padding: EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md +
+                          MediaQuery.of(context).padding.bottom +
+                          AppSpacing.sm,
+                    ),
                     children: [
-                      GridView.count(
-                        crossAxisCount: 2,
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        mainAxisSpacing: 8,
-                        crossAxisSpacing: 8,
-                        childAspectRatio: 1.6,
-                        children: [
-                          _Stat('Peserta',
-                              '${_data?.totalStudents ?? 0}'),
-                          _Stat('Instruktur',
-                              '${_data?.totalTeachers ?? 0}'),
-                          _Stat('Kursus',
-                              '${_data?.totalCourses ?? 0}'),
-                          _Stat('Sertifikat',
-                              '${_data?.totalCertificates ?? 0}'),
-                        ],
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final wide = constraints.maxWidth >= 600;
+                          return GridView.count(
+                            crossAxisCount: wide ? 4 : 2,
+                            shrinkWrap: true,
+                            physics:
+                                const NeverScrollableScrollPhysics(),
+                            mainAxisSpacing: AppSpacing.sm,
+                            crossAxisSpacing: AppSpacing.sm,
+                            childAspectRatio: 1.6,
+                            children: [
+                              _Stat('Peserta',
+                                  '${_data?.totalStudents ?? 0}'),
+                              _Stat('Instruktur',
+                                  '${_data?.totalTeachers ?? 0}'),
+                              _Stat('Kursus',
+                                  '${_data?.totalCourses ?? 0}'),
+                              _Stat('Sertifikat',
+                                  '${_data?.totalCertificates ?? 0}'),
+                            ],
+                          );
+                        },
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppSpacing.sm),
                       _NavTile(
                         icon: Icons.people,
                         title: 'Peserta',
@@ -101,8 +114,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                       ),
                     ],
                   ),
-                ),
-    );
+                );
+    if (widget.showAppBar) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Dasbor Admin')),
+        body: body,
+      );
+    }
+    return body;
   }
 
   Future<void> _go(Widget page) {
@@ -121,6 +140,11 @@ class _Stat extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: AppColors.border),
+      ),
       child: Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -128,7 +152,7 @@ class _Stat extends StatelessWidget {
             Text(value,
                 style: const TextStyle(
                     fontSize: 24, fontWeight: FontWeight.bold)),
-            Text(label),
+            Text(label, style: AppText.small),
           ],
         ),
       ),
@@ -147,8 +171,13 @@ class _NavTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: AppColors.border),
+      ),
       child: ListTile(
-        leading: Icon(icon),
+        leading: Icon(icon, color: AppColors.primary),
         title: Text(title),
         trailing: const Icon(Icons.arrow_forward_ios, size: 16),
         onTap: onTap,

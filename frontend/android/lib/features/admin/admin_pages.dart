@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/file_url.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import 'admin_api.dart';
 
 class AdminUsersPage extends StatefulWidget {
@@ -58,24 +59,47 @@ class _AdminUsersPageState extends State<AdminUsersPage> {
                               'Belum ada akun peserta terdaftar.')
                         ])
                       : ListView.builder(
+                          padding: EdgeInsets.fromLTRB(
+                            AppSpacing.md,
+                            AppSpacing.md,
+                            AppSpacing.md,
+                            AppSpacing.md +
+                                MediaQuery.of(context).padding.bottom +
+                                AppSpacing.sm,
+                          ),
                           itemCount: _rows.length,
                           itemBuilder: (context, i) {
                             final u = _rows[i];
                             final avatar =
                                 resolveAvatarUrl(u.avatarUrl, widget.api.baseUrl);
-                            return ListTile(
-                              leading: CircleAvatar(
-                                  backgroundImage: avatar != null
-                                      ? NetworkImage(avatar)
-                                      : null,
-                                  child: avatar != null
-                                      ? null
-                                      : Text(u.name.isEmpty
-                                          ? '?'
-                                          : u.name[0].toUpperCase())),
-                              title: Text(u.name),
-                              subtitle: Text(
-                                  '${u.email} · ${u.isActive ? 'aktif' : 'nonaktif'}'),
+                            return Card(
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.md),
+                                side:
+                                    BorderSide(color: AppColors.border),
+                              ),
+                              child: ListTile(
+                                leading: CircleAvatar(
+                                    backgroundImage: avatar != null
+                                        // R5: decode secukupnya.
+                                        ? ResizeImage(NetworkImage(avatar),
+                                            width: 96, height: 96)
+                                        : null,
+                                    onBackgroundImageError: avatar != null
+                                        ? (Object err, StackTrace? stack) {}
+                                        : null,
+                                    child: avatar != null
+                                        ? null
+                                        : Text(u.name.isEmpty
+                                            ? '?'
+                                            : u.name[0].toUpperCase())),
+                                title: Text(u.name),
+                                subtitle: Text(
+                                    '${u.email} · ${u.isActive ? 'aktif' : 'nonaktif'}',
+                                    style: AppText.small),
+                              ),
                             );
                           },
                         ),
@@ -162,18 +186,31 @@ class _AdminInvitationsPageState extends State<AdminInvitationsPage> {
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView(
-                    padding: const EdgeInsets.all(12),
+                    padding: EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md +
+                          MediaQuery.of(context).padding.bottom +
+                          AppSpacing.sm,
+                    ),
                     children: [
                       Card(
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppRadius.md),
+                          side: BorderSide(color: AppColors.border),
+                        ),
                         child: Padding(
-                          padding: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.all(AppSpacing.md),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
                               const Text('Undang instruktur baru',
                                   style:
                                       TextStyle(fontWeight: FontWeight.bold)),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: AppSpacing.sm),
                               TextField(
                                 controller: _email,
                                 keyboardType: TextInputType.emailAddress,
@@ -182,7 +219,7 @@ class _AdminInvitationsPageState extends State<AdminInvitationsPage> {
                                   border: OutlineInputBorder(),
                                 ),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: AppSpacing.sm),
                               TextField(
                                 controller: _name,
                                 decoration: const InputDecoration(
@@ -190,8 +227,16 @@ class _AdminInvitationsPageState extends State<AdminInvitationsPage> {
                                   border: OutlineInputBorder(),
                                 ),
                               ),
-                              const SizedBox(height: 8),
+                              const SizedBox(height: AppSpacing.sm),
                               FilledButton(
+                                  style: FilledButton.styleFrom(
+                                    minimumSize:
+                                        const Size.fromHeight(48),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(
+                                          AppRadius.md),
+                                    ),
+                                  ),
                                   onPressed: _create,
                                   child: const Text('Buat undangan')),
                             ],
@@ -200,14 +245,23 @@ class _AdminInvitationsPageState extends State<AdminInvitationsPage> {
                       ),
                       for (final r in _rows)
                         Card(
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius:
+                                BorderRadius.circular(AppRadius.md),
+                            side:
+                                BorderSide(color: AppColors.border),
+                          ),
                           child: ListTile(
                             title: Text(r.email),
-                            subtitle: Text('Status: ${r.status}'),
+                            subtitle: Text('Status: ${r.status}',
+                                style: AppText.small),
                             trailing: r.token == null
                                 ? null
                                 : IconButton(
                                     tooltip: 'Info token',
-                                    icon: const Icon(Icons.key),
+                                    icon: const Icon(Icons.key,
+                                        color: AppColors.primary),
                                     onPressed: () =>
                                         ScaffoldMessenger.of(context)
                                             .showSnackBar(SnackBar(
@@ -276,18 +330,37 @@ class _AdminVouchersPageState extends State<AdminVouchersPage> {
                               'Buat voucher dari dasbor web bila diperlukan.')
                         ])
                       : ListView.builder(
+                          padding: EdgeInsets.fromLTRB(
+                            AppSpacing.md,
+                            AppSpacing.md,
+                            AppSpacing.md,
+                            AppSpacing.md +
+                                MediaQuery.of(context).padding.bottom +
+                                AppSpacing.sm,
+                          ),
                           itemCount: _rows.length,
                           itemBuilder: (context, i) {
                             final v = _rows[i];
-                            return ListTile(
-                              leading: const Icon(
-                                  Icons.confirmation_number_outlined),
-                              title: Text(v.code,
-                                  style: const TextStyle(
-                                      fontFamily: 'monospace',
-                                      fontWeight: FontWeight.bold)),
-                              subtitle: Text(
-                                  '${v.kind} · kursus #${v.courseId} · ${v.status}'),
+                            return Card(
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.md),
+                                side:
+                                    BorderSide(color: AppColors.border),
+                              ),
+                              child: ListTile(
+                                leading: const Icon(
+                                    Icons.confirmation_number_outlined,
+                                    color: AppColors.primary),
+                                title: Text(v.code,
+                                    style: const TextStyle(
+                                        fontFamily: 'monospace',
+                                        fontWeight: FontWeight.bold)),
+                                subtitle: Text(
+                                    '${v.kind} · kursus #${v.courseId} · ${v.status}',
+                                    style: AppText.small),
+                              ),
                             );
                           },
                         ),
@@ -297,9 +370,10 @@ class _AdminVouchersPageState extends State<AdminVouchersPage> {
 }
 
 class AdminPaymentsPage extends StatefulWidget {
-  const AdminPaymentsPage({super.key, required this.api});
+  const AdminPaymentsPage({super.key, required this.api, this.showAppBar = true});
 
   final ApiClient api;
+  final bool showAppBar;
 
   @override
   State<AdminPaymentsPage> createState() => _AdminPaymentsPageState();
@@ -395,9 +469,7 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Verifikasi Pembayaran')),
-      body: _loading
+    final Widget body = _loading
           ? StateViews.loading()
           : _error != null
               ? StateViews.error(_error!, _load)
@@ -409,14 +481,30 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
                               'Tidak ada pembayaran menunggu verifikasi.')
                         ])
                       : ListView.builder(
-                          padding: const EdgeInsets.all(12),
+                          padding: EdgeInsets.fromLTRB(
+                            AppSpacing.md,
+                            AppSpacing.md,
+                            AppSpacing.md,
+                            AppSpacing.md +
+                                MediaQuery.of(context).padding.bottom +
+                                AppSpacing.sm,
+                          ),
                           itemCount: _rows.length,
                           itemBuilder: (context, i) {
                             final r = _rows[i];
                             return Card(
-                              margin: const EdgeInsets.only(bottom: 12),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.md),
+                                side:
+                                    BorderSide(color: AppColors.border),
+                              ),
+                              margin: const EdgeInsets.only(
+                                  bottom: AppSpacing.md),
                               child: Padding(
-                                padding: const EdgeInsets.all(12),
+                                padding:
+                                    const EdgeInsets.all(AppSpacing.md),
                                 child: Column(
                                   crossAxisAlignment:
                                       CrossAxisAlignment.start,
@@ -429,20 +517,39 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
                                         '${r.userName} · ${r.courseTitle}'),
                                     Text(
                                         'Tagihan: ${formatIDR(r.amountExpected)}'),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: AppSpacing.sm),
                                     Row(
                                       children: [
                                         Expanded(
                                           child: FilledButton(
+                                            style: FilledButton.styleFrom(
+                                              minimumSize:
+                                                  const Size.fromHeight(48),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(
+                                                        AppRadius.md),
+                                              ),
+                                            ),
                                             onPressed: _acting
                                                 ? null
                                                 : () => _verify(r, true),
                                             child: const Text('Terima'),
                                           ),
                                         ),
-                                        const SizedBox(width: 8),
+                                        const SizedBox(
+                                            width: AppSpacing.sm),
                                         Expanded(
                                           child: OutlinedButton(
+                                            style: OutlinedButton.styleFrom(
+                                              minimumSize:
+                                                  const Size.fromHeight(48),
+                                              shape: RoundedRectangleBorder(
+                                                borderRadius:
+                                                    BorderRadius.circular(
+                                                        AppRadius.md),
+                                              ),
+                                            ),
                                             onPressed: _acting
                                                 ? null
                                                 : () => _verify(r, false),
@@ -457,7 +564,13 @@ class _AdminPaymentsPageState extends State<AdminPaymentsPage> {
                             );
                           },
                         ),
-                ),
-    );
+                );
+    if (widget.showAppBar) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Verifikasi Pembayaran')),
+        body: body,
+      );
+    }
+    return body;
   }
 }

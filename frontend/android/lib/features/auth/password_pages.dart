@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../../core/api_client.dart';
 import '../../core/auth_api.dart';
+import '../../theme/app_tokens.dart';
 import 'auth_scaffold.dart';
 import 'auth_widgets.dart';
 
@@ -58,18 +59,17 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
       children: [
         if (_error != null) ...[
           AuthErrorBanner(message: _error!, onRetry: _submit),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
         ],
         TextField(
           controller: _email,
           keyboardType: TextInputType.emailAddress,
-          decoration: const InputDecoration(
-            labelText: 'Email',
-            border: OutlineInputBorder(),
-            prefixIcon: Icon(Icons.email_outlined),
+          decoration: authFieldDecoration(
+            label: 'Email',
+            prefixIcon: const Icon(Icons.email_outlined),
           ),
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpacing.lg),
         AuthPrimaryButton(
             label: 'Kirim kode reset', busy: _busy, onPressed: _submit),
       ],
@@ -141,40 +141,42 @@ class _ResetPasswordPageState extends State<ResetPasswordPage> {
       children: [
         if (_done)
           Container(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
-              color: Theme.of(context).colorScheme.secondaryContainer,
-              borderRadius: BorderRadius.circular(12),
+              color: Colors.white,
+              border:
+                  Border.all(color: AppColors.primaryBorder),
+              borderRadius: BorderRadius.circular(AppRadius.lg),
             ),
             child: const Text(
-                'Kata sandi berhasil diganti. Masuk dengan kata sandi baru.'),
+                'Kata sandi berhasil diganti. Masuk dengan kata sandi baru.',
+                style: AppText.body),
           )
         else ...[
           if (_error != null) ...[
             AuthErrorBanner(message: _error!, onRetry: _submit),
-            const SizedBox(height: 16),
+            const SizedBox(height: AppSpacing.lg),
           ],
           TextField(
             controller: _code,
             keyboardType: TextInputType.number,
             maxLength: 6,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(
-              labelText: 'Kode OTP',
-              border: OutlineInputBorder(),
+            decoration: authFieldDecoration(
+              label: 'Kode OTP',
               counterText: '',
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpacing.md),
           TextField(
             controller: _password,
             obscureText: true,
-            decoration: const InputDecoration(
-              labelText: 'Kata sandi baru (min. 8 karakter)',
-              border: OutlineInputBorder(),
+            decoration: authFieldDecoration(
+              label: 'Kata sandi baru (min. 8 karakter)',
+              prefixIcon: const Icon(Icons.lock_outline),
             ),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: AppSpacing.lg),
           AuthPrimaryButton(
               label: 'Ganti kata sandi', busy: _busy, onPressed: _submit),
         ],

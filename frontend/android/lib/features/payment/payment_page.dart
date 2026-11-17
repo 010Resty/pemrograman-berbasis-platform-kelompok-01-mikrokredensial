@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import '../profile/profile_api.dart';
 import 'payment_api.dart';
 
@@ -21,12 +22,17 @@ class PaymentPage extends StatefulWidget {
   State<PaymentPage> createState() => _PaymentPageState();
 }
 
-class _PaymentPageState extends State<PaymentPage> {
+class _PaymentPageState extends State<PaymentPage>
+    with WidgetsBindingObserver {
   MyPayment? _payment;
   bool _loading = true;
   String? _error;
   bool _busy = false;
   Timer? _poll;
+  Timer? _ticker;
+  int _pollAttempt = 0;
+  bool _checking = false;
+  String? _pollError;
   final _voucherCtrl = TextEditingController();
   DiscountQuote? _discount;
   String? _voucherError;
@@ -37,17 +43,41 @@ class _PaymentPageState extends State<PaymentPage> {
   String? _qrError;
   bool _refreshing = false;
 
+  static const _backoff = [5, 10, 15];
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _restore();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _poll?.cancel();
+    _ticker?.cancel();
     _voucherCtrl.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final p = _payment;
+    if (p == null || !p.isPending) return;
+    switch (state) {
+      case AppLifecycleState.resumed:
+        _schedulePoll();
+        _startTicker();
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+      case AppLifecycleState.hidden:
+        _poll?.cancel();
+        _ticker?.cancel();
+        break;
+    }
   }
 
   Future<void> _restore() async {
@@ -81,31 +111,74 @@ class _PaymentPageState extends State<PaymentPage> {
   }
 
   void _startPolling() {
+    _pollAttempt = 0;
+    _pollError = null;
+    _schedulePoll();
+    _startTicker();
+  }
+
+  void _stopPolling() {
     _poll?.cancel();
-    _poll = Timer.periodic(const Duration(seconds: 5), (_) => _check(false));
+    _ticker?.cancel();
+  }
+
+  void _schedulePoll() {
+    _poll?.cancel();
+    final secs = _backoff[_pollAttempt.clamp(0, _backoff.length - 1)];
+    _poll = Timer(Duration(seconds: secs), () async {
+      await _check(false);
+      if (!mounted) return;
+      final p = _payment;
+      if (p != null && p.isPending) {
+        _pollAttempt = (_pollAttempt + 1).clamp(0, _backoff.length - 1);
+        _schedulePoll();
+      }
+    });
+  }
+
+  void _startTicker() {
+    _ticker?.cancel();
+    final p = _payment;
+    if (p == null || !p.isPending || _qrRemaining == null) return;
+    _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (!mounted) return;
+      final cur = _payment;
+      if (cur == null || !cur.isPending) {
+        _ticker?.cancel();
+        return;
+      }
+      setState(() {});
+    });
   }
 
   Future<void> _check(bool manual) async {
+    if (_checking) return;
     final current = _payment;
     if (current == null) return;
+    _checking = true;
     try {
       final latest = await PaymentApi(widget.api).mine(widget.courseId);
       if (!mounted || latest == null || latest.id != current.id) return;
       setState(() {
         _payment = latest;
+        _pollError = null;
       });
       if (latest.isVerified) {
-        _poll?.cancel();
+        _stopPolling();
       } else if (latest.isRejected) {
-        _poll?.cancel();
+        _stopPolling();
         setState(() =>
             _lastRejection = latest.rejectReason ?? 'Pembayaran gagal.');
       }
     } on ApiException catch (e) {
+      // Auto-poll diam: simpan galat, hanya SnackBar bila manual.
+      _pollError = e.message;
       if (manual && mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(e.message)));
       }
+    } finally {
+      _checking = false;
     }
   }
 
@@ -242,7 +315,7 @@ class _PaymentPageState extends State<PaymentPage> {
     try {
       await PaymentApi(widget.api).cancel(current.id);
       if (!mounted) return;
-      _poll?.cancel();
+      _stopPolling();
       if (Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
       } else {
@@ -277,15 +350,23 @@ class _PaymentPageState extends State<PaymentPage> {
 
   Widget _checkout() {
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.fromLTRB(
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg,
+        AppSpacing.lg +
+            MediaQuery.of(context).padding.bottom +
+            AppSpacing.sm,
+      ),
       children: [
         const Card(
           child: Padding(
-            padding: EdgeInsets.all(16),
+            padding: EdgeInsets.all(AppSpacing.lg),
             child: Text(
                 'Bayar via QRIS dinamis: pindai kode, nominal tampil otomatis, akses dibuka otomatis setelah terkonfirmasi. Tanpa unggah bukti.'),
           ),
         ),
+        const SizedBox(height: AppSpacing.md),
         TextField(
           controller: _voucherCtrl,
           textCapitalization: TextCapitalization.characters,
@@ -296,24 +377,27 @@ class _PaymentPageState extends State<PaymentPage> {
         ),
         if (_voucherError != null)
           Padding(
-            padding: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.only(top: AppSpacing.sm),
             child: Text(_voucherError!,
                 style: const TextStyle(color: Colors.red)),
           ),
-        const SizedBox(height: 8),
+        const SizedBox(height: AppSpacing.sm),
         OutlinedButton.icon(
           onPressed: _busy ? null : _applyVoucher,
+          style: OutlinedButton.styleFrom(
+            minimumSize: const Size(64, 48),
+          ),
           icon: const Icon(Icons.confirmation_number_outlined),
           label: const Text('Validasi voucher'),
         ),
         if (_discount != null)
           Padding(
-            padding: const EdgeInsets.only(top: 8),
+            padding: const EdgeInsets.only(top: AppSpacing.sm),
             child: Chip(
                 label: Text(
                     'Diskon ${formatIDR(_discount!.discountAmount)} (${_discount!.code})')),
           ),
-        const SizedBox(height: 16),
+        const SizedBox(height: AppSpacing.lg),
         FilledButton(
           onPressed: _busy ? null : _create,
           style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
@@ -328,35 +412,61 @@ class _PaymentPageState extends State<PaymentPage> {
     return RefreshIndicator(
       onRefresh: () => _check(true),
       child: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg +
+              MediaQuery.of(context).padding.bottom +
+              AppSpacing.sm,
+        ),
         children: [
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppSpacing.lg),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('Invoice ${p.invoice}',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   Text('Tagihan: ${formatIDR(p.amountExpected)}',
                       style: const TextStyle(
                           fontSize: 24, fontWeight: FontWeight.w900)),
                   if (p.voucherCode != null)
                     Text('Voucher: ${p.voucherCode}'),
                   if (p.promoSlug != null) Text('Promo: ${p.promoSlug}'),
-                  const SizedBox(height: 8),
-                  Chip(
-                    label: Text(_statusLabel(p.status)),
-                    backgroundColor: p.isVerified
-                        ? Colors.green.shade100
-                        : p.isRejected
-                            ? Colors.red.shade100
-                            : Colors.amber.shade100,
+                  const SizedBox(height: AppSpacing.sm),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.md,
+                        vertical: AppSpacing.sm),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border.all(
+                        color: p.isVerified
+                            ? Colors.green
+                            : p.isRejected
+                                ? Colors.red
+                                : Colors.amber.shade800,
+                      ),
+                      borderRadius:
+                          BorderRadius.circular(AppRadius.pill),
+                    ),
+                    child: Text(_statusLabel(p.status),
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: p.isVerified
+                                ? Colors.green.shade700
+                                : p.isRejected
+                                    ? Colors.red.shade700
+                                    : Colors.amber.shade800)),
                   ),
                   if (p.isRejected && p.rejectReason != null)
                     Padding(
-                      padding: const EdgeInsets.only(top: 8),
+                      padding:
+                          const EdgeInsets.only(top: AppSpacing.sm),
                       child: Text('Alasan: ${p.rejectReason}'),
                     ),
                 ],
@@ -364,8 +474,11 @@ class _PaymentPageState extends State<PaymentPage> {
             ),
           ),
           if (_lastRejection != null && p.isRejected) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             FilledButton(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
               onPressed: () {
                 setState(() {
                   _payment = null;
@@ -378,10 +491,10 @@ class _PaymentPageState extends State<PaymentPage> {
             ),
           ],
           if (p.isPending) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpacing.sm),
             Card(
               child: Padding(
-                padding: const EdgeInsets.all(16),
+                padding: const EdgeInsets.all(AppSpacing.lg),
                 child: Column(
                   children: [
                     if (_qrLoading)
@@ -395,36 +508,67 @@ class _PaymentPageState extends State<PaymentPage> {
                     else ...[
                       const Icon(Icons.qr_code_2,
                           size: 64, color: Colors.grey),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppSpacing.sm),
                       Text(_qrError ?? 'QR belum tersedia.',
                           textAlign: TextAlign.center),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppSpacing.sm),
                       OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          minimumSize: const Size(64, 48),
+                        ),
                         onPressed: _loadQr,
                         icon: const Icon(Icons.refresh),
                         label: const Text('Muat ulang QR'),
                       ),
                     ],
-                    const SizedBox(height: 8),
+                    const SizedBox(height: AppSpacing.sm),
                     const Text(
                       'Pindai dengan m-banking / e-wallet apa pun — nominal tampil otomatis.',
                       textAlign: TextAlign.center,
                     ),
                     if (_qrRemaining != null && !_qrExpired) ...[
-                      const SizedBox(height: 4),
-                      Chip(
-                        label: Text('QR berlaku $_qrCountdown'),
-                        backgroundColor: Colors.blue.shade50,
-                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md,
+                            vertical: AppSpacing.sm),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          border:
+                              Border.all(color: AppColors.primaryContainer),
+                          borderRadius:
+                              BorderRadius.circular(AppRadius.pill),
+                        ),
+                        child: Text('QR berlaku $_qrCountdown',
+                            style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.primary)),
+                      )
                     ],
                     if (_qrExpired) ...[
-                      const SizedBox(height: 4),
-                      const Chip(
-                        label: Text('QR kedaluwarsa'),
-                        backgroundColor: Color(0xFFFFEBEE),
+                      const SizedBox(height: AppSpacing.xs),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: AppSpacing.md,
+                            vertical: AppSpacing.sm),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          border: Border.all(color: AppColors.rose),
+                          borderRadius:
+                              BorderRadius.circular(AppRadius.pill),
+                        ),
+                        child: const Text('QR kedaluwarsa',
+                            style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.rose)),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: AppSpacing.sm),
                       FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          minimumSize: const Size(64, 48),
+                        ),
                         onPressed: _refreshing ? null : _refreshQr,
                         icon: _refreshing
                             ? const SizedBox(
@@ -442,11 +586,16 @@ class _PaymentPageState extends State<PaymentPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 8),
-            const Text(
-              'Status diperiksa otomatis tiap 5 detik. Tarik ke bawah untuk periksa manual.',
-              style: TextStyle(fontSize: 11)),
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              _pollError == null
+                  ? 'Status diperiksa otomatis (5 dtk, lalu 10 dtk, lalu 15 dtk). Tarik ke bawah untuk periksa manual.'
+                  : 'Refresh otomatis terakhir gagal ($_pollError). Tarik ke bawah untuk periksa manual.',
+              style: AppText.small),
             TextButton.icon(
+              style: TextButton.styleFrom(
+                minimumSize: const Size(64, 48),
+              ),
               onPressed: _busy ? null : _confirmCancel,
               icon: const Icon(Icons.delete_outline,
                   size: 16, color: Colors.red),
@@ -457,7 +606,7 @@ class _PaymentPageState extends State<PaymentPage> {
           if (p.isVerified)
             const Card(
               child: Padding(
-                padding: EdgeInsets.all(16),
+                padding: EdgeInsets.all(AppSpacing.lg),
                 child: Text(
                     'Pembayaran terkonfirmasi DOKU. Akses kursus telah dibuka — lanjutkan belajar di Kursusku.'),
               ),

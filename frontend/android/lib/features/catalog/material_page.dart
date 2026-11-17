@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import '../learning/progress_api.dart';
 import '../learning/quiz_api.dart';
 import '../learning/submission_api.dart';
@@ -96,56 +97,73 @@ class _MaterialDetailPageState extends State<MaterialDetailPage> {
           ? StateViews.loading()
           : _error != null
               ? StateViews.error(_error!, _load)
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: ListView(
-                    padding: const EdgeInsets.all(16),
-                    children: [
-                      if (widget.material.type == 'kuis')
-                        _QuizBody(
-                          api: widget.api,
-                          materialId: _numericId!,
-                          passScore: _detail?.passScore ?? 70,
-                          onPass: _markDone,
-                        )
-                      else if (widget.material.type == 'tugas')
-                        _TaskBody(
-                          api: widget.api,
-                          materialId: _numericId!,
-                          brief: tiptapToText(_detail?.content),
-                          onSubmitted: _markDone,
-                        )
-                      else ...[
-                        if (tiptapToText(_detail?.content).isNotEmpty)
-                          Card(
-                            child: Padding(
-                              padding: const EdgeInsets.all(16),
-                              child: Text(
-                                tiptapToText(_detail?.content),
-                                style: const TextStyle(height: 1.6),
-                              ),
-                            ),
-                          )
-                        else
-                          const Card(
-                            child: Padding(
-                              padding: EdgeInsets.all(16),
-                              child: Text('Konten materi belum tersedia.'),
-                            ),
-                          ),
-                        const SizedBox(height: 16),
-                        FilledButton.icon(
-                          onPressed: _done ? null : _markDone,
-                          icon: Icon(
-                              _done ? Icons.check_circle : Icons.arrow_forward),
-                          label: Text(_done
-                              ? 'Selesai — lanjut ke materi berikut'
-                              : 'Berikutnya (tandai selesai)'),
-                        ),
-                      ],
-                    ],
+              : _buildContent(),
+    );
+  }
+
+  Widget _buildContent() {
+    // Tugas punya RefreshIndicator + ListView sendiri (status/history
+    // digabung via Future.wait di _TaskBody) agar tidak ada scroll bersarang.
+    if (widget.material.type == 'tugas') {
+      return _TaskBody(
+        api: widget.api,
+        materialId: _numericId!,
+        brief: tiptapToText(_detail?.content),
+        onSubmitted: _markDone,
+      );
+    }
+    return RefreshIndicator(
+      onRefresh: _load,
+      child: ListView(
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg +
+              MediaQuery.of(context).padding.bottom +
+              AppSpacing.sm,
+        ),
+        children: [
+          if (widget.material.type == 'kuis')
+            _QuizBody(
+              api: widget.api,
+              materialId: _numericId!,
+              passScore: _detail?.passScore ?? 70,
+              onPass: _markDone,
+            )
+          else ...[
+            if (tiptapToText(_detail?.content).isNotEmpty)
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Text(
+                    tiptapToText(_detail?.content),
+                    style: const TextStyle(height: 1.6),
                   ),
                 ),
+              )
+            else
+              const Card(
+                child: Padding(
+                  padding: EdgeInsets.all(AppSpacing.lg),
+                  child: Text('Konten materi belum tersedia.'),
+                ),
+              ),
+            const SizedBox(height: AppSpacing.lg),
+            FilledButton.icon(
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
+              onPressed: _done ? null : _markDone,
+              icon: Icon(
+                  _done ? Icons.check_circle : Icons.arrow_forward),
+              label: Text(_done
+                  ? 'Selesai — lanjut ke materi berikut'
+                  : 'Berikutnya (tandai selesai)'),
+            ),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -193,10 +211,15 @@ class _QuizBodyState extends State<_QuizBody> {
     });
     try {
       final api = QuizApi(widget.api);
-      final qs = await api.questions(widget.materialId);
-      final best = await api.best(widget.materialId);
-      final history = await api.history(widget.materialId);
+      final results = await Future.wait([
+        api.questions(widget.materialId),
+        api.best(widget.materialId),
+        api.history(widget.materialId),
+      ]);
       if (!mounted) return;
+      final qs = results[0] as List<QuizQuestion>;
+      final best = results[1] as QuizBest?;
+      final history = results[2] as List<QuizAttemptRow>;
       setState(() {
         _questions = qs;
         _best = best;
@@ -249,14 +272,21 @@ class _QuizBodyState extends State<_QuizBody> {
   }
 
   Future<void> _refreshBest() async {
-    final api = QuizApi(widget.api);
-    final best = await api.best(widget.materialId);
-    final history = await api.history(widget.materialId);
-    if (!mounted) return;
-    setState(() {
-      _best = best;
-      _history = history.take(5).toList();
-    });
+    try {
+      final api = QuizApi(widget.api);
+      final results = await Future.wait([
+        api.best(widget.materialId),
+        api.history(widget.materialId),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _best = results[0] as QuizBest?;
+        _history = (results[1] as List<QuizAttemptRow>).take(5).toList();
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _submitError = e.message);
+    }
   }
 
   @override
@@ -266,16 +296,20 @@ class _QuizBodyState extends State<_QuizBody> {
     if (_questions.isEmpty) {
       return const Card(
           child: Padding(
-              padding: EdgeInsets.all(16),
+              padding: EdgeInsets.all(AppSpacing.lg),
               child: Text('Kuis ini belum memiliki soal.')));
     }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Card(
-          color: Theme.of(context).colorScheme.secondaryContainer,
+          color: Colors.white,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            side: const BorderSide(color: AppColors.primaryBorder),
+          ),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(AppSpacing.md),
             child: Text(
               'Nilai minimal $_effectivePass untuk lolos'
               '${_best != null && _best!.attempts > 0 ? ' · Terbaik ${_best!.bestScore ?? 0} dari ${_best!.attempts} percobaan${_best!.passed ? ' · Lulus' : ''}' : ''}',
@@ -283,17 +317,17 @@ class _QuizBodyState extends State<_QuizBody> {
             ),
           ),
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: AppSpacing.md),
         for (var qi = 0; qi < _questions.length; qi++) ...[
           Card(
             child: Padding(
-              padding: const EdgeInsets.all(12),
+              padding: const EdgeInsets.all(AppSpacing.md),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text('${qi + 1}. ${_questions[qi].text}',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 8),
+                  const SizedBox(height: AppSpacing.sm),
                   RadioGroup<int>(
                     groupValue: _answers[qi],
                     onChanged: (int? v) {
@@ -312,7 +346,7 @@ class _QuizBodyState extends State<_QuizBody> {
                                     setState(() => _answers[qi] = oi),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
-                                  vertical: 6),
+                                  vertical: AppSpacing.sm),
                               child: Row(
                                 children: [
                                   Radio<int>(value: oi),
@@ -332,13 +366,16 @@ class _QuizBodyState extends State<_QuizBody> {
               ),
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
         ],
         if (_submitError != null) ...[
           AuthErrorInline(message: _submitError!),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
         ],
         FilledButton.icon(
+          style: FilledButton.styleFrom(
+            minimumSize: const Size.fromHeight(48),
+          ),
           onPressed: (!_complete || _sending) ? null : _submit,
           icon: _sending
               ? const SizedBox.square(
@@ -350,20 +387,25 @@ class _QuizBodyState extends State<_QuizBody> {
               'Kirim jawaban (${_answers.where((a) => a != null).length}/${_questions.length})'),
         ),
         const Padding(
-          padding: EdgeInsets.symmetric(vertical: 8),
+          padding: EdgeInsets.symmetric(vertical: AppSpacing.sm),
           child: Text(
             'Dapat diulang tanpa batas — nilai terbaik yang dipakai. Hasil hanya berupa nilai.',
             textAlign: TextAlign.center,
-            style: TextStyle(fontSize: 11),
+            style: AppText.small,
           ),
         ),
         if (_last != null)
           Card(
-            color: _last!.passed
-                ? Colors.green.shade50
-                : Colors.amber.shade50,
+            color: Colors.white,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              side: BorderSide(
+                  color: _last!.passed
+                      ? Colors.green.shade200
+                      : Colors.amber.shade300),
+            ),
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(AppSpacing.lg),
               child: Column(
                 children: [
                   Text(_last!.passed ? 'Lulus!' : 'Belum lulus',
@@ -377,7 +419,7 @@ class _QuizBodyState extends State<_QuizBody> {
             ),
           ),
         if (_history.isNotEmpty) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpacing.sm),
           const Text('Riwayat percobaan',
               style: TextStyle(fontWeight: FontWeight.bold)),
           for (var i = 0; i < _history.length; i++)
@@ -390,6 +432,10 @@ class _QuizBodyState extends State<_QuizBody> {
               ),
             ),
         ],
+        SizedBox(
+          height:
+              MediaQuery.of(context).padding.bottom + AppSpacing.sm,
+        ),
       ],
     );
   }
@@ -403,36 +449,23 @@ class AuthErrorInline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
-        color: Theme.of(context).colorScheme.errorContainer,
-        borderRadius: BorderRadius.circular(12),
+        color: Colors.white,
+        border: Border.all(color: Colors.red.shade300),
+        borderRadius: BorderRadius.circular(AppRadius.md),
       ),
-      child: Text(message),
+      child: Text(message,
+          style: const TextStyle(fontSize: 12, color: AppColors.rose)),
     );
   }
-}
-
-class _TaskBody extends StatefulWidget {
-  const _TaskBody({
-    required this.api,
-    required this.materialId,
-    required this.brief,
-    required this.onSubmitted,
-  });
-
-  final ApiClient api;
-  final int materialId;
-  final String brief;
-  final VoidCallback onSubmitted;
-
-  @override
-  State<_TaskBody> createState() => _TaskBodyState();
 }
 
 class _TaskBodyState extends State<_TaskBody> {
   TaskStatus? _status;
   List<TaskSubmission> _history = [];
+  bool _loading = true;
+  String? _loadError;
   bool _busy = false;
   String? _error;
   final _noteCtrl = TextEditingController();
@@ -450,14 +483,30 @@ class _TaskBodyState extends State<_TaskBody> {
   }
 
   Future<void> _refresh() async {
-    final api = SubmissionApi(widget.api);
-    final st = await api.status(widget.materialId);
-    final hist = await api.history(widget.materialId);
-    if (!mounted) return;
     setState(() {
-      _status = st;
-      _history = hist;
+      _loading = true;
+      _loadError = null;
     });
+    try {
+      final api = SubmissionApi(widget.api);
+      final results = await Future.wait([
+        api.status(widget.materialId),
+        api.history(widget.materialId),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _status = results[0] as TaskStatus?;
+        _history = results[1] as List<TaskSubmission>;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() => _loadError = e.message);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _loadError = 'Gagal memuat status tugas: $e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   Future<void> _pickAndUpload() async {
@@ -509,74 +558,116 @@ class _TaskBodyState extends State<_TaskBody> {
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) return StateViews.loading('Memuat status tugas…');
+    if (_loadError != null) return StateViews.error(_loadError!, _refresh);
     final st = _status;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (widget.brief.isNotEmpty)
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Text(widget.brief,
-                  style: const TextStyle(height: 1.6)),
-            ),
-          ),
-        if (st != null && st.attempts > 0)
-          Card(
-            color: st.passed ? Colors.green.shade50 : Colors.amber.shade50,
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Text(
-                st.passed
-                    ? 'Lulus — nilai terbaik ${st.bestScore ?? '-'} dari ${st.attempts} kiriman.'
-                    : 'Menunggu penilaian — ${st.attempts} kiriman${st.graded > 0 ? ' · ${st.graded} dinilai' : ''}.',
-                style: const TextStyle(fontWeight: FontWeight.bold),
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ListView(
+        padding: EdgeInsets.fromLTRB(
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg,
+          AppSpacing.lg +
+              MediaQuery.of(context).padding.bottom +
+              AppSpacing.sm,
+        ),
+        children: [
+          if (widget.brief.isNotEmpty)
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.lg),
+                child: Text(widget.brief,
+                    style: const TextStyle(height: 1.6)),
               ),
             ),
-          ),
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 4),
-          child: Text('Terkumpul ≠ lulus — kelulusan dan nilai dibaca dari server.'),
-        ),
-        if (_error != null) ...[
-          AuthErrorInline(message: _error!),
-          const SizedBox(height: 8),
-        ],
-        TextField(
-          controller: _noteCtrl,
-          maxLines: 2,
-          maxLength: 500,
-          decoration: const InputDecoration(
-            labelText: 'Catatan untuk instruktur (opsional)',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 8),
-        FilledButton.icon(
-          onPressed: _busy ? null : _pickAndUpload,
-          icon: _busy
-              ? const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(
-                      strokeWidth: 2, color: Colors.white))
-              : const Icon(Icons.upload_file),
-          label: Text(_history.isEmpty ? 'Pilih PDF & kumpulkan' : 'Kumpulkan revisi (PDF baru)'),
-        ),
-        if (_history.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          const Text('Riwayat kiriman',
-              style: TextStyle(fontWeight: FontWeight.bold)),
-          for (final h in _history)
-            ListTile(
-              dense: true,
-              leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
-              title: Text(h.originalName ?? 'tugas.pdf',
-                  overflow: TextOverflow.ellipsis),
-              subtitle: Text(
-                  '${h.status}${h.score != null ? ' · nilai ${h.score}' : ''}'),
+          if (st != null && st.attempts > 0)
+            Card(
+              color: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                side: BorderSide(
+                    color: st.passed
+                        ? Colors.green.shade200
+                        : Colors.amber.shade300),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Text(
+                  st.passed
+                      ? 'Lulus — nilai terbaik ${st.bestScore ?? '-'} dari ${st.attempts} kiriman.'
+                      : 'Menunggu penilaian — ${st.attempts} kiriman${st.graded > 0 ? ' · ${st.graded} dinilai' : ''}.',
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+              ),
             ),
+          const Padding(
+            padding: EdgeInsets.symmetric(vertical: AppSpacing.xs),
+            child: Text(
+              'Terkumpul ≠ lulus — kelulusan dan nilai dibaca dari server.',
+              style: AppText.small,
+            ),
+          ),
+          if (_error != null) ...[
+            AuthErrorInline(message: _error!),
+            const SizedBox(height: AppSpacing.sm),
+          ],
+          TextField(
+            controller: _noteCtrl,
+            maxLines: 2,
+            maxLength: 500,
+            decoration: const InputDecoration(
+              labelText: 'Catatan untuk instruktur (opsional)',
+              border: OutlineInputBorder(),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          FilledButton.icon(
+            style: FilledButton.styleFrom(
+              minimumSize: const Size.fromHeight(48),
+            ),
+            onPressed: _busy ? null : _pickAndUpload,
+            icon: _busy
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
+                : const Icon(Icons.upload_file),
+            label: Text(_history.isEmpty ? 'Pilih PDF & kumpulkan' : 'Kumpulkan revisi (PDF baru)'),
+          ),
+          if (_history.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.md),
+            const Text('Riwayat kiriman',
+                style: TextStyle(fontWeight: FontWeight.bold)),
+            for (final h in _history)
+              ListTile(
+                dense: true,
+                leading: const Icon(Icons.picture_as_pdf, color: Colors.red),
+                title: Text(h.originalName ?? 'tugas.pdf',
+                    overflow: TextOverflow.ellipsis),
+                subtitle: Text(
+                    '${h.status}${h.score != null ? ' · nilai ${h.score}' : ''}'),
+              ),
+          ],
         ],
-      ],
+      ),
     );
   }
+}
+
+class _TaskBody extends StatefulWidget {
+  const _TaskBody({
+    required this.api,
+    required this.materialId,
+    required this.brief,
+    required this.onSubmitted,
+  });
+
+  final ApiClient api;
+  final int materialId;
+  final String brief;
+  final VoidCallback onSubmitted;
+
+  @override
+  State<_TaskBody> createState() => _TaskBodyState();
 }

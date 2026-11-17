@@ -2,14 +2,16 @@ import 'package:flutter/material.dart';
 
 import '../../core/api_client.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import '../catalog/catalog_api.dart';
 import 'instructor_api.dart';
 
 /// Kursus yang saya ampu → struktur modul → materi.
 class InstructorCoursesPage extends StatefulWidget {
-  const InstructorCoursesPage({super.key, required this.api});
+  const InstructorCoursesPage({super.key, required this.api, this.showAppBar = true});
 
   final ApiClient api;
+  final bool showAppBar;
 
   @override
   State<InstructorCoursesPage> createState() => _InstructorCoursesPageState();
@@ -67,9 +69,7 @@ class _InstructorCoursesPageState extends State<InstructorCoursesPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Kursusku (Instruktur)')),
-      body: _loading
+    final Widget body = _loading
           ? StateViews.loading()
           : _error != null
               ? StateViews.error(_error!, _load)
@@ -79,15 +79,32 @@ class _InstructorCoursesPageState extends State<InstructorCoursesPage> {
                   : RefreshIndicator(
                       onRefresh: _load,
                       child: ListView.builder(
-                        padding: const EdgeInsets.all(12),
+                        padding: EdgeInsets.fromLTRB(
+                          AppSpacing.md,
+                          AppSpacing.md,
+                          AppSpacing.md,
+                          AppSpacing.md +
+                              MediaQuery.of(context).padding.bottom +
+                              AppSpacing.sm,
+                        ),
                         itemCount: _courses.length,
                         itemBuilder: (context, i) {
                           final c = _courses[i];
                           final open = _openCourseId == c.id;
                           return Card(
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.md),
+                              side: BorderSide(color: AppColors.border),
+                            ),
                             child: ExpansionTile(
                               key: ValueKey(c.id),
                               initiallyExpanded: false,
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                    AppRadius.md),
+                              ),
                               onExpansionChanged: (v) {
                                 if (v) {
                                   _open(c.id);
@@ -99,16 +116,23 @@ class _InstructorCoursesPageState extends State<InstructorCoursesPage> {
                                   style: const TextStyle(
                                       fontWeight: FontWeight.bold)),
                               subtitle: Text(
-                                  '${c.studentCount} peserta · ${c.pendingCount} menunggu dinilai'),
+                                  '${c.studentCount} peserta · ${c.pendingCount} menunggu dinilai',
+                                  style: AppText.small),
                               children: [
                                 if (open && _treeLoading)
                                   const Padding(
-                                    padding: EdgeInsets.all(16),
+                                    padding:
+                                        EdgeInsets.all(AppSpacing.lg),
                                     child: CircularProgressIndicator(),
                                   )
                                 else
                                   for (final m in _tree)
                                     ExpansionTile(
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius:
+                                            BorderRadius.circular(
+                                                AppRadius.md),
+                                      ),
                                       title: Text(m.title),
                                       children: [
                                         for (final s in m.subModules)
@@ -120,7 +144,8 @@ class _InstructorCoursesPageState extends State<InstructorCoursesPage> {
                                                   maxLines: 2,
                                                   overflow:
                                                       TextOverflow.ellipsis),
-                                              subtitle: Text(mat.type),
+                                              subtitle: Text(mat.type,
+                                                  style: AppText.small),
                                             ),
                                       ],
                                     ),
@@ -129,7 +154,13 @@ class _InstructorCoursesPageState extends State<InstructorCoursesPage> {
                           );
                         },
                       ),
-                    ),
-    );
+                    );
+    if (widget.showAppBar) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Kursusku (Instruktur)')),
+        body: body,
+      );
+    }
+    return body;
   }
 }

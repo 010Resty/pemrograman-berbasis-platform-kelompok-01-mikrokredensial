@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../core/api_client.dart';
 import '../../core/file_url.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import 'instructor_api.dart';
 
 /// Nilai satu pengumpulan: rubrik seragam 3 kriteria (bobot sama),
@@ -115,7 +116,14 @@ class _GradePageState extends State<GradePage> {
                               'Peserta belum mengumpulkan tugas ini.')
                         ])
                       : ListView.builder(
-                          padding: const EdgeInsets.all(12),
+                          padding: EdgeInsets.fromLTRB(
+                            AppSpacing.md,
+                            AppSpacing.md,
+                            AppSpacing.md,
+                            AppSpacing.md +
+                                MediaQuery.of(context).padding.bottom +
+                                AppSpacing.sm,
+                          ),
                           itemCount: _rows.length,
                           itemBuilder: (context, i) {
                             final r = _rows[i];
@@ -123,9 +131,18 @@ class _GradePageState extends State<GradePage> {
                             final avatar =
                                 resolveAvatarUrl(r.studentAvatarUrl, widget.api.baseUrl);
                             return Card(
-                              margin: const EdgeInsets.only(bottom: 12),
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(
+                                borderRadius:
+                                    BorderRadius.circular(AppRadius.md),
+                                side:
+                                    BorderSide(color: AppColors.border),
+                              ),
+                              margin: const EdgeInsets.only(
+                                  bottom: AppSpacing.md),
                               child: Padding(
-                                padding: const EdgeInsets.all(12),
+                                padding:
+                                    const EdgeInsets.all(AppSpacing.md),
                                 child: Column(
                                   crossAxisAlignment:
                                       CrossAxisAlignment.start,
@@ -134,8 +151,15 @@ class _GradePageState extends State<GradePage> {
                                       children: [
                                         CircleAvatar(
                                           backgroundImage: avatar != null
-                                              ? NetworkImage(avatar)
+                                              // R5: decode secukupnya (avatar daftar).
+                                              ? ResizeImage(NetworkImage(avatar),
+                                                  width: 96, height: 96)
                                               : null,
+                                          onBackgroundImageError:
+                                              avatar != null
+                                                  ? (Object err,
+                                                          StackTrace? stack) {}
+                                                  : null,
                                           child: avatar != null
                                               ? null
                                               : Text((r.studentName?.isNotEmpty ??
@@ -144,7 +168,7 @@ class _GradePageState extends State<GradePage> {
                                                       .toUpperCase()
                                                   : '#'),
                                         ),
-                                        const SizedBox(width: 8),
+                                        const SizedBox(width: AppSpacing.sm),
                                         Expanded(
                                           child: Text(
                                               r.studentName ??
@@ -156,13 +180,14 @@ class _GradePageState extends State<GradePage> {
                                       ],
                                     ),
                                     Text(
-                                        '${r.studentNim ?? '-'} · ${formatDateTime(r.submittedAt)} · ${r.status}'),
+                                        '${r.studentNim ?? '-'} · ${formatDateTime(r.submittedAt)} · ${r.status}',
+                                        style: AppText.small),
                                     if (r.score != null)
                                       Text('Nilai saat ini: ${r.score}',
                                           style: const TextStyle(
                                               fontWeight:
                                                   FontWeight.bold)),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: AppSpacing.sm),
                                     _RubricSlider(
                                       label: 'Kelengkapan',
                                       value: f.kelengkapan,
@@ -202,7 +227,7 @@ class _GradePageState extends State<GradePage> {
                                           () => f.decision =
                                               v ?? 'passed'),
                                     ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: AppSpacing.sm),
                                     TextField(
                                       controller: f.feedbackCtrl,
                                       maxLines: 2,
@@ -213,8 +238,17 @@ class _GradePageState extends State<GradePage> {
                                       ),
                                       onChanged: (v) => f.feedback = v,
                                     ),
-                                    const SizedBox(height: 8),
+                                    const SizedBox(height: AppSpacing.sm),
                                     FilledButton(
+                                      style: FilledButton.styleFrom(
+                                        minimumSize:
+                                            const Size.fromHeight(48),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(
+                                                  AppRadius.md),
+                                        ),
+                                      ),
                                       onPressed: () => _submit(r),
                                       child: const Text('Simpan nilai'),
                                     ),
@@ -260,8 +294,7 @@ class _RubricSlider extends StatelessWidget {
       children: [
         SizedBox(
             width: 110,
-            child: Text(label,
-                style: const TextStyle(fontSize: 12))),
+            child: Text(label, style: AppText.small)),
         Expanded(
           child: Slider(
               value: value, min: 0, max: 100, divisions: 20,

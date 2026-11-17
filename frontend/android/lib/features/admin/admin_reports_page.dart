@@ -6,6 +6,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../core/api_client.dart';
 import '../../shared_ui.dart';
+import '../../theme/app_tokens.dart';
 import 'report_api.dart';
 
 enum _Range { all, d7, d30 }
@@ -13,9 +14,10 @@ enum _Range { all, d7, d30 }
 /// Laporan admin read-only: ringkasan + keuangan + per kursus.
 /// Sumber: `GET /admin/reports` (agregat server, tanpa angka contoh).
 class AdminReportsPage extends StatefulWidget {
-  const AdminReportsPage({super.key, required this.api});
+  const AdminReportsPage({super.key, required this.api, this.showAppBar = true});
 
   final ApiClient api;
+  final bool showAppBar;
 
   @override
   State<AdminReportsPage> createState() => _AdminReportsPageState();
@@ -110,31 +112,24 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Laporan'),
-        actions: [
-          IconButton(
-            tooltip: 'Bagikan CSV',
-            icon: _sharing
-                ? const SizedBox(
-                    width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.share_outlined),
-            onPressed: _data == null ? null : _shareCsv,
-          ),
-        ],
-      ),
-      body: _loading
+    final Widget body = _loading
           ? StateViews.loading()
           : _error != null
               ? StateViews.error(_error!, _load)
               : RefreshIndicator(
                   onRefresh: _load,
                   child: ListView(
-                    padding: const EdgeInsets.all(12),
+                    padding: EdgeInsets.fromLTRB(
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md,
+                      AppSpacing.md +
+                          MediaQuery.of(context).padding.bottom +
+                          AppSpacing.sm,
+                    ),
                     children: [
                       Wrap(
-                        spacing: 8,
+                        spacing: AppSpacing.sm,
                         children: [
                           ChoiceChip(
                             label: const Text('Semua'),
@@ -162,7 +157,7 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
                           ),
                         ],
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: AppSpacing.md),
                       _SectionTitle('Ringkasan'),
                       _StatGrid(items: [
                         _Stat('Peserta', '${_s().totalStudents}'),
@@ -172,11 +167,17 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
                         _Stat('Enrollment aktif', '${_s().activeEnrollments}'),
                         _Stat('Enrollment selesai', '${_s().completedEnrollments}'),
                       ]),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: AppSpacing.md),
                       _SectionTitle('Keuangan'),
                       Card(
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppRadius.md),
+                          side: BorderSide(color: AppColors.border),
+                        ),
                         child: Padding(
-                          padding: const EdgeInsets.all(16),
+                          padding: const EdgeInsets.all(AppSpacing.lg),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -185,8 +186,9 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
                                 style: const TextStyle(
                                     fontSize: 24, fontWeight: FontWeight.w900),
                               ),
-                              const Text('Pendapatan diverifikasi'),
-                              const SizedBox(height: 8),
+                              const Text('Pendapatan diverifikasi',
+                                  style: AppText.small),
+                              const SizedBox(height: AppSpacing.sm),
                               Text(
                                   '${_s().paymentsMenunggu} menunggu · ${_s().paymentsDiverifikasi} diverifikasi · ${_s().paymentsDitolak} ditolak'),
                               Text('${_s().voucherRedemptions} voucher ditukar'),
@@ -194,23 +196,31 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
                           ),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: AppSpacing.md),
                       _SectionTitle('Sertifikat'),
                       Card(
+                        elevation: 0,
+                        shape: RoundedRectangleBorder(
+                          borderRadius:
+                              BorderRadius.circular(AppRadius.md),
+                          side: BorderSide(color: AppColors.border),
+                        ),
                         child: ListTile(
-                          leading: const Icon(Icons.verified, color: Colors.green),
+                          leading: const Icon(Icons.verified,
+                              color: AppColors.success),
                           title: Text(
                               '${_data!.certificatesIssued} terbit · ${_data!.certificatesRevoked} dicabut'),
-                          subtitle: const Text('Periode filter yang dipilih'),
+                          subtitle: const Text('Periode filter yang dipilih',
+                              style: AppText.small),
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: AppSpacing.md),
                       _SectionTitle('Per kursus (${_data!.perCourse.length})'),
                       const Padding(
-                        padding: EdgeInsets.only(bottom: 8),
+                        padding: EdgeInsets.only(bottom: AppSpacing.sm),
                         child: Text(
                           'Progres rata-rata & antrean nilai adalah snapshot saat ini (tidak terpengaruh filter tanggal).',
-                          style: TextStyle(fontSize: 11, color: Colors.grey),
+                          style: AppText.small,
                         ),
                       ),
                       if (_data!.perCourse.isEmpty)
@@ -219,17 +229,35 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
                       else
                         for (final c in _data!.perCourse)
                           Card(
-                            margin: const EdgeInsets.only(bottom: 8),
+                            elevation: 0,
+                            margin: const EdgeInsets.only(
+                                bottom: AppSpacing.sm),
+                            shape: RoundedRectangleBorder(
+                              borderRadius:
+                                  BorderRadius.circular(AppRadius.md),
+                              side:
+                                  BorderSide(color: AppColors.border),
+                            ),
                             child: ExpansionTile(
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(
+                                    AppRadius.md),
+                              ),
                               title: Text(c.title,
                                   maxLines: 2, overflow: TextOverflow.ellipsis),
                               subtitle: Text(
-                                  '${c.status} · ${c.studentCount} peserta · ${formatIDR(c.revenueVerified)}'),
+                                  '${c.status} · ${c.studentCount} peserta · ${formatIDR(c.revenueVerified)}',
+                                  style: AppText.small),
                               children: [
                                 Padding(
-                                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                                  padding: const EdgeInsets.fromLTRB(
+                                      AppSpacing.lg,
+                                      0,
+                                      AppSpacing.lg,
+                                      AppSpacing.lg),
                                   child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
                                     children: [
                                       Text('Progres rata-rata: ${c.avgProgress}%'),
                                       Text(
@@ -246,8 +274,26 @@ class _AdminReportsPageState extends State<AdminReportsPage> {
                           ),
                     ],
                   ),
-                ),
-    );
+                );
+    if (widget.showAppBar) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Laporan'),
+          actions: [
+            IconButton(
+              tooltip: 'Bagikan CSV',
+              icon: _sharing
+                  ? const SizedBox(
+                      width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                  : const Icon(Icons.share_outlined),
+              onPressed: _data == null ? null : _shareCsv,
+            ),
+          ],
+        ),
+        body: body,
+      );
+    }
+    return body;
   }
 
   AdminReportSummary _s() => _data!.summary;
@@ -261,7 +307,7 @@ class _SectionTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
       child: Text(text,
           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
     );
@@ -282,29 +328,39 @@ class _StatGrid extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return GridView.count(
-      crossAxisCount: 2,
-      shrinkWrap: true,
-      physics: const NeverScrollableScrollPhysics(),
-      mainAxisSpacing: 8,
-      crossAxisSpacing: 8,
-      childAspectRatio: 1.6,
-      children: [
-        for (final s in items)
-          Card(
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(s.value,
-                      style: const TextStyle(
-                          fontSize: 24, fontWeight: FontWeight.bold)),
-                  Text(s.label),
-                ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final wide = constraints.maxWidth >= 600;
+        return GridView.count(
+          crossAxisCount: wide ? 3 : 2,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: AppSpacing.sm,
+          crossAxisSpacing: AppSpacing.sm,
+          childAspectRatio: 1.6,
+          children: [
+            for (final s in items)
+              Card(
+                elevation: 0,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  side: BorderSide(color: AppColors.border),
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(s.value,
+                          style: const TextStyle(
+                              fontSize: 24, fontWeight: FontWeight.bold)),
+                      Text(s.label, style: AppText.small),
+                    ],
+                  ),
+                ),
               ),
-            ),
-          ),
-      ],
+          ],
+        );
+      },
     );
   }
 }
