@@ -42,7 +42,7 @@
 		<span class="min-w-0">
 			<span class="block truncate text-xs font-medium text-slate-500">{label}</span>
 			<span class="block text-lg leading-tight font-bold text-slate-900">{value}</span>
-			{#if sub}<span class="block truncate text-xs text-slate-400">{sub}</span>{/if}
+			{#if sub}<span class="block truncate text-xs text-slate-500">{sub}</span>{/if}
 		</span>
 	</a>
 {:else}
@@ -56,7 +56,7 @@
 		<div class="min-w-0">
 			<p class="truncate text-xs font-medium text-slate-500">{label}</p>
 			<p class="text-lg leading-tight font-bold text-slate-900">{value}</p>
-			{#if sub}<p class="truncate text-xs text-slate-400">{sub}</p>{/if}
+			{#if sub}<p class="truncate text-xs text-slate-500">{sub}</p>{/if}
 		</div>
 	</div>
 {/if}

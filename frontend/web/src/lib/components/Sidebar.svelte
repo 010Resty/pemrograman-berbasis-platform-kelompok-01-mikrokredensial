@@ -10,15 +10,21 @@
 		/**
 		 * Anak sub-menu. Bila diisi, label item dirender sebagai judul
 		 * kelompok dan anak-anaknya tampil sebagai menu di bawahnya.
-		 * Bila `collapsible: true`, kelompok bisa dilipat/dibentangkan lewat
-		 * tombol chevron (default terbuka bila halaman aktif ada di dalamnya).
-		 * Bila `linkable: true`, label grup menjadi tautan ke `href`-nya
-		 * sendiri (mis. menu "Promo" → halaman semua promo) dengan tombol
-		 * chevron terpisah untuk dropdown-nya.
+		 * Bila `collapsible: true`, kelompok bisa dilipat/dibentangkan:
+		 * - `linkable: true` → label grup menjadi tautan ke `href`-nya
+		 *   sendiri dengan tombol chevron terpisah untuk dropdown-nya.
+		 * - tanpa `linkable` → seluruh baris header (ikon + label + chevron)
+		 *   menjadi tombol toggle dropdown seperti menu biasa.
+		 * Default terbuka bila halaman aktif ada di dalamnya.
 		 */
 		children?: NavItem[];
 		collapsible?: boolean;
 		linkable?: boolean;
+		/**
+		 * Gaya daftar sub-menu. `'panel'` = menjorok ke kanan dengan latar
+		 * sedikit lebih gelap + tanpa ikon per item (mis. dropdown Promo).
+		 */
+		submenu?: 'panel';
 	}
 
 	let {
@@ -171,7 +177,7 @@
 							<span class="text-xl font-bold tracking-tight text-slate-900">Aristoteles</span>
 							<span class="h-2 w-2 rounded-full bg-blue-500" aria-hidden="true"></span>
 						</span>
-						<span class="whitespace-nowrap text-[10px] font-semibold tracking-widest text-blue-600"
+						<span class="whitespace-nowrap text-xs font-semibold tracking-widest text-blue-600"
 							>MICRO-CREDENTIALS</span
 						>
 					</span>
@@ -236,7 +242,7 @@
 		<nav class="flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto" aria-label={navAriaLabel}>
 			{#if !isCollapsed && !navItems.some((i) => isGroup(i))}
 				<span
-					class="sidebar-text mb-1 px-3 text-[11px] font-bold tracking-wider text-slate-400 uppercase"
+					class="sidebar-text mb-1 px-3 text-xs font-bold tracking-wider text-slate-400 uppercase"
 					>Menu Utama</span
 				>
 			{/if}
@@ -267,7 +273,7 @@
 						<span class="sidebar-text flex-1 truncate text-sm">{entry.label}</span>
 						{#if entry.badge}
 							<span
-								class={`inline-flex min-w-6 items-center justify-center rounded-full px-2 py-0.5 text-[11px] font-bold ${
+								class={`inline-flex min-w-6 items-center justify-center rounded-full px-2 py-0.5 text-xs font-bold ${
 									active ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-600'
 								}`}
 								aria-label={`${entry.badge} baru`}
@@ -282,19 +288,43 @@
 				</a>
 			{/snippet}
 
+			{#snippet navLinkCompact(entry: NavItem)}
+				{@const active = isActive(entry.href)}
+				<a
+					href={entry.href}
+					aria-current={active ? 'page' : undefined}
+					onclick={closeMobileSidebar}
+					class={`group flex min-h-11 items-center gap-2 rounded-lg px-3 py-2.5 text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
+						active
+							? 'bg-blue-600 font-semibold text-white shadow-md shadow-blue-600/25 hover:bg-blue-700'
+							: 'font-medium text-slate-600 hover:bg-white hover:text-blue-700'
+					}`}
+				>
+					<span class="min-w-0 flex-1 truncate">{entry.label}</span>
+					{#if entry.badge}
+						<span
+							class={`inline-flex min-w-6 shrink-0 items-center justify-center rounded-full px-2 py-0.5 text-[11px] font-bold ${
+								active ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-600'
+							}`}
+							aria-label={`${entry.badge} baru`}
+						>
+							{entry.badge}
+						</span>
+					{/if}
+					{#if active}
+						<i class="fa-solid fa-chevron-right text-[10px] opacity-70" aria-hidden="true"></i>
+					{/if}
+				</a>
+			{/snippet}
+
 			{#each navItems as item (item.label)}
 				{#if isGroup(item)}
 					{@const open = isGroupOpen(item)}
 					{#if !isCollapsed}
 						{#if item.collapsible}
+							{#if item.linkable}
 							<div class="mt-3 flex items-center gap-1 first:mt-0">
-								{#if item.linkable}
-									<div class="min-w-0 flex-1">{@render navLink(item)}</div>
-								{:else}
-									<span class="sidebar-text min-w-0 flex-1 truncate px-3 text-[11px] font-bold tracking-wider text-slate-400 uppercase">
-										{item.label}
-									</span>
-								{/if}
+								<div class="min-w-0 flex-1">{@render navLink(item)}</div>
 								<button
 									type="button"
 									onclick={() => toggleGroup(item)}
@@ -309,16 +339,46 @@
 								</button>
 							</div>
 						{:else}
+							{@const groupActive = groupHasActive(item)}
+							<button
+								type="button"
+								onclick={() => toggleGroup(item)}
+								aria-expanded={open}
+								aria-label={open ? `Sembunyikan submenu ${item.label}` : `Tampilkan submenu ${item.label}`}
+								class={`group mt-3 flex min-h-11 w-full items-center gap-3 rounded-xl px-3.5 py-3 text-left transition-all first:mt-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${groupActive ? 'bg-blue-600 font-semibold text-white shadow-lg shadow-blue-600/25 hover:bg-blue-700' : 'font-medium text-slate-600 hover:bg-blue-50 hover:text-blue-700'}`}
+							>
+								<span class="flex w-6 shrink-0 justify-center">
+									<i
+										class={`fa-solid ${item.icon} text-base transition-transform group-hover:scale-110 ${groupActive ? 'text-white' : 'text-slate-400 group-hover:text-blue-600'}`}
+										aria-hidden="true"
+									></i>
+								</span>
+								<span class="sidebar-text min-w-0 flex-1 truncate text-sm">{item.label}</span>
+								<i
+									class={`fa-solid fa-chevron-down text-xs transition-transform duration-200 ${open ? '' : '-rotate-90'} ${groupActive ? 'text-white/80' : 'text-slate-400'}`}
+									aria-hidden="true"
+								></i>
+							</button>
+							{/if}
+						{:else}
 							<span
-								class="sidebar-text mt-3 mb-1 px-3 text-[11px] font-bold tracking-wider text-slate-400 uppercase first:mt-0"
+								class="sidebar-text mt-3 mb-1 px-3 text-xs font-bold tracking-wider text-slate-400 uppercase first:mt-0"
 								>{item.label}</span
 							>
 						{/if}
 					{/if}
 					{#if open || isCollapsed}
-						{#each item.children! as child (child.href)}
-							{@render navLink(child)}
-						{/each}
+						{#if item.submenu === 'panel' && !isCollapsed}
+							<div class="mt-1 ml-5 space-y-0.5 rounded-xl rounded-l-none border-l-2 border-slate-200 bg-slate-100/80 py-1.5 pr-1.5 pl-3">
+								{#each item.children! as child (child.href)}
+									{@render navLinkCompact(child)}
+								{/each}
+							</div>
+						{:else}
+							{#each item.children! as child (child.href)}
+								{@render navLink(child)}
+							{/each}
+						{/if}
 					{/if}
 				{:else}
 					{@render navLink(item)}
@@ -344,7 +404,7 @@
 			</a>
 			<div class="flex items-center justify-between px-2 pt-1">
 				<span
-					class="sidebar-text text-[10px] font-medium tracking-widest whitespace-nowrap text-slate-400 uppercase"
+					class="sidebar-text text-xs font-medium tracking-widest whitespace-nowrap text-slate-500 uppercase"
 					>ARISTOTELES · PLATFORM</span
 				>
 				<i class="fa-solid fa-shield-halved text-xs text-slate-300" aria-hidden="true"></i>

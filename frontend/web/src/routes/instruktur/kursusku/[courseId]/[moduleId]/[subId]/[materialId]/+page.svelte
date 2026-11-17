@@ -956,7 +956,7 @@
 				{#if serverMode && isServerId(materialId)}
 					<div class="mb-3 grid gap-3 rounded-xl border border-slate-200 bg-slate-50/60 p-3 sm:grid-cols-[180px_minmax(0,1fr)]">
 						<div>
-							<label for="change-significance" class="mb-1.5 block text-xs font-bold text-slate-700">Signifikansi (K-08)</label>
+							<label for="change-significance" class="mb-1.5 block text-xs font-bold text-slate-700">Jenis perubahan</label>
 							<select
 								id="change-significance"
 								bind:value={significance}
@@ -1234,7 +1234,7 @@
 			<section aria-labelledby="heading-riwayat" class="mt-6 overflow-hidden rounded-2xl border border-slate-200/60 bg-white">
 				<div class="border-b border-slate-100 bg-slate-50/70 px-5 py-4 sm:px-6">
 					<h2 id="heading-riwayat" class="text-sm font-extrabold text-slate-900">
-						<i class="fa-solid fa-clock-rotate-left mr-1.5 text-slate-400" aria-hidden="true"></i>Riwayat perubahan resmi (K-08)
+						<i class="fa-solid fa-clock-rotate-left mr-1.5 text-slate-400" aria-hidden="true"></i>Riwayat perubahan resmi
 					</h2>
 					<p class="mt-0.5 text-xs text-slate-500">Tercatat di server setiap kali materi disimpan — siapa, kapan, bagian apa, seberapa penting.</p>
 				</div>

@@ -338,7 +338,7 @@
 					type="button"
 					onclick={() => (activeFilter = f.value)}
 					aria-pressed={activeFilter === f.value}
-					class={`rounded-xl px-4 py-2 text-xs font-bold transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
+					class={`min-h-11 rounded-xl px-4 py-2 text-xs font-bold transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
 						activeFilter === f.value
 							? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
 							: 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'

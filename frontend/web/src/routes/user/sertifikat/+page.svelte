@@ -138,7 +138,7 @@
 	</div>
 
 	{#if loading}
-		<div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3" aria-label="Memuat sertifikat">
+		<div class="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3" role="status" aria-label="Memuat sertifikat">
 			{#each [1, 2, 3] as i (i)}
 				<div class="animate-pulse overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
 					<div class="h-44 bg-slate-100"></div>
@@ -262,7 +262,7 @@
 							</p>
 						{/if}
 
-						<p class="text-[11px] text-slate-400">Simpan kode verifikasi ini sebagai bukti kelulusan {cert.moduleTitle === null ? 'kursus' : 'modul'}.</p>
+						<p class="text-xs text-slate-500">Simpan kode verifikasi ini sebagai bukti kelulusan {cert.moduleTitle === null ? 'kursus' : 'modul'}.</p>
 					</div>
 				</article>
 			{/each}
@@ -283,7 +283,7 @@
 			</div>
 			<a
 				href="/user/kursusku"
-				class="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+				class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 			>
 				Kembali ke Kursusku <i class="fa-solid fa-arrow-right text-[10px]" aria-hidden="true"></i>
 			</a>

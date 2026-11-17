@@ -41,6 +41,8 @@
 	let uploading = $state(false);
 	let uploadError = $state('');
 	let editing = $state(false);
+	/** Mode ubah khusus bagian Identitas (nama + username) tanpa membuka seluruh form. */
+	let editingIdentity = $state(false);
 	let coverUploading = $state(false);
 
 	function coverSrc(p: UserProfile | null): string | null {
@@ -159,6 +161,7 @@
 
 	function cancelEdit(): void {
 		editing = false;
+		editingIdentity = false;
 		saveMessage = '';
 		saveOk = false;
 		fieldMsgs = {};
@@ -172,9 +175,27 @@
 		}
 	}
 
+	function startIdentityEdit(): void {
+		editingIdentity = true;
+		saveMessage = '';
+		saveOk = false;
+		fieldMsgs = {};
+	}
+
+	function cancelIdentityEdit(): void {
+		editingIdentity = false;
+		saveMessage = '';
+		saveOk = false;
+		fieldMsgs = {};
+		if (profile) {
+			name = profile.name;
+			username = profile.username;
+		}
+	}
+
 	async function save(e: SubmitEvent): Promise<void> {
 		e.preventDefault();
-		if (saving || !profile || !editing) return;
+		if (saving || !profile || (!editing && !editingIdentity)) return;
 		saving = true;
 		saveMessage = '';
 		saveOk = false;
@@ -192,6 +213,7 @@
 			saveOk = true;
 			saveMessage = 'Profil berhasil diperbarui.';
 			editing = false;
+			editingIdentity = false;
 			// Selaraskan nama di header/sidebar (sesi dibaca ulang dari /me).
 			void refreshSession();
 		} catch (err) {
@@ -267,6 +289,25 @@
 			<img src={cover} alt="" aria-hidden="true" class="absolute inset-0 h-full w-full object-cover" />
 			<div class="absolute inset-0 bg-gradient-to-t from-slate-900/85 via-slate-900/45 to-slate-900/25" aria-hidden="true"></div>
 		{/if}
+		<div class="absolute top-4 right-4 z-10 sm:top-6 sm:right-6">
+			{#if !editing}
+				<button
+					type="button"
+					onclick={() => startEdit()}
+					class="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-xs font-bold text-white backdrop-blur transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-white"
+				>
+					<i class="fa-solid fa-pen" aria-hidden="true"></i> Edit profil
+				</button>
+			{:else}
+				<button
+					type="button"
+					onclick={() => cancelEdit()}
+					class="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-white/25 bg-white/10 px-4 py-2.5 text-xs font-bold text-white backdrop-blur transition-colors hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-white"
+				>
+					<i class="fa-solid fa-xmark" aria-hidden="true"></i> Batal
+				</button>
+			{/if}
+		</div>
 		<div class="relative flex flex-col items-center gap-4 text-center">
 			<label
 				for="avatar-file"
@@ -299,30 +340,22 @@
 				/>
 			</label>
 			<div>
-				<h2 class="text-xl font-extrabold sm:text-2xl">{profile.name}</h2>
-				<div class="mt-2 flex flex-wrap items-center justify-center gap-2">
-					<span class="inline-flex items-center gap-1 rounded-full bg-white/15 px-2.5 py-0.5 text-[11px] font-bold">
+				<h2 class="text-balance text-xl font-extrabold tracking-tight sm:text-2xl">{profile.name}</h2>
+				<div class="mt-2.5 flex flex-wrap items-center justify-center gap-2">
+					<span class="inline-flex items-center gap-1.5 rounded-full bg-white/15 px-3 py-1 text-xs font-bold">
 						<i class="fa-solid fa-user" aria-hidden="true"></i> {roleLabel(profile.role)}
 					</span>
 					{#if profile.emailVerified}
-						<span class="inline-flex items-center gap-1 rounded-full bg-emerald-400/20 px-2.5 py-0.5 text-[11px] font-bold text-emerald-100">
-<i class="fa-solid fa-circle-check" aria-hidden="true"></i> Email terverifikasi
+						<span class="inline-flex items-center gap-1.5 rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-bold text-emerald-100 ring-1 ring-emerald-300/30">
+							<i class="fa-solid fa-circle-check" aria-hidden="true"></i> Email terverifikasi
 						</span>
 					{/if}
 				</div>
-				<p class="mt-1 max-w-full truncate text-sm text-blue-100">@{profile.username} · {profile.email}</p>
-				<p class="mt-0.5 text-[11px] text-blue-200/80">Anggota sejak {formatDate(profile.createdAt)}</p>
+				<p class="mt-2 text-sm font-semibold text-white">@{profile.username}</p>
+				<p class="mx-auto max-w-full truncate text-xs text-blue-100" title={profile.email}>{profile.email}</p>
+				<p class="mt-1.5 text-xs font-medium text-blue-100/80">Anggota sejak {formatDate(profile.createdAt)}</p>
 			</div>
 			<div class="flex flex-wrap items-center justify-center gap-2">
-				{#if !editing}
-					<button
-						type="button"
-						onclick={() => startEdit()}
-						class="inline-flex min-h-11 shrink-0 items-center gap-2 rounded-xl border border-white/25 px-4 py-2.5 text-xs font-bold text-white transition-colors hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-white"
-						>
-					<i class="fa-solid fa-pen" aria-hidden="true"></i> Edit profil
-					</button>
-				{/if}
 				{#if editing}
 					<label
 						for="cover-file"
@@ -361,8 +394,40 @@
 			aria-label="Formulir profil"
 			class="space-y-5 rounded-2xl border border-slate-200/70 bg-white p-5 sm:p-6"
 		>
-			<fieldset>
-				<legend class="text-sm font-extrabold text-slate-900">Identitas</legend>
+			<fieldset aria-labelledby="identitas-heading">
+				<div class="flex items-center justify-between gap-2">
+					<h3 id="identitas-heading" class="text-sm font-extrabold text-slate-900">Identitas</h3>
+					{#if !editing && !editingIdentity}
+						<button
+							type="button"
+							onclick={() => startIdentityEdit()}
+							class="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-bold text-blue-600 transition-colors hover:bg-blue-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+						>
+							<i class="fa-solid fa-pen" aria-hidden="true"></i> Ubah identitas
+						</button>
+					{:else if editingIdentity && !editing}
+						<span class="flex items-center gap-2">
+							<button
+								type="button"
+								onclick={() => cancelIdentityEdit()}
+								class="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-bold text-slate-500 transition-colors hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-slate-500"
+							>
+								Batal
+							</button>
+							<button
+								type="submit"
+								disabled={saving}
+								class="inline-flex min-h-11 items-center gap-1.5 rounded-lg bg-blue-600 px-4 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-70"
+							>
+								{#if saving}
+									<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Menyimpan…
+								{:else}
+									<i class="fa-solid fa-check" aria-hidden="true"></i> Simpan
+								{/if}
+							</button>
+						</span>
+					{/if}
+				</div>
 				<div class="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
 					<div>
 						<label for="profile-name" class="mb-1.5 block text-xs font-bold text-slate-700">Nama lengkap</label>
@@ -372,7 +437,7 @@
 							bind:value={name}
 							maxlength={100}
 							autocomplete="name"
-							disabled={!editing}
+							disabled={!editing && !editingIdentity}
 							aria-invalid={fieldMsg('name') !== ''}
 							class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:text-slate-800"
 						/>
@@ -386,7 +451,7 @@
 							bind:value={username}
 							maxlength={30}
 							autocomplete="username"
-							disabled={!editing}
+							disabled={!editing && !editingIdentity}
 							aria-invalid={fieldMsg('username') !== ''}
 							class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 font-mono text-sm focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none disabled:border-transparent disabled:bg-transparent disabled:px-0 disabled:font-semibold disabled:text-slate-800"
 						/>

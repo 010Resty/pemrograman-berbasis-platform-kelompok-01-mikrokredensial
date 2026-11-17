@@ -622,7 +622,7 @@
 								<button
 									type="button"
 									onclick={() => void refreshServerAccess()}
-									class="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-amber-600"
+									class="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-amber-600"
 								>
 									<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Periksa ulang
 								</button>
@@ -736,7 +736,7 @@
 							<button
 								type="button"
 								onclick={() => void (payment ? loadQr(false) : null)}
-								class="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
+								class="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
 								<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Muat ulang QR
 							</button>
@@ -755,7 +755,7 @@
 								type="button"
 								onclick={() => void refreshQr()}
 								disabled={refreshingQr}
-								class="inline-flex min-h-10 items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-blue-600"
+								class="inline-flex min-h-11 items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
 								{#if refreshingQr}
 									<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memperbarui…
@@ -813,7 +813,7 @@
 							<button
 								type="button"
 								onclick={() => void checkPaymentStatus(true)}
-								class="mt-3 inline-flex min-h-10 items-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-amber-600"
+								class="mt-3 inline-flex min-h-11 items-center gap-2 rounded-xl border border-amber-300 bg-white px-4 py-2 text-xs font-bold text-amber-800 transition-colors hover:bg-amber-100 focus-visible:outline-2 focus-visible:outline-amber-600"
 							>
 								<i class="fa-solid fa-rotate" aria-hidden="true"></i> Periksa sekarang
 							</button>
@@ -824,7 +824,7 @@
 							<button
 								type="button"
 								onclick={() => (cancelOpen = true)}
-								class="inline-flex min-h-10 items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-600"
+								class="inline-flex min-h-11 items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-600"
 							>
 								<i class="fa-solid fa-trash-can" aria-hidden="true"></i> Batalkan pengajuan ini
 							</button>

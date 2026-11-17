@@ -180,7 +180,7 @@
 	/>
 
 	{#if loading}
-		<div class="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4" aria-label="Memuat dasbor">
+		<div class="mb-8 grid grid-cols-2 gap-4 lg:grid-cols-4" role="status" aria-label="Memuat dasbor">
 			{#each [1, 2, 3, 4] as i (i)}
 				<div class="animate-pulse rounded-2xl border border-slate-200/60 bg-white p-5">
 					<div class="mb-3 h-11 w-11 rounded-xl bg-slate-100"></div>
@@ -227,7 +227,7 @@
 					</div>
 					<a
 						href="/user/kursusku"
-						class="rounded-lg text-sm font-semibold text-blue-600 transition-colors duration-200 ease-smooth hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+						class="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-semibold text-blue-600 transition-colors duration-200 ease-smooth hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 					>
 						Lihat Semua <i class="fa-solid fa-arrow-right ml-1 text-xs" aria-hidden="true"></i>
 					</a>
@@ -347,7 +347,7 @@
 					<h2 id="heading-sertifikat" class="text-lg font-bold text-slate-900">Sertifikat Terbaru</h2>
 					<a
 						href="/user/sertifikat"
-						class="rounded-lg text-sm font-semibold text-blue-600 transition-colors duration-200 ease-smooth hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+						class="inline-flex min-h-11 items-center rounded-lg px-2 text-sm font-semibold text-blue-600 transition-colors duration-200 ease-smooth hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 					>
 						Lihat Semua
 					</a>
@@ -371,7 +371,7 @@
 								<h3 class="truncate text-sm font-semibold text-slate-800">{cert.title}</h3>
 								<p class="mt-0.5 text-xs text-slate-500">{cert.issuer}</p>
 							</div>
-							<span class="flex-shrink-0 text-xs text-slate-400">{cert.date}</span>
+							<span class="flex-shrink-0 text-xs text-slate-500">{cert.date}</span>
 						</a>
 					{/each}
 				</div>
@@ -415,7 +415,7 @@
 
 					<a
 						href={overallPercent > 0 ? '/user/kursusku' : '/user/semua-kursus'}
-						class="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-white/15 py-2.5 px-4 text-sm font-semibold text-white transition-colors duration-200 ease-smooth hover:bg-white/25 focus-visible:outline-2 focus-visible:outline-white"
+						class="mt-6 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl bg-white/15 py-2.5 px-4 text-sm font-semibold text-white transition-colors duration-200 ease-smooth hover:bg-white/25 focus-visible:outline-2 focus-visible:outline-white"
 					>
 						{overallPercent > 0 ? 'Lanjutkan belajar' : 'Jelajahi Kursus Baru'}
 						<i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>

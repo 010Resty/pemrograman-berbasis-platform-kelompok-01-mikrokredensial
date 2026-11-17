@@ -238,19 +238,19 @@
 		{/each}
 	</div>
 
-	<div class="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-		<a href="/admin/peserta" class="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600">
+	<div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+		<a href="/admin/peserta" class="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600">
 			<i class="fa-solid fa-user-plus" aria-hidden="true"></i> Tambah Peserta
 		</a>
-		<a href="/admin/invitations" class="flex items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-violet-600/25 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-violet-600">
+		<a href="/admin/invitations" class="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-violet-600 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-violet-600/25 transition-colors hover:bg-violet-700 focus-visible:outline-2 focus-visible:outline-violet-600">
 			<i class="fa-solid fa-envelope-open-text" aria-hidden="true"></i> Undang Instruktur
 		</a>
-		<a href="/admin/courses" class="flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-600/25 transition-colors hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600">
+		<a href="/admin/courses" class="flex min-h-11 items-center justify-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs font-bold text-white shadow-lg shadow-emerald-600/25 transition-colors hover:bg-emerald-700 focus-visible:outline-2 focus-visible:outline-emerald-600">
 			<i class="fa-solid fa-plus" aria-hidden="true"></i> Buat Kursus
 		</a>
 		<a
 			href="/admin/laporan"
-			class="flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
+			class="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-3 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
 		>
 			<i class="fa-solid fa-chart-line" aria-hidden="true"></i> Lihat Laporan
 		</a>

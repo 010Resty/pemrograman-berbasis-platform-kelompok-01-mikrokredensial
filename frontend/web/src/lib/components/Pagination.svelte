@@ -59,7 +59,7 @@
 			{id}
 			bind:value={perPage}
 			aria-label="Baris per halaman"
-			class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 focus:border-blue-500 focus:outline-none"
+			class="min-h-11 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 focus:border-blue-500 focus:outline-none focus-visible:outline-2 focus-visible:outline-blue-600"
 		>
 			{#each perPageOptions as opt (opt)}
 				<option value={opt}>{opt} / halaman</option>
@@ -71,7 +71,7 @@
 				onclick={() => go(safePage - 1)}
 				disabled={safePage <= 1}
 				aria-label="Halaman sebelumnya"
-				class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+				class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
 			>
 				<i class="fa-solid fa-chevron-left text-xs" aria-hidden="true"></i>
 			</button>
@@ -84,7 +84,7 @@
 						onclick={() => go(p)}
 						aria-label={`Ke halaman ${p}`}
 						aria-current={p === safePage ? 'page' : undefined}
-						class={`flex min-h-9 min-w-9 items-center justify-center rounded-lg px-2 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${
+						class={`flex min-h-11 min-w-11 items-center justify-center rounded-lg px-2 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${
 							p === safePage
 								? activeClass
 								: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -99,7 +99,7 @@
 				onclick={() => go(safePage + 1)}
 				disabled={safePage >= totalPages}
 				aria-label="Halaman berikutnya"
-				class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-slate-600 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40"
+				class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 bg-white px-2 text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
 			>
 				<i class="fa-solid fa-chevron-right text-xs" aria-hidden="true"></i>
 			</button>

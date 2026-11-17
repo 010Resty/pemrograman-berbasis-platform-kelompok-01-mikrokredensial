@@ -192,7 +192,7 @@
 										<span class="w-10 text-right text-xs font-bold text-slate-600">{course.avgProgress}%</span>
 										<a
 											href={`/instruktur/kursusku/${course.id}?src=server`}
-											class="shrink-0 rounded-lg bg-blue-600 px-3 py-1.5 text-[11px] font-bold text-white transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
+											class="inline-flex min-h-11 shrink-0 items-center rounded-lg bg-blue-600 px-4 py-2.5 text-xs font-bold text-white transition-all duration-200 ease-smooth hover:bg-blue-700 active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-blue-600"
 										>
 											Kelola
 										</a>

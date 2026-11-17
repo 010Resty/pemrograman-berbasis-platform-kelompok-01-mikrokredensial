@@ -243,7 +243,7 @@
 					<div class="mt-3 flex gap-2">
 						<a
 							href={resolve(`/user/pembayaran/${p.courseId}`)}
-							class="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+							class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 						>
 							<i class="fa-solid fa-arrow-right" aria-hidden="true"></i>
 							{p.status === 'menunggu' ? 'Lanjutkan pembayaran' : 'Lihat detail'}
@@ -252,7 +252,7 @@
 							<button
 								type="button"
 								onclick={() => askCancel(p)}
-								class="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl border border-red-200 px-4 py-2 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-600"
+								class="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-red-200 px-4 py-2 text-xs font-bold text-red-600 transition-colors hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-600"
 							>
 								<i class="fa-solid fa-trash-can" aria-hidden="true"></i> Batalkan
 							</button>

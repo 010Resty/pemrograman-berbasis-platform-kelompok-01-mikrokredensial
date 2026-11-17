@@ -217,7 +217,7 @@
 								<span class="block text-sm font-bold text-white">
 									Portal {ROLE_LABEL[portal.role]}
 									{#if activeTab === portal.role}
-										<span class="ml-1.5 rounded-full bg-cyan-400/20 px-2 py-0.5 text-[10px] font-bold text-cyan-200">dipilih</span>
+										<span class="ml-1.5 rounded-full bg-cyan-400/20 px-2 py-0.5 text-xs font-bold text-cyan-200">dipilih</span>
 									{/if}
 								</span>
 								<span class="block truncate text-xs text-blue-200">{portal.description}</span>
@@ -244,7 +244,7 @@
 					<div class="text-2xl font-bold text-white" aria-hidden="true">80+</div>
 					<div class="text-xs text-blue-200">Mitra Industri</div>
 				</div>
-				<p class="col-span-3 text-[11px] text-blue-300/80">* Angka ilustrasi tampilan, bukan data resmi.</p>
+				<p class="col-span-3 text-xs text-blue-300/80">* Angka ilustrasi tampilan, bukan data resmi.</p>
 			</div>
 		</div>
 	</div>
@@ -283,7 +283,7 @@
 							role="tab"
 							aria-selected={activeTab === role}
 							onclick={() => selectTab(role)}
-							class={`inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-[11px] font-bold transition-all focus-visible:outline-2 focus-visible:outline-blue-600 ${activeTab === role ? TAB_STYLE[role].active : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
+							class={`inline-flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl px-2 py-2 text-xs font-bold transition-all focus-visible:outline-2 focus-visible:outline-blue-600 ${activeTab === role ? TAB_STYLE[role].active : 'text-slate-500 hover:bg-slate-50 hover:text-slate-800'}`}
 						>
 							<i class={`fa-solid ${TAB_STYLE[role].icon}`} aria-hidden="true"></i>
 							{ROLE_LABEL[role]}
@@ -318,7 +318,7 @@
 								autocomplete="email"
 								placeholder="nama@email.com"
 								bind:value={email}
-								class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-4 pl-11 text-sm text-slate-800 transition-all placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+								class="w-full min-h-[44px] rounded-xl border border-slate-200 bg-white py-2.5 pr-4 pl-11 text-sm text-slate-800 transition-all placeholder:text-slate-500 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 							/>
 						</div>
 					</div>
@@ -348,14 +348,14 @@
 								autocomplete="current-password"
 								placeholder="Masukkan kata sandi"
 								bind:value={password}
-								class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-12 pl-11 text-sm text-slate-800 transition-all placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
+								class="w-full min-h-[44px] rounded-xl border border-slate-200 bg-white py-2.5 pr-12 pl-11 text-sm text-slate-800 transition-all placeholder:text-slate-500 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 							/>
 							<button
 								type="button"
 								aria-label={showPassword ? 'Sembunyikan kata sandi' : 'Tampilkan kata sandi'}
 								aria-pressed={showPassword}
 								onclick={togglePassword}
-								class="absolute inset-y-0 right-0 flex items-center pr-4 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-blue-600"
+								class="absolute inset-y-0 right-0 flex min-w-[44px] items-center justify-center px-3 text-slate-500 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-blue-600"
 							>
 								<i class={`fa-solid ${showPassword ? 'fa-eye-slash' : 'fa-eye'}`} aria-hidden="true"></i>
 							</button>
@@ -369,7 +369,7 @@
 								name="remember-me"
 								type="checkbox"
 								bind:checked={rememberMe}
-								class="h-4 w-4 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500/20"
+								class="h-5 w-5 cursor-pointer rounded border-slate-300 text-blue-600 focus:ring-blue-500/20"
 							/>
 							<label
 								for="remember-me"
@@ -403,7 +403,7 @@
 					<div class="relative flex items-center py-1">
 						<div class="grow border-t border-slate-200"></div>
 						<span
-							class="mx-4 shrink text-xs font-semibold tracking-wider text-slate-400 uppercase"
+							class="mx-4 shrink text-xs font-semibold tracking-wider text-slate-500 uppercase"
 							>atau</span
 						>
 						<div class="grow border-t border-slate-200"></div>
@@ -417,7 +417,7 @@
 					>
 						<img
 							src={uniraLogo}
-							alt="Logo UNIRA"
+							alt=""
 							class="h-5 w-5 rounded-full object-cover"
 						/>
 						<span>Masuk dengan UNIRA</span>

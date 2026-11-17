@@ -11,7 +11,8 @@
 	import type { MyCertificate, MyEnrollment } from '$lib/api/progress';
 	import { fetchMyPayments } from '$lib/api/payments';
 	import type { MyPaymentListItem } from '$lib/api/payments';
-	import { fetchPromos, type PromoCampaign } from '$lib/api/promos';
+	import { fetchMyPatunganGroups } from '$lib/api/patungan';
+	import type { PatunganGroupSummary } from '$lib/api/patungan';
 	import { fileUrl } from '$lib/api/courses';
 	import { syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
 	import { untrack } from 'svelte';
@@ -34,16 +35,6 @@
 	// + sertifikat terbit milik sendiri. Gagal dimuat = badge disembunyikan,
 	// halaman konten yang menampilkan error + retry.
 
-	// Daftar promo aktif untuk dropdown menu Promo (gagal = dropdown hanya "Semua Promo").
-	let promoCampaigns = $state<PromoCampaign[]>([]);
-
-	async function loadPromoNav(): Promise<void> {
-		try {
-			promoCampaigns = await fetchPromos();
-		} catch {
-			promoCampaigns = [];
-		}
-	}
 	let courseBadge = $state<string | undefined>(undefined);
 	let certBadge = $state<string | undefined>(undefined);
 	let badgesStarted = false;
@@ -53,21 +44,29 @@
 	let rejectedPayments = $state(0);
 	let pendingSample = $state<MyPaymentListItem[]>([]);
 	let rejectedSample = $state<MyPaymentListItem[]>([]);
+	let patunganInvites = $state<PatunganGroupSummary[]>([]);
+	let patunganDues = $state<PatunganGroupSummary[]>([]);
 	let refreshing = false;
 
 	async function loadBadges(): Promise<void> {
 		if (refreshing) return;
 		refreshing = true;
 		try {
-			const [enrollments, certs, pending, rejected] = await Promise.all([
+			const [enrollments, certs, pending, rejected, patungan] = await Promise.all([
 				fetchMyEnrollments(),
 				fetchMyCertificates(),
 				fetchMyPayments({ status: 'menunggu', limit: 3 }),
 				// Hanya penolakan yang belum dibaca — yang sudah dibuka hilang dari bell.
-				fetchMyPayments({ status: 'ditolak', unseen: true, limit: 3 })
+				fetchMyPayments({ status: 'ditolak', unseen: true, limit: 3 }),
+				fetchMyPatunganGroups().catch((): PatunganGroupSummary[] => [])
 			]);
 			myEnrollments = enrollments;
 			myIssuedCerts = certs.filter((c) => c.status === 'issued');
+			// Undangan patungan pending + iuran patungan yang belum dibayar (grup pending).
+			patunganInvites = patungan.filter((g) => g.status === 'pending' && g.inviteStatus === 'pending');
+			patunganDues = patungan.filter(
+				(g) => g.status === 'pending' && g.inviteStatus === 'accepted' && g.myPaymentStatus === 'unpaid'
+			);
 			pendingPayments = pending.total;
 			rejectedPayments = rejected.total;
 			pendingSample = pending.items;
@@ -87,7 +86,6 @@
 		if (!browser || badgesStarted) return;
 		badgesStarted = true;
 		untrack(() => void loadBadges());
-		untrack(() => void loadPromoNav());
 	});
 
 	// Realtime tanpa push server: refresh saat pindah halaman, tab kembali
@@ -97,7 +95,6 @@
 		const path = page.url.pathname;
 		if (!badgesStarted || phase !== 'ready') return;
 		untrack(() => void loadBadges());
-		untrack(() => void loadPromoNav());
 		void path;
 	});
 
@@ -159,10 +156,17 @@
 	// Notifikasi jujur dari backend (tanpa tabel notifikasi khusus):
 	// - pembayaran menunggu verifikasi (hilang saat diputus admin)
 	// - pembayaran ditolak yang belum dibaca (hilang saat dibuka di halaman pembayaran)
+	// - undangan patungan pending (hilang saat diterima/ditolak)
+	// - iuran patungan belum dibayar (hilang saat iuran dibuat)
 	// Kursus aktif & sertifikat terbit bersifat permanen sehingga tidak masuk
 	// bell (tetap terlihat sebagai badge sidebar) agar tidak menumpuk.
 	// Bell menyala hanya bila ada info (>0); gagal fetch = badge hilang.
-	const notifCount = $derived((pendingPayments > 0 ? 1 : 0) + (rejectedPayments > 0 ? 1 : 0));
+	const notifCount = $derived(
+		(pendingPayments > 0 ? 1 : 0) +
+			(rejectedPayments > 0 ? 1 : 0) +
+			(patunganInvites.length > 0 ? 1 : 0) +
+			(patunganDues.length > 0 ? 1 : 0)
+	);
 	const notifLabel = $derived(
 		notifCount > 0 ? `${notifCount} informasi penting — buka Notifikasi` : 'Notifikasi'
 	);
@@ -173,16 +177,13 @@
 		/^\/user\/kursusku\/[^/]+\/[^/]+\/[^/]+/.test(page.url.pathname)
 	);
 
-	// Dropdown Promo: satu menu "Promo" (klik → semua promo) + daftar kampanye aktif di bawahnya.
-	const promoChildren = $derived<NavItem[]>(
-		promoCampaigns.slice(0, 6).map(
-			(c): NavItem => ({
-				label: c.title,
-				icon: c.type === 'diskon' ? 'fa-bolt' : c.type === 'patungan' ? 'fa-people-group' : 'fa-star',
-				href: `/user/promo/${c.slug}`
-			})
-		)
-	);
+	// Dropdown Promo: 3 halaman jenis (tanpa daftar kampanye agar tidak duplikat/generik).
+	const promoTypeLinks: NavItem[] = [
+		{ label: 'Flash Sale', icon: 'fa-bolt', href: '/user/promo/diskon' },
+		{ label: 'Pilihan Unggulan', icon: 'fa-star', href: '/user/promo/kurasi' },
+		{ label: 'Promo Patungan', icon: 'fa-people-group', href: '/user/promo/patungan' }
+	];
+	const promoChildren = $derived<NavItem[]>(promoTypeLinks);
 
 	// Menu utama sesuai kebutuhan user
 	const navItems = $derived<NavItem[]>([
@@ -201,9 +202,10 @@
 		{
 			label: 'Promo',
 			icon: 'fa-tags',
-			href: '/user/promo',
+			href: '/user/promo/diskon',
 			collapsible: true,
-			linkable: true,
+			linkable: false,
+			submenu: 'panel',
 			children: promoChildren
 		},
 		{
@@ -384,6 +386,36 @@
 											<span>
 												<span class="block font-semibold text-slate-800">{rejectedPayments} pembayaran ditolak</span>
 												<span class="block text-xs text-slate-500">{rejectedSample[0]?.rejectReason ?? rejectedSample[0]?.courseTitle ?? 'Perlu perbaikan'} — ajukan ulang.</span>
+											</span>
+										</a>
+									{/if}
+									{#if patunganInvites.length > 0}
+										{@const inv = patunganInvites[0]!}
+										<a
+											role="menuitem"
+											href={`/patungan/${inv.id}`}
+											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+											onclick={closeNotifMenu}
+										>
+											<i class="fa-solid fa-people-group mt-0.5 w-4 text-center text-teal" aria-hidden="true"></i>
+											<span>
+												<span class="block font-semibold text-slate-800">{patunganInvites.length} undangan patungan</span>
+												<span class="block text-xs text-slate-500">{inv.courseTitle ?? 'Grup patungan'} — terima atau tolak undanganmu.</span>
+											</span>
+										</a>
+									{/if}
+									{#if patunganDues.length > 0}
+										{@const due = patunganDues[0]!}
+										<a
+											role="menuitem"
+											href={`/patungan/${due.id}`}
+											class="flex items-start gap-2.5 rounded-lg px-3 py-2 text-sm text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600"
+											onclick={closeNotifMenu}
+										>
+											<i class="fa-solid fa-hand-holding-dollar mt-0.5 w-4 text-center text-amber-500" aria-hidden="true"></i>
+											<span>
+												<span class="block font-semibold text-slate-800">{patunganDues.length} iuran patungan belum dibayar</span>
+												<span class="block text-xs text-slate-500">{due.courseTitle ?? 'Grup patungan'} — bayar iuranmu.</span>
 											</span>
 										</a>
 									{/if}

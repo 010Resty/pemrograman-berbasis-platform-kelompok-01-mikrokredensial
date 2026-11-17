@@ -682,13 +682,13 @@
 							<span class={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${statusClass(c.status)}`}><span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{statusLabel(c.status)}</span>
 						</div>
 						<div class="mt-2.5 flex gap-2">
-							<button type="button" onclick={(e) => void openDetail(c.id, e.currentTarget)} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-emerald-600">
+							<button type="button" onclick={(e) => void openDetail(c.id, e.currentTarget)} class="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-emerald-600">
 								<i class="fa-solid fa-eye" aria-hidden="true"></i> Detail
 							</button>
-							<button type="button" onclick={(e) => void openEdit(c.id, e.currentTarget)} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-amber-600">
+							<button type="button" onclick={(e) => void openEdit(c.id, e.currentTarget)} class="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-bold text-slate-600 hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-amber-600">
 								<i class="fa-solid fa-pen" aria-hidden="true"></i> Ubah
 							</button>
-							<button type="button" onclick={(e) => askDelete(c, e.currentTarget)} class="inline-flex min-h-10 flex-1 items-center justify-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-500">
+							<button type="button" onclick={(e) => askDelete(c, e.currentTarget)} class="inline-flex min-h-11 flex-1 items-center justify-center gap-1.5 rounded-xl border border-red-200 px-3 py-2 text-xs font-bold text-red-600 hover:bg-red-50 focus-visible:outline-2 focus-visible:outline-red-500">
 								<i class="fa-solid fa-trash" aria-hidden="true"></i> Hapus
 							</button>
 						</div>
@@ -723,13 +723,13 @@
 								</td>
 								<td class="px-6 py-3.5">
 									<div class="flex justify-end gap-2">
-										<button type="button" onclick={(e) => void openDetail(c.id, e.currentTarget)} aria-label={`Lihat detail ${c.title}`} title="Lihat detail" class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-emerald-600 focus-visible:outline-2 focus-visible:outline-emerald-600">
+										<button type="button" onclick={(e) => void openDetail(c.id, e.currentTarget)} aria-label={`Lihat detail ${c.title}`} title="Lihat detail" class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-emerald-600 focus-visible:outline-2 focus-visible:outline-emerald-600">
 											<i class="fa-solid fa-eye text-sm" aria-hidden="true"></i>
 										</button>
-										<button type="button" onclick={(e) => void openEdit(c.id, e.currentTarget)} aria-label={`Ubah ${c.title}`} title="Ubah kursus" class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-amber-600 focus-visible:outline-2 focus-visible:outline-amber-600">
+										<button type="button" onclick={(e) => void openEdit(c.id, e.currentTarget)} aria-label={`Ubah ${c.title}`} title="Ubah kursus" class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-slate-50 hover:text-amber-600 focus-visible:outline-2 focus-visible:outline-amber-600">
 											<i class="fa-solid fa-pen text-sm" aria-hidden="true"></i>
 										</button>
-										<button type="button" onclick={(e) => askDelete(c, e.currentTarget)} aria-label={`Hapus ${c.title}`} title="Hapus kursus" class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500">
+										<button type="button" onclick={(e) => askDelete(c, e.currentTarget)} aria-label={`Hapus ${c.title}`} title="Hapus kursus" class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 p-2 text-slate-500 transition-colors hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500">
 											<i class="fa-solid fa-trash text-sm" aria-hidden="true"></i>
 										</button>
 									</div>
@@ -822,7 +822,7 @@
 							{#each cOutcomes as _, i (i)}
 								<div class="flex gap-2">
 									<input type="text" bind:value={cOutcomes[i]} placeholder={`Capaian ${i + 1}`} aria-label={`Capaian ${i + 1}`} class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none" />
-									<button type="button" onclick={() => { cOutcomes = cOutcomes.filter((__, j) => j !== i); }} disabled={cOutcomes.length <= 1} aria-label={`Hapus capaian ${i + 1}`} class="flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40">
+									<button type="button" onclick={() => { cOutcomes = cOutcomes.filter((__, j) => j !== i); }} disabled={cOutcomes.length <= 1} aria-label={`Hapus capaian ${i + 1}`} class="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40">
 										<i class="fa-solid fa-xmark text-sm" aria-hidden="true"></i>
 									</button>
 								</div>
@@ -840,7 +840,7 @@
 							{#each cTools as _, i (i)}
 								<div class="flex gap-2">
 									<input type="text" bind:value={cTools[i]} placeholder={`Alat ${i + 1}`} aria-label={`Alat ${i + 1}`} class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none" />
-									<button type="button" onclick={() => { cTools = cTools.filter((__, j) => j !== i); }} disabled={cTools.length <= 1} aria-label={`Hapus alat ${i + 1}`} class="flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40">
+									<button type="button" onclick={() => { cTools = cTools.filter((__, j) => j !== i); }} disabled={cTools.length <= 1} aria-label={`Hapus alat ${i + 1}`} class="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40">
 										<i class="fa-solid fa-xmark text-sm" aria-hidden="true"></i>
 									</button>
 								</div>
@@ -1111,7 +1111,7 @@
 									{#each eOutcomes as _, i (i)}
 										<div class="flex gap-2">
 											<input type="text" bind:value={eOutcomes[i]} aria-label={`Capaian ${i + 1}`} class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none" />
-											<button type="button" onclick={() => { eOutcomes = eOutcomes.filter((__, j) => j !== i); }} disabled={eOutcomes.length <= 1} aria-label={`Hapus capaian ${i + 1}`} class="flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40">
+											<button type="button" onclick={() => { eOutcomes = eOutcomes.filter((__, j) => j !== i); }} disabled={eOutcomes.length <= 1} aria-label={`Hapus capaian ${i + 1}`} class="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40">
 												<i class="fa-solid fa-xmark text-sm" aria-hidden="true"></i>
 											</button>
 										</div>
@@ -1129,7 +1129,7 @@
 									{#each eTools as _, i (i)}
 										<div class="flex gap-2">
 											<input type="text" bind:value={eTools[i]} aria-label={`Alat ${i + 1}`} class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm focus:border-emerald-500 focus:outline-none" />
-											<button type="button" onclick={() => { eTools = eTools.filter((__, j) => j !== i); }} disabled={eTools.length <= 1} aria-label={`Hapus alat ${i + 1}`} class="flex min-h-10 min-w-10 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40">
+											<button type="button" onclick={() => { eTools = eTools.filter((__, j) => j !== i); }} disabled={eTools.length <= 1} aria-label={`Hapus alat ${i + 1}`} class="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl border border-slate-200 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40">
 												<i class="fa-solid fa-xmark text-sm" aria-hidden="true"></i>
 											</button>
 										</div>

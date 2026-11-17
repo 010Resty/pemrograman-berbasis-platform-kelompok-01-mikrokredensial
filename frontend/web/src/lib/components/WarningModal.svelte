@@ -183,7 +183,7 @@
 							type="button"
 							aria-label="Tutup dialog"
 							onclick={() => requestClose('cancel')}
-							class="flex min-h-9 min-w-9 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-slate-500"
+							class="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-slate-500"
 						>
 							<i class="fa-solid fa-xmark" aria-hidden="true"></i>
 						</button>

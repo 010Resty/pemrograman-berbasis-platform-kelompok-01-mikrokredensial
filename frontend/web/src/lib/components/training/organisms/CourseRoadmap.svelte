@@ -11,7 +11,6 @@
 		firstUnfinishedInModules,
 		firstUnfinishedMaterial,
 		moduleProgress,
-		resolveRoadmapSelection,
 		resolveSubModules,
 		roadmapHue,
 		subModuleProgress,
@@ -43,7 +42,28 @@
 
 	let selectedNode = $state<string | null>(null);
 
-	const selection = $derived(resolveRoadmapSelection(modules, selectedNode));
+	const selection = $derived.by((): RoadmapSelection | null => {
+		if (!selectedNode) return null;
+		// Cari via node unik lintas jenis (kind + id): id modul dan sub-modul
+		// server berbagi ruang angka yang sama sehingga id mentah bisa kembar.
+		const n = nodeMap.get(selectedNode);
+		if (!n) return null;
+		const module = modules[n.mi];
+		if (!module) return null;
+		if (n.kind === 'module') {
+			const subs = resolveSubModules(module);
+			return {
+				kind: 'module',
+				module,
+				moduleIndex: n.mi,
+				subCount: subs.length,
+				materialCount: subs.reduce((t, s) => t + s.materials.length, 0)
+			};
+		}
+		const sub = resolveSubModules(module)[n.si];
+		if (!sub) return null;
+		return { kind: 'sub', module, moduleIndex: n.mi, sub, subIndex: n.si };
+	});
 
 	function openNode(id: string) {
 		if (selectedNode === id) {
@@ -69,9 +89,14 @@
 			resolveSubModules(m).forEach((s, si) => subMeta.set(s.id, { mi, si }));
 		});
 		const nodes = geometry.nodes.map((n) => {
+			// Kunci unik lintas jenis: id modul dan sub-modul server berbagi
+			// ruang angka yang sama (keduanya autoincrement) sehingga id mentah
+			// bisa kembar ("12" modul vs "12" sub). Key gabungan mencegah
+			// each_key_duplicate + salah rujuk di nodeMap/status/drawer.
+			const key = `${n.kind}-${n.id}`;
 			const mi = n.kind === 'module' ? (moduleOf.get(n.id) ?? 0) : (subMeta.get(n.id)?.mi ?? 0);
-			const si = subMeta.get(n.id)?.si ?? 0;
-			return { ...n, mi, si, badge: n.kind === 'module' ? `M${mi + 1}` : `${mi + 1}.${si + 1}` };
+			const si = n.kind === 'module' ? 0 : (subMeta.get(n.id)?.si ?? 0);
+			return { ...n, key, mi, si, badge: n.kind === 'module' ? `M${mi + 1}` : `${mi + 1}.${si + 1}` };
 		});
 		const curveColor = new Map<string, string>();
 		for (const c of geometry.curves) {
@@ -79,36 +104,40 @@
 		}
 		return { ...geometry, nodes, curveColor };
 	});
-	const nodeMap = $derived(new Map(layout.nodes.map((n) => [n.id, n] as const)));
+	const nodeMap = $derived(new Map(layout.nodes.map((n) => [n.key, n] as const)));
 
 	const statusById = $derived.by(() => {
 		const map = new Map<string, NodeStatus>();
 		for (const n of layout.nodes) {
 			if (preview) {
-				map.set(n.id, 'todo');
+				map.set(n.key, 'todo');
 				continue;
 			}
-			const sel = resolveRoadmapSelection(modules, n.id);
-			if (!sel) continue;
+			const module = modules[n.mi];
+			if (!module) continue;
 			const locked =
-				sel.kind === 'module'
-					? isModuleLocked(modules, sel.moduleIndex, isDone)
-					: isSubModuleLocked(modules, sel.moduleIndex, sel.subIndex, isDone);
+				n.kind === 'module'
+					? isModuleLocked(modules, n.mi, isDone)
+					: isSubModuleLocked(modules, n.mi, n.si, isDone);
 			if (locked) {
-				map.set(n.id, 'locked');
+				map.set(n.key, 'locked');
 				continue;
 			}
-			const percent =
-				sel.kind === 'module'
-					? moduleProgress(sel.module, isDone).percent
-					: subModuleProgress(sel.sub, isDone).percent;
-			map.set(n.id, percent === 100 ? 'done' : 'todo');
+			if (n.kind === 'module') {
+				const percent = moduleProgress(module, isDone).percent;
+				map.set(n.key, percent === 100 ? 'done' : 'todo');
+				continue;
+			}
+			const sub = resolveSubModules(module)[n.si];
+			if (!sub) continue;
+			const percent = subModuleProgress(sub, isDone).percent;
+			map.set(n.key, percent === 100 ? 'done' : 'todo');
 		}
 		return map;
 	});
 
 	const currentId = $derived(
-		preview ? null : (layout.nodes.find((n) => statusById.get(n.id) === 'todo')?.id ?? null)
+		preview ? null : (layout.nodes.find((n) => statusById.get(n.key) === 'todo')?.key ?? null)
 	);
 
 	const overall = $derived.by(() => {
@@ -336,8 +365,8 @@
 							</linearGradient>
 						</defs>
 						{#each layout.connections as connection (connection[0] + '>' + connection[1])}
-							{@const from = nodeMap.get(connection[0])}
-							{@const to = nodeMap.get(connection[1])}
+							{@const from = nodeMap.get(`module-${connection[0]}`)}
+							{@const to = nodeMap.get(`module-${connection[1]}`)}
 							{#if from && to}
 								{@const x1 = from.x + ROADMAP_NODE_W / 2}
 								{@const y1 = from.y + ROADMAP_NODE_H / 2}
@@ -395,9 +424,9 @@
 						{/each}
 					</svg>
 					<ul class="absolute inset-0 m-0 list-none p-0">
-						{#each layout.nodes as node, ni (node.id)}
-							{@const status = nodeStatus(node.id)}
-							{@const isCurrent = currentId === node.id}
+						{#each layout.nodes as node, ni (node.key)}
+							{@const status = nodeStatus(node.key)}
+							{@const isCurrent = currentId === node.key}
 							{@const hue = hueFor(node.mi, status)}
 							<li
 								class="roadmap-node-enter absolute"
@@ -406,17 +435,17 @@
 							>
 								<button
 									type="button"
-									id={`user-node-${node.id}`}
+									id={`user-node-${node.key}`}
 									class="roadmap-node"
 									class:module={node.kind === 'module'}
 									class:sub={node.kind === 'sub'}
 									class:locked={status === 'locked'}
 									class:is-done={status === 'done'}
 									class:current={isCurrent}
-									class:selected={selectedNode === node.id}
+									class:selected={selectedNode === node.key}
 									style="--g1:{hue.from};--g2:{hue.to};--soft:{hue.soft};--ink:{hue.ink};--ring:{hue.ring};--shadow:{hue.shadow}"
-									onclick={() => openNode(node.id)}
-									aria-pressed={selectedNode === node.id}
+									onclick={() => openNode(node.key)}
+									aria-pressed={selectedNode === node.key}
 									aria-label={ariaLabelFor(node.label, status, isCurrent)}
 									title={node.label}
 								>

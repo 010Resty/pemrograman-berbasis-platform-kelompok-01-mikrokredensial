@@ -22,7 +22,7 @@
 <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 	<div class="min-w-0">
 		{#if eyebrow}
-			<p class="mb-1 text-[11px] font-bold tracking-[0.14em] text-blue-700 uppercase">
+			<p class="mb-1 text-xs font-bold tracking-[0.14em] text-blue-700 uppercase">
 				{eyebrow}
 			</p>
 		{/if}

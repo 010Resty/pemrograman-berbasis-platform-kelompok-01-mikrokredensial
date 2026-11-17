@@ -119,7 +119,7 @@
 		return `${Number(n || 0).toLocaleString('id-ID', { maximumFractionDigits: 1 })}%`;
 	}
 
-	const funnelStageColors = ['#93c5fd', '#60a5fa', '#3b82f6', '#0d9488'];
+	const funnelStageColors = ['#1d4ed8', '#1e40af', '#2563eb', '#0f766e'];
 
 	/** Indeks tahap dengan penurunan terbesar (selisih % dari awal antar tahap). */
 	const biggestDropIndex = $derived.by(() => {
@@ -561,8 +561,10 @@
 					description="Ubah periode atau hapus filter Kursus ID, lalu muat ulang."
 				/>
 			{:else}
-				<div class="overflow-x-auto">
+				<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll region keyboard: tabel lebar perlu tabindex 0 -->
+				<div class="overflow-x-auto" tabindex="0" role="region" aria-label="Tabel kinerja per kursus, geser horizontal">
 					<table class="w-full min-w-[880px] text-left text-sm">
+						<caption class="sr-only">Kinerja per kursus: peserta, progres, antrean, pendapatan, pembayaran, sertifikat</caption>
 						<thead>
 							<tr class="border-b border-slate-100 text-xs text-slate-500">
 								<th scope="col" class="px-6 py-3 font-bold">Kursus</th>
@@ -571,8 +573,8 @@
 								<th scope="col" class="px-4 py-3 text-right font-bold">Progres</th>
 								<th scope="col" class="px-4 py-3 text-right font-bold">Antrean nilai</th>
 								<th scope="col" class="px-4 py-3 text-right font-bold">Pendapatan</th>
-								<th scope="col" class="px-4 py-3 text-right font-bold">Bayar M/D</th>
-								<th scope="col" class="px-4 py-3 text-right font-bold">Sertifikat T/C</th>
+								<th scope="col" class="px-4 py-3 text-right font-bold">Bayar <abbr title="Menunggu">M</abbr>/<abbr title="Disetujui">D</abbr></th>
+								<th scope="col" class="px-4 py-3 text-right font-bold">Sertifikat <abbr title="Terbit">T</abbr>/<abbr title="Cabut">C</abbr></th>
 							</tr>
 						</thead>
 						<tbody class="divide-y divide-slate-100">

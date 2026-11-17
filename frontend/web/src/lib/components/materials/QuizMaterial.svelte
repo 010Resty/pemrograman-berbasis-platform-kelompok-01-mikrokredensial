@@ -222,9 +222,11 @@
 	{#if !isSupported}
 		<div class="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
 			<i class="fa-solid fa-circle-question mb-2 text-xl text-slate-300" aria-hidden="true"></i>
-			<p class="text-sm font-bold text-slate-500">Kuis tidak tersedia</p>
-			<p class="mt-1 text-xs text-slate-400">
-				Kuis hanya dapat dikerjakan pada materi server. Materi pratinjau ini tidak memiliki bank soal.
+			<p class="text-sm font-bold text-slate-500">Kuis tidak tersedia di pratinjau ini</p>
+			<p class="mt-1 text-xs leading-relaxed text-slate-500">
+				Soal dan penilaian kuis 100% dari server (K-02) — materi statis ini tidak punya bank
+				soal. Untuk mencoba kuis sungguhan, buat kursus di portal instruktur lalu tambahkan
+				materi kuis via QuizBuilder.
 			</p>
 		</div>
 	{:else}

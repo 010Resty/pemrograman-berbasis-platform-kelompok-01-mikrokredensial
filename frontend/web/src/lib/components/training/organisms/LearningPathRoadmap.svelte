@@ -4,9 +4,9 @@
 		ROADMAP_NODE_H,
 		ROADMAP_NODE_W,
 		computeRoadmapLayout,
-		resolveRoadmapSelection,
 		resolveSubModules,
-		roadmapHue
+		roadmapHue,
+		type RoadmapSelection
 	} from '$lib/data/training';
 	import InfoDrawer from './InfoDrawer.svelte';
 	import '../roadmap.css';
@@ -21,7 +21,28 @@
 
 	let selectedNode = $state<string | null>(null);
 
-	const selection = $derived(resolveRoadmapSelection(modules, selectedNode));
+	const selection = $derived.by((): RoadmapSelection | null => {
+		if (!selectedNode) return null;
+		// Kunci unik lintas jenis (lihat CourseRoadmap): id modul dan
+		// sub-modul server bisa kembar sehingga rujuk id mentah ambigu.
+		const n = nodeMap.get(selectedNode);
+		if (!n) return null;
+		const module = modules[n.mi];
+		if (!module) return null;
+		if (n.kind === 'module') {
+			const subs = resolveSubModules(module);
+			return {
+				kind: 'module',
+				module,
+				moduleIndex: n.mi,
+				subCount: subs.length,
+				materialCount: subs.reduce((t, s) => t + s.materials.length, 0)
+			};
+		}
+		const sub = resolveSubModules(module)[n.si];
+		if (!sub) return null;
+		return { kind: 'sub', module, moduleIndex: n.mi, sub, subIndex: n.si };
+	});
 
 	function openNode(id: string) {
 		if (selectedNode === id) {
@@ -48,11 +69,14 @@
 			resolveSubModules(m).forEach((s, si) => subMeta.set(s.id, { mi, si }));
 		});
 		const nodes = geometry.nodes.map((n) => {
+			// Kunci unik lintas jenis: id modul dan sub-modul server berbagi
+			// ruang angka yang sama sehingga id mentah bisa kembar.
+			const key = `${n.kind}-${n.id}`;
 			const mi = n.kind === 'module' ? (moduleOf.get(n.id) ?? 0) : (subMeta.get(n.id)?.mi ?? 0);
-			const si = subMeta.get(n.id)?.si ?? 0;
+			const si = n.kind === 'module' ? 0 : (subMeta.get(n.id)?.si ?? 0);
 			const hue = roadmapHue(mi);
 			const badge = n.kind === 'module' ? `M${mi + 1}` : `${mi + 1}.${si + 1}`;
-			return { ...n, mi, hue, badge };
+			return { ...n, key, mi, si, hue, badge };
 		});
 		const curveColor = new Map<string, string>();
 		for (const c of geometry.curves) {
@@ -62,7 +86,7 @@
 		return { ...geometry, nodes, curveColor };
 	});
 
-	const nodeMap = $derived(new Map(layout.nodes.map((n) => [n.id, n] as const)));
+	const nodeMap = $derived(new Map(layout.nodes.map((n) => [n.key, n] as const)));
 
 	const totalSubs = $derived(modules.reduce((n, m) => n + resolveSubModules(m).length, 0));
 </script>
@@ -178,8 +202,8 @@
 							</linearGradient>
 						</defs>
 						{#each layout.connections as connection (connection[0] + '>' + connection[1])}
-							{@const from = nodeMap.get(connection[0])}
-							{@const to = nodeMap.get(connection[1])}
+							{@const from = nodeMap.get(`module-${connection[0]}`)}
+							{@const to = nodeMap.get(`module-${connection[1]}`)}
 							{#if from && to}
 								{@const x1 = from.x + ROADMAP_NODE_W / 2}
 								{@const y1 = from.y + ROADMAP_NODE_H / 2}
@@ -237,7 +261,7 @@
 						{/each}
 					</svg>
 					<ul class="absolute inset-0 m-0 list-none p-0">
-						{#each layout.nodes as node, ni (node.id)}
+						{#each layout.nodes as node, ni (node.key)}
 							<li
 								class="roadmap-node-enter absolute"
 								style="left:{node.x}px;top:{node.y}px;width:{ROADMAP_NODE_W}px;animation-delay:{ni *
@@ -245,15 +269,15 @@
 							>
 								<button
 									type="button"
-									id={`roadmap-node-${node.id}`}
+									id={`roadmap-node-${node.key}`}
 									class="roadmap-node"
 									class:module={node.kind === 'module'}
 									class:sub={node.kind === 'sub'}
-									class:selected={selectedNode === node.id}
+									class:selected={selectedNode === node.key}
 									style="--g1:{node.hue.from};--g2:{node.hue.to};--soft:{node.hue.soft};--ink:{node
 										.hue.ink};--ring:{node.hue.ring};--shadow:{node.hue.shadow}"
-									onclick={() => openNode(node.id)}
-									aria-pressed={selectedNode === node.id}
+									onclick={() => openNode(node.key)}
+									aria-pressed={selectedNode === node.key}
 									title={node.label}
 								>
 									<span class="rm-badge" aria-hidden="true">{node.badge}</span>
