@@ -22,6 +22,8 @@
 	} from '$lib/api/payments';
 	import { fetchCoursePromo, type CoursePromoQuote } from '$lib/api/promos';
 	import WarningModal from '$lib/components/WarningModal.svelte';
+	import Breadcrumb from '$lib/components/ui/Breadcrumb.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	const courseId = $derived(Number(page.params.courseId));
 	const course = $derived(getCourseById(courseId));
@@ -63,6 +65,9 @@
 	let nowTs = $state(Date.now());
 	let pollTimer: ReturnType<typeof setInterval> | null = null;
 	let tickTimer: ReturnType<typeof setInterval> | null = null;
+	/** Gagal polling beruntun; >=2 tampilkan banner offline + tombol periksa manual. */
+	let pollFails = $state(0);
+	let pollOffline = $state(false);
 
 	// Status akses menurut server — null = belum diperiksa.
 	let serverAccess = $state<boolean | null>(null);
@@ -72,6 +77,8 @@
 
 	/** Detail kursus dari server (sumber kebenaran harga; fallback ke meta statis bila offline). */
 	let serverCourse = $state<BackendCourse | null>(null);
+	/** true sampai detail server selesai dimuat (skeleton harga anti-flicker 0). */
+	let courseLoading = $state(true);
 
 	/** Harga: utamakan `priceNominal` server; meta statis hanya fallback. */
 	const price = $derived(
@@ -130,7 +137,10 @@
 					upcoming: d.period === 'upcoming'
 				});
 			})
-			.catch(() => {});
+			.catch(() => {})
+			.finally(() => {
+				courseLoading = false;
+			});
 	});
 
 	async function restorePayment(): Promise<void> {
@@ -198,12 +208,29 @@
 	function startPolling(): void {
 		stopPolling();
 		pollTimer = setInterval(() => {
+			// Hemat kuota + baterai: jeda saat tab tidak terlihat.
+			if (document.hidden) return;
 			void checkPaymentStatus(false);
 		}, 5000);
 		tickTimer = setInterval(() => {
+			if (document.hidden) return;
 			nowTs = Date.now();
 		}, 1000);
 	}
+
+	/** Segarkan sekali saat tab kembali terlihat (mengejar status yang terlewat). */
+	function handleVisibility(): void {
+		if (document.hidden) return;
+		if (stage !== 'instruction' || !payment) return;
+		nowTs = Date.now();
+		void checkPaymentStatus(false);
+	}
+
+	$effect(() => {
+		if (!browser) return;
+		document.addEventListener('visibilitychange', handleVisibility);
+		return () => document.removeEventListener('visibilitychange', handleVisibility);
+	});
 
 	$effect(() => {
 		if (!browser) return;
@@ -216,6 +243,8 @@
 		if (!payment) return;
 		try {
 			const latest = await fetchMyPayment(courseId);
+			pollFails = 0;
+			pollOffline = false;
 			if (!latest || latest.id !== payment.id) return;
 			payment = latest;
 			if (latest.status === 'diverifikasi') {
@@ -233,7 +262,13 @@
 				void dismissPaymentNotice();
 			}
 		} catch {
-			if (manual) formError = 'Gagal memeriksa status. Coba lagi.';
+			if (manual) {
+				formError = 'Gagal memeriksa status. Coba lagi.';
+				toast.error(formError);
+			} else {
+				pollFails += 1;
+				if (pollFails >= 2) pollOffline = true;
+			}
 		}
 	}
 
@@ -255,7 +290,10 @@
 			qrUrl = URL.createObjectURL(blob);
 		} catch (e) {
 			qrError = e instanceof Error ? e.message : 'Gagal memuat QR. Coba lagi.';
-			if (!silent) formError = qrError;
+			if (!silent) {
+				formError = qrError;
+				toast.error(qrError);
+			}
 		} finally {
 			qrLoading = false;
 		}
@@ -272,10 +310,20 @@
 			await loadQr(true);
 		} catch (e) {
 			qrError = e instanceof Error ? e.message : 'Gagal memperbarui QR. Coba lagi.';
+			toast.error(qrError);
 		} finally {
 			refreshingQr = false;
 		}
 	}
+
+	/** Auto-refresh QR sekali saat kedaluwarsa (tanpa klik manual). */
+	let qrAutoRefreshedFor = $state<number | null>(null);
+	$effect(() => {
+		if (stage !== 'instruction' || !payment || !qrExpired || refreshingQr) return;
+		if (qrAutoRefreshedFor === payment.id) return;
+		qrAutoRefreshedFor = payment.id;
+		void refreshQr();
+	});
 
 	/** Sisa waktu QR (dari dokuExpiresAt server). Null = tak diketahui. */
 	const qrRemainingMs = $derived.by(() => {
@@ -297,6 +345,7 @@
 		if (applyingVoucher) return;
 		if (!voucherCode.trim()) {
 			voucherError = 'Masukkan kode voucher dulu.';
+			toast.error(voucherError);
 			return;
 		}
 		if (!course) return;
@@ -307,6 +356,7 @@
 			voucherCode = '';
 		} catch (e) {
 			voucherError = e instanceof Error ? e.message : 'Kode voucher tidak valid.';
+			toast.error(voucherError);
 		} finally {
 			applyingVoucher = false;
 		}
@@ -326,6 +376,7 @@
 			}, 2000);
 		} catch {
 			formError = 'Gagal menyalin. Salin manual ya.';
+			toast.error(formError);
 		}
 	}
 
@@ -335,10 +386,12 @@
 		if (!isPaidCourse) return;
 		if (meta.period === 'ended') {
 			formError = 'Batch pelatihan ini sudah berakhir dan tidak bisa dibayar.';
+			toast.error(formError);
 			return;
 		}
 		if (!agree) {
 			formError = 'Centang persetujuan syarat & ketentuan dulu untuk lanjut bayar.';
+			toast.error(formError);
 			return;
 		}
 		creatingPayment = true;
@@ -355,6 +408,7 @@
 		} catch (e) {
 			if (e instanceof Error && /voucher/i.test(e.message)) appliedVoucher = null;
 			formError = e instanceof Error ? e.message : 'Gagal membuat pengajuan pembayaran.';
+			toast.error(formError);
 		} finally {
 			creatingPayment = false;
 		}
@@ -387,6 +441,7 @@
 			await goto(resolve('/user/pembayaran'));
 		} catch (e) {
 			cancelError = e instanceof Error ? e.message : 'Gagal membatalkan. Coba lagi.';
+			toast.error(cancelError);
 		} finally {
 			cancelling = false;
 		}
@@ -519,21 +574,14 @@
 		</div>
 	{:else}
 		<!-- Breadcrumb -->
-		<nav aria-label="Breadcrumb" class="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-			<a href={resolve('/user/semua-kursus')} class="rounded font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600">
-				Semua Kursus
-			</a>
-			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
-			<a href={resolve('/user/pembayaran')} class="rounded font-medium text-slate-600 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600">
-				Riwayat Pembayaran
-			</a>
-			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
-			<a href={resolve(`/user/semua-kursus/${course.id}`)} class="max-w-56 truncate rounded font-medium text-slate-600 hover:text-slate-900 focus-visible:outline-2 focus-visible:outline-blue-600">
-				{course.title}
-			</a>
-			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
-			<span aria-current="page" class="font-semibold text-slate-900">Pembayaran</span>
-		</nav>
+		<Breadcrumb
+			items={[
+				{ label: 'Semua Kursus', href: resolve('/user/semua-kursus') },
+				{ label: 'Riwayat Pembayaran', href: resolve('/user/pembayaran') },
+				{ label: course.title, href: resolve(`/user/semua-kursus/${course.id}`) },
+				{ label: 'Pembayaran' }
+			]}
+		/>
 
 		<!-- Header + stepper -->
 		<div class="mb-6 flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
@@ -687,7 +735,7 @@
 					<ol class="space-y-3 text-sm text-slate-600">
 						<li class="flex gap-2.5">
 							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-700">1</span>
-							Mulai dari modul 1 — materi terbuka berurutan.
+							Mulai dari modul mana pun — modul independen (materi dalam satu sub-modul tetap berurutan).
 						</li>
 						<li class="flex gap-2.5">
 							<span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-700">2</span>
@@ -740,6 +788,19 @@
 							>
 								<i class="fa-solid fa-rotate-right" aria-hidden="true"></i> Muat ulang QR
 							</button>
+						{/if}
+						{#if pollOffline}
+							<p role="alert" class="flex w-full max-w-sm items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-left text-xs font-semibold text-amber-800">
+								<i class="fa-solid fa-wifi mt-0.5 shrink-0" aria-hidden="true"></i>
+								<span class="flex-1">Server sulit dijangkau — status dicek otomatis begitu pulih.</span>
+								<button
+									type="button"
+									onclick={() => void checkPaymentStatus(true)}
+									class="shrink-0 rounded-lg px-2 py-1 font-bold underline hover:text-amber-900 focus-visible:outline-2 focus-visible:outline-amber-600"
+								>
+									Periksa sekarang
+								</button>
+							</p>
 						{/if}
 						<p class="text-2xl font-black text-slate-900">{formatIDR(displayTotal)}</p>
 						<p class="text-xs text-slate-500">QRIS dinamis · {invoice || '…'} · a.n. Aristoteles Platform</p>
@@ -837,6 +898,13 @@
 
 				<aside aria-label="Ringkasan tagihan" class="rounded-2xl border border-slate-200/70 bg-white p-6 lg:sticky lg:top-24">
 					<h2 class="text-sm font-extrabold text-slate-900">Ringkasan tagihan</h2>
+					{#if courseLoading && !serverCourse}
+						<div class="mt-3 space-y-2" role="status" aria-label="Memuat harga">
+							<div class="h-4 w-2/3 animate-pulse rounded bg-slate-100"></div>
+							<div class="h-8 w-1/2 animate-pulse rounded bg-slate-100"></div>
+							<span class="sr-only">Memuat harga…</span>
+						</div>
+					{:else}
 					<dl class="mt-3 space-y-2 text-sm">
 						<div class="flex justify-between gap-3">
 							<dt class="text-slate-500">{course.title}</dt>
@@ -862,10 +930,11 @@
 							<dd class="text-lg font-black text-blue-700">{formatIDR(total)}</dd>
 						</div>
 					</dl>
-					<p class="mt-3 font-mono text-[11px] text-slate-500">Invoice {invoice || 'dibuat setelah tekan Bayar'}</p>
+					{/if}
+					<p class="mt-3 font-mono text-[11px] text-slate-600">Invoice {invoice || 'dibuat setelah tekan Bayar'}</p>
 					<p class="mt-3 flex items-center gap-2 text-[11px] text-slate-500">
 						<i class="fa-solid fa-shield-halved text-emerald-600" aria-hidden="true"></i>
-						Bukti diverifikasi admin maks 1×24 jam · akses dibuka otomatis
+						Bayar via QRIS dinamis — nominal tampil otomatis · akses dibuka otomatis setelah pembayaran terverifikasi
 					</p>
 				</aside>
 			</div>

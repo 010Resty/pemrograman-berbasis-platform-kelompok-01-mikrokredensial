@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import { onMount } from 'svelte';
 	import { fetchAdminUser, updateAdminUser, type AdminUserDetail } from '$lib/api/admin';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Ubah instruktur — data backend asli (PATCH /api/v1/admin/users/:id).
@@ -50,6 +51,7 @@
 			firstField?.focus();
 		} catch (e) {
 			loadError = messageOf(e, 'Gagal memuat data instruktur dari backend.');
+			toast.error(loadError);
 		} finally {
 			isLoading = false;
 		}
@@ -67,14 +69,17 @@
 		const email = formEmail.trim().toLowerCase();
 		if (!name) {
 			formError = 'Nama lengkap wajib diisi.';
+			toast.error(formError);
 			return;
 		}
 		if (!email) {
 			formError = 'Email wajib diisi.';
+			toast.error(formError);
 			return;
 		}
 		if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
 			formError = 'Format email tidak valid (contoh: nama@aristoteles.ac.id).';
+			toast.error(formError);
 			return;
 		}
 		const patch: { name?: string; email?: string; expertise?: string; isActive?: boolean } = {};
@@ -86,6 +91,7 @@
 		if (isActive !== user.isActive) patch.isActive = isActive;
 		if (Object.keys(patch).length === 0) {
 			formError = 'Tidak ada perubahan untuk disimpan.';
+			toast.error(formError);
 			return;
 		}
 		isSubmitting = true;
@@ -94,6 +100,7 @@
 			await goto(`/admin/instrukturs/${user.id}`);
 		} catch (e) {
 			formError = messageOf(e, 'Perubahan gagal disimpan. Coba lagi.');
+			toast.error(formError);
 		} finally {
 			isSubmitting = false;
 		}

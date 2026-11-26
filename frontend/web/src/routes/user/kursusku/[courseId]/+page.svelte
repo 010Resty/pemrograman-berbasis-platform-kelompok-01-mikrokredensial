@@ -26,6 +26,7 @@
 		type MyModuleCertificateStatus
 	} from '$lib/api/certificates';
 	import { BackendRequestError } from '$lib/api/backend';
+	import { toast } from '$lib/stores/toast.svelte';
 	import {
 		courseProgress,
 		firstUnfinishedInCourse,
@@ -220,6 +221,7 @@
 			}
 			loadError = e instanceof Error ? e.message : 'Gagal memuat kursus.';
 			phase = 'error';
+			toast.error(loadError);
 		}
 	}
 

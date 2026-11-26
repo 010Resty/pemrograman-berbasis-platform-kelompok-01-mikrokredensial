@@ -13,8 +13,8 @@ Perintah: `npm run dev`, cek: `npm run check`. Jangan install, migrasi, build, d
 Svelte 5 + SvelteKit 2, TypeScript strict, Tailwind 4, Tiptap.
 Runes `$state/$derived/$effect`, `SvelteSet/Map`.
 `src/lib/data/` statis, `src/lib/stores/` lokal, `materials/* + MaterialRenderer`, `training/atoms|molecules|organisms`, `src/lib/tiptap/extensions.ts`.
-Proxy `src/routes/api/assignments/upload/+server.ts` dan `grade/[id]/+server.ts` fallback mock bila backend offline.
-Tidak ada bukti JWT, database, gateway, storage file di repo frontend.
+Proxy `src/routes/api/assignments/upload/+server.ts` dan `grade/[id]/+server.ts` teruskan ke backend; backend offline = 502 jujur (tanpa mock, tanpa sukses palsu).
+Token akses disimpan di memori + refresh token di storage (lihat `auth.svelte.ts`); logika JWT, database, gateway, dan storage file hidup di repo backend.
 
 ## 3. Dokumentasi wajib dibaca
 
@@ -26,7 +26,7 @@ Jika kode berbeda dari keputusan, catat sebagai gap. Jangan ubah kode agar tampa
 Acuan utama: `docs/06-aturan-bisnis.md` dan `docs/09-keputusan-proyek.md`. Jangan duplikasi tabel ke sini.
 Keputusan = target disepakati 2026-10-24, bukan bukti sudah diimplementasikan:
 K-01 admin-only undang instruktur; K-02 kuis tanpa batas nilai terbaik default 70; K-03 voucher resmi admin 1 akun + 1 kursus 1x pakai anti-race; K-04 materi biasa selesai via Berikutnya; K-05 sertifikat per modul bersyarat; K-06 tugas boleh ulang tanpa batas pakai rubrik; K-07 modul independen; K-08 ubah materi tidak hapus progres.
-Gunakan `docs/04` untuk status implementasi dan gap. Detail undangan, format riwayat, rubrik, daftar sekuensial, definisi penting masih belum diputuskan.
+Gunakan `docs/04` untuk status implementasi dan gap. Detail undangan (7 hari, token 1x pakai, tanpa OTP), format riwayat (best + attempts + snapshot), rubrik (3 kriteria tetap), sekuens (dalam sub-modul sama), dan definisi penting K-08 sudah diputuskan dan diimplementasikan — lihat `docs/06` + `docs/09`.
 
 ## 5. Keamanan dan data sensitif
 

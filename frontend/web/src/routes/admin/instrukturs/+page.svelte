@@ -6,6 +6,7 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import { fetchAdminUsers, type AdminUser } from '$lib/api/admin';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Daftar instruktur dari backend (GET /api/v1/admin/users?role=teacher).
@@ -64,6 +65,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat instruktur.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}

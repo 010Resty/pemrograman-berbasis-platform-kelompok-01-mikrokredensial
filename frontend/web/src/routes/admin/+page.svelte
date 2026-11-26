@@ -13,6 +13,7 @@
 		type AdminOverview,
 		type AdminUser
 	} from '$lib/api/admin';
+	import { toast } from '$lib/stores/toast.svelte';
 	import type { BackendCourse } from '$lib/api/courses';
 
 	interface Stat {
@@ -53,6 +54,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat dasbor.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}

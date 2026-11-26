@@ -46,6 +46,13 @@ const DEFAULT_TITLE: Record<ToastType, string> = {
 const MAX_VISIBLE = 4;
 /** Jeda animasi keluar sebelum elemen dihapus (sinkron dengan CSS). */
 const EXIT_MS = 180;
+/**
+ * Snapshot toast aktif agar selamat dari full reload (tab yang sama).
+ * Inline error di tiap halaman tetap cadangan utama; snapshot ini hanya
+ * mengembalikan notifikasi yang belum sempat dibaca. Dibersihkan tiap
+ * dibaca agar reload berikutnya tidak memutar ulang.
+ */
+const STORAGE_KEY = 'aristoteles:toasts:v1';
 
 let seq = 0;
 const items = $state<ToastItem[]>([]);
@@ -68,6 +75,25 @@ function remove(id: number): void {
 	const i = items.findIndex((t) => t.id === id);
 	if (i >= 0) items.splice(i, 1);
 	clearTimer(id);
+	persist();
+}
+
+/** Tulis snapshot aktif ke sessionStorage (aman: no-op di server / bila diblokir). */
+function persist(): void {
+	if (!browser) return;
+	try {
+		const snapshot = items
+			.filter((t) => !t.leaving)
+			.slice(-MAX_VISIBLE)
+			.map((t) => ({ type: t.type, title: t.title, message: t.message }));
+		if (snapshot.length > 0) {
+			sessionStorage.setItem(STORAGE_KEY, JSON.stringify(snapshot));
+		} else {
+			sessionStorage.removeItem(STORAGE_KEY);
+		}
+	} catch {
+		/* Penyimpanan diblokir — toast tetap tampil sesi ini. */
+	}
 }
 
 function scheduleDismiss(id: number, duration: number): void {
@@ -108,7 +134,40 @@ function push(type: ToastType, message: string, options: ToastOptions = {}): num
 	const id = ++seq;
 	items.push({ id, type, title, message: text, leaving: false });
 	scheduleDismiss(id, duration);
+	persist();
 	return id;
+}
+
+// Kembalikan snapshot reload sebelumnya (sekali, di klien). Timer baru penuh.
+if (browser) {
+	try {
+		const raw = sessionStorage.getItem(STORAGE_KEY);
+		sessionStorage.removeItem(STORAGE_KEY);
+		const saved: unknown = raw ? JSON.parse(raw) : null;
+		if (Array.isArray(saved)) {
+			for (const s of saved.slice(-MAX_VISIBLE)) {
+				const message =
+					s && typeof s === 'object' && 'message' in s && typeof s.message === 'string'
+						? s.message.trim()
+						: '';
+				if (!message) continue;
+				const type = (
+					s && typeof s === 'object' && 'type' in s && (s.type === 'success' || s.type === 'error' || s.type === 'warning' || s.type === 'info')
+						? s.type
+						: 'info'
+				) as ToastType;
+				const title =
+					s && typeof s === 'object' && 'title' in s && typeof s.title === 'string' && s.title.trim()
+						? s.title.trim()
+						: DEFAULT_TITLE[type];
+				const id = ++seq;
+				items.push({ id, type, title, message, leaving: false });
+				scheduleDismiss(id, DEFAULT_DURATION[type]);
+			}
+		}
+	} catch {
+		/* Snapshot rusak/diblokir — mulai bersih. */
+	}
 }
 
 /** Tutup satu toast manual (dengan animasi keluar). */
@@ -117,6 +176,7 @@ export function dismissToast(id: number): void {
 	if (!it || it.leaving) return;
 	clearTimer(id);
 	it.leaving = true;
+	persist();
 	timers.set(id, setTimeout(() => remove(id), EXIT_MS));
 }
 

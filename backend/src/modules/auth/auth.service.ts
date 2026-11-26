@@ -24,6 +24,7 @@ import {
   normalizeUsername,
 } from "../../utils/username";
 import { issueRefreshToken } from "./refresh.service";
+import { resolveAvatarUrl } from "../../utils/avatar";
 import {
   sendPasswordResetEmail,
   sendVerificationEmail,
@@ -815,7 +816,7 @@ export const loginUser = async (_input: unknown) => {
       username: user.username,
       email: user.email,
       role: user.role,
-      avatarUrl: user.avatarFileId ? `/api/v1/files/${user.avatarFileId}/content` : null,
+      avatarUrl: resolveAvatarUrl(user.avatarFileId, user.photoUrl ?? null, user.id),
     },
   };
 };

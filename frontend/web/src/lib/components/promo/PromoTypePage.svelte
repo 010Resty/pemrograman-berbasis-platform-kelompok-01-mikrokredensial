@@ -1,12 +1,12 @@
 <script lang="ts">
-	import '../../../app.css';
 	import { browser } from '$app/environment';
-	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
+	import { lp, jsonLdLang, type Locale } from '$lib/i18n/locale';
 	import PublicHeader from '$lib/components/public/PublicHeader.svelte';
 	import PublicFooter from '$lib/components/public/PublicFooter.svelte';
 	import PatunganSection from '$lib/components/public/PatunganSection.svelte';
 	import SeoHead from '$lib/components/SeoHead.svelte';
-	import { canonicalPath, getSiteUrl } from '$lib/seo/site';
+	import { canonicalPath, getSiteUrl, altUrls } from '$lib/seo/site';
 	import { reveal } from '$lib/actions/reveal';
 	import {
 		fetchCourseDetail,
@@ -22,6 +22,8 @@
 		'https://images.unsplash.com/photo-1516321318423-f06f85e504b3?auto=format&fit=crop&w=600&q=80';
 
 	let { type, data }: { type: PromoType; data: { origin: string } } = $props();
+
+	const lang: Locale = $derived(page.params.lang === 'en' ? 'en' : 'id');
 
 	const meta = $derived(promoTypeMeta(type));
 
@@ -141,16 +143,16 @@
 			'@type': 'CollectionPage',
 			name: `${meta.title} — ARISTOTELES`,
 			description: meta.description,
-			url: canonicalPath(`/promo/${meta.slug}`, data.origin),
-			inLanguage: 'id-ID',
+			url: canonicalPath(lp(lang, `/promo/${meta.slug}`), data.origin),
+			inLanguage: jsonLdLang(lang),
 			isPartOf: { '@type': 'WebSite', name: 'ARISTOTELES', url: getSiteUrl(data.origin) }
 		},
 		{
 			'@type': 'BreadcrumbList',
 			itemListElement: [
-				{ '@type': 'ListItem', position: 1, name: 'Beranda', item: canonicalPath('/', data.origin) },
-				{ '@type': 'ListItem', position: 2, name: 'Promo', item: canonicalPath('/promo/diskon', data.origin) },
-				{ '@type': 'ListItem', position: 3, name: meta.title, item: canonicalPath(`/promo/${meta.slug}`, data.origin) }
+				{ '@type': 'ListItem', position: 1, name: 'Beranda', item: canonicalPath(lp(lang, '/'), data.origin) },
+				{ '@type': 'ListItem', position: 2, name: 'Promo', item: canonicalPath(lp(lang, '/promo/diskon'), data.origin) },
+				{ '@type': 'ListItem', position: 3, name: meta.title, item: canonicalPath(lp(lang, `/promo/${meta.slug}`), data.origin) }
 			]
 		}
 	]);
@@ -159,8 +161,10 @@
 <SeoHead
 	title={`${meta.title} — ARISTOTELES`}
 	description={meta.description}
-	path={`/promo/${meta.slug}`}
+	path={lp(lang, `/promo/${meta.slug}`)}
 	origin={data.origin}
+	lang={lang}
+	alternates={altUrls(lp(lang, `/promo/${meta.slug}`), data.origin)}
 	jsonLd={pageJsonLd}
 />
 
@@ -189,7 +193,7 @@
 			<nav aria-label="Navigasi jenis promo" class="mt-8 flex flex-wrap gap-2.5">
 				{#each PROMO_TYPES as t (t.type)}
 					<a
-						href={resolve(`/promo/${t.slug}`)}
+						href={lp(lang, `/promo/${t.slug}`)}
 						aria-current={t.type === type ? 'page' : undefined}
 						class="inline-flex min-h-[44px] items-center gap-2 rounded-xl px-5 py-2.5 font-heading text-xs font-bold transition-colors duration-200 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white {t.type === type
 							? 'bg-ice text-abyss'
@@ -250,7 +254,7 @@
 						<p class="font-heading text-sm font-bold text-abyss">Belum ada flash sale saat ini.</p>
 						<p class="mx-auto mt-1 max-w-md text-sm text-slate-500">Jelajahi katalog untuk melihat seluruh pelatihan yang tersedia.</p>
 						<div class="mt-5">
-							<a href={resolve('/pelatihan')} class="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-6 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-royal">
+							<a href={lp(lang, '/pelatihan')} class="inline-flex min-h-[44px] items-center gap-2 rounded-xl bg-royal px-6 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-royal">
 								Lihat Katalog <i class="fa-solid fa-arrow-right text-xs" aria-hidden="true"></i>
 							</a>
 						</div>
@@ -266,7 +270,7 @@
 										Berakhir {formatTanggal(camp.endsAt)} · {camp.courses.length} pelatihan
 									</p>
 								</div>
-								<a href={resolve(`/promo/${camp.slug}`)} class="inline-flex min-h-[40px] items-center gap-2 rounded-xl bg-abyss px-4 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-red-600 focus-visible:outline-2 focus-visible:outline-red-600">
+								<a href={lp(lang, `/promo/${camp.slug}`)} class="inline-flex min-h-[40px] items-center gap-2 rounded-xl bg-abyss px-4 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-red-600 focus-visible:outline-2 focus-visible:outline-red-600">
 									Halaman promo <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
 								</a>
 							</div>
@@ -284,7 +288,7 @@
 											<div>
 												<p class="font-heading text-[11px] font-bold tracking-[0.14em] text-red-600 uppercase">Flash Sale</p>
 												<h4 class="mt-2 font-heading text-base leading-snug font-bold text-abyss">
-													<a href={resolve(`/modules/${m.courseId}`)} aria-label={`Lihat info singkat: ${m.title}`} class="rounded transition-colors duration-200 group-hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-600 after:absolute after:inset-0">{m.title}</a>
+													<a href={lp(lang, `/modules/${m.courseId}`)} aria-label={`Lihat info singkat: ${m.title}`} class="rounded transition-colors duration-200 group-hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-600 after:absolute after:inset-0">{m.title}</a>
 												</h4>
 												<p class="mt-1 text-xs text-slate-500">Pengampu: {instructorNames.get(m.courseId) ?? '…'}</p>
 												{#if m.promoEndsAt ?? camp.endsAt}
@@ -298,7 +302,7 @@
 														<span class="font-heading text-lg font-extrabold text-red-600">{formatIDR(m.promoPrice)}</span>
 													{/if}
 												</div>
-												<a href={resolve(`/modules/${m.courseId}`)} class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-abyss px-4 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-red-600 focus-visible:outline-2 focus-visible:outline-red-600">
+												<a href={lp(lang, `/modules/${m.courseId}`)} class="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-abyss px-4 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-red-600 focus-visible:outline-2 focus-visible:outline-red-600">
 													Lihat Pelatihan <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
 												</a>
 											</div>
@@ -368,7 +372,7 @@
 									<h3 class="truncate font-heading text-base font-bold text-abyss">{camp.title}</h3>
 									<p class="text-xs text-slate-500">{camp.courses.length} pelatihan pilihan editor</p>
 								</div>
-								<a href={resolve(`/promo/${camp.slug}`)} class="inline-flex min-h-[40px] items-center gap-2 rounded-xl bg-abyss px-4 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal focus-visible:outline-2 focus-visible:outline-royal">
+								<a href={lp(lang, `/promo/${camp.slug}`)} class="inline-flex min-h-[40px] items-center gap-2 rounded-xl bg-abyss px-4 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-royal focus-visible:outline-2 focus-visible:outline-royal">
 									Halaman promo <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
 								</a>
 							</div>
@@ -385,7 +389,7 @@
 													<p class="font-heading text-[11px] font-bold tracking-[0.14em] text-royal uppercase">Unggulan</p>
 												{/if}
 												<h4 class="mt-1 truncate font-heading text-base font-bold text-abyss">
-													<a href={resolve(`/modules/${m.courseId}`)} aria-label={`Lihat detail: ${m.title}`} class="rounded transition-colors duration-200 group-hover:text-royal focus-visible:outline-2 focus-visible:outline-royal after:absolute after:inset-0">{m.title}</a>
+													<a href={lp(lang, `/modules/${m.courseId}`)} aria-label={`Lihat detail: ${m.title}`} class="rounded transition-colors duration-200 group-hover:text-royal focus-visible:outline-2 focus-visible:outline-royal after:absolute after:inset-0">{m.title}</a>
 												</h4>
 												<p class="mt-0.5 text-xs text-slate-500">Pengampu: {instructorNames.get(m.courseId) ?? '…'}</p>
 											</div>
@@ -413,7 +417,7 @@
 									<div>
 										<p class="font-heading text-[11px] font-bold tracking-[0.14em] text-royal uppercase">Unggulan</p>
 										<h3 class="mt-2 font-heading text-base leading-snug font-bold text-abyss">
-											<a href={resolve(`/modules/${course.id}`)} aria-label={`Lihat detail: ${course.title}`} class="rounded transition-colors duration-200 group-hover:text-royal focus-visible:outline-2 focus-visible:outline-royal after:absolute after:inset-0">{course.title}</a>
+											<a href={lp(lang, `/modules/${course.id}`)} aria-label={`Lihat detail: ${course.title}`} class="rounded transition-colors duration-200 group-hover:text-royal focus-visible:outline-2 focus-visible:outline-royal after:absolute after:inset-0">{course.title}</a>
 										</h3>
 										<p class="mt-1 text-xs text-slate-500">Pengampu: {instructorNames.get(course.id) ?? '…'}</p>
 									</div>
@@ -487,7 +491,7 @@
 								<ul class="mt-4 space-y-2 border-t border-teal/20 pt-4">
 									{#each camp.courses as m (m.courseId)}
 										<li>
-											<a href={resolve(`/patungan/setup/${m.courseId}`)} class="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors hover:bg-teal/10 focus-visible:outline-2 focus-visible:outline-teal" aria-label={`Buat grup patungan: ${m.title}`}>
+											<a href={lp(lang, `/patungan/setup/${m.courseId}`)} class="flex items-center justify-between gap-3 rounded-xl px-3 py-2.5 text-sm transition-colors hover:bg-teal/10 focus-visible:outline-2 focus-visible:outline-teal" aria-label={`Buat grup patungan: ${m.title}`}>
 												<span class="min-w-0 flex-1 truncate font-semibold text-abyss">{m.title}</span>
 												<span class="flex shrink-0 items-center gap-2 text-xs font-bold text-teal">
 													{m.priceLabel}
@@ -497,10 +501,10 @@
 										</li>
 									{/each}
 								</ul>
-								<a href={resolve('/patungan/saya')} class="mt-4 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-abyss px-4 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-teal focus-visible:outline-2 focus-visible:outline-teal">
+								<a href={lp(lang, '/patungan/saya')} class="mt-4 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-abyss px-4 py-2.5 font-heading text-xs font-bold text-white transition-colors duration-200 hover:bg-teal focus-visible:outline-2 focus-visible:outline-teal">
 									Grup patunganku <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
 								</a>
-								<a href={resolve(`/promo/${camp.slug}`)} class="mt-2 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-teal/40 px-4 py-2.5 font-heading text-xs font-bold text-teal transition-colors duration-200 hover:bg-teal/10 focus-visible:outline-2 focus-visible:outline-teal">
+								<a href={lp(lang, `/promo/${camp.slug}`)} class="mt-2 inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-teal/40 px-4 py-2.5 font-heading text-xs font-bold text-teal transition-colors duration-200 hover:bg-teal/10 focus-visible:outline-2 focus-visible:outline-teal">
 									Halaman promo ini <i class="fa-solid fa-arrow-right text-[11px]" aria-hidden="true"></i>
 								</a>
 							</div>

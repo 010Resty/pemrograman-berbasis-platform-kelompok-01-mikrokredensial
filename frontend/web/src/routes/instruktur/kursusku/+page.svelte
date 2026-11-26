@@ -79,6 +79,7 @@
 			toast.success(`Kursus “${removedTitle}” dihapus.`);
 		} catch (e) {
 			deleteError = e instanceof Error ? e.message : 'Gagal menghapus kursus.';
+			toast.error(deleteError);
 		} finally {
 			deleting = false;
 		}
@@ -114,6 +115,7 @@
 			});
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Gagal memuat kursus.';
+			toast.error(loadError);
 		} finally {
 			loading = false;
 		}

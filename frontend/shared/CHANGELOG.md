@@ -1,5 +1,27 @@
 # Changelog Kontrak `frontend/shared/`
 
+## 1.6.0 — 2026-11-24 (Agregat 1-query + optimasi batch backend)
+
+- Baru: `GET /admin/vouchers/stats[?courseId=&kind=&q=]` (admin) → 200
+  `{total,aktif,habis,kedaluarsa,batal}` dari 1 query `SUM(CASE)`; grup
+  status identik dengan filter daftar (`active`/`expired`). Web memakai ini
+  untuk kartu statistik (fallback 5× daftar bila backend lama).
+- `GET /instructor/review-queue` dukung `?courseId=` opsional: lingkup 1
+  kursus + tetap cek kepengelolaan (bukan pengelola → kosong). Web memakai
+  ini di halaman penilaian per kursus (ganti kipas N request per materi);
+  dashboard ringkasan tetap tanpa filter.
+- Backend: 15 indeks komposit baru (migrasi `0035`), proyeksi polling
+  pembayaran (tanpa `dokuQrString`), agregat SQL `getBest`/revenue/
+  eligibility batch, paginasi daftar milik sendiri, `rawBody` hanya webhook
+  DOKU, purge refresh-token kedaluwarsa (fungsi opsional). Suite backend
+  241/241 hijau.
+- Frontend web: cache GET opt-in untuk bell (`lib/api/cache.ts`, 45 dtk,
+  invalidasi per mutasi), hook polling terpadu (`lib/stores/badge-poll.ts`),
+  komponen `ModalShell`/`StatusBadge`/`Breadcrumb`, QR auto-refresh sekali
+  + banner offline + jeda polling saat tab hidden, srcset responsif,
+  prerender 4 halaman statis, `vite build` lolos (kecuali tahap adapter
+  Vercel: symlink EPERM khas Windows — pra-eksis, bukan dari kode).
+
 ## 1.5.0 — 2026-11-15 (QRIS dinamis DOKU ganti total jalur manual)
 
 - `POST /courses/:id/payments` terima `{gateway: manual|doku}` (default manual

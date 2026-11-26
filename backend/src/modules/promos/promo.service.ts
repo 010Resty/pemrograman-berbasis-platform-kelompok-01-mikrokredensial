@@ -865,11 +865,61 @@ export const listPublicCampaigns = async (now: Date = new Date()) => {
     .from(promoCampaigns)
     .where(eq(promoCampaigns.status, "active"))
     .orderBy(desc(promoCampaigns.id));
-  const out = [];
-  for (const c of rows) {
-    if (!isCampaignActive({ status: c.status, startsAt: c.startsAt, endsAt: c.endsAt }, now)) continue;
-    const members = await coursePromoShape(c.id, c.type === "diskon" ? c.discountPercent : null);
-    out.push({
+  const active = rows.filter((c) =>
+    isCampaignActive({ status: c.status, startsAt: c.startsAt, endsAt: c.endsAt }, now)
+  );
+  if (active.length === 0) return [];
+  // Batch: 1 query members untuk semua kampanye (dulu N query).
+  const mrows = await db
+    .select({
+      campaignId: promoCourses.campaignId,
+      courseId: promoCourses.courseId,
+      position: promoCourses.position,
+      customBadge: promoCourses.customBadge,
+      patunganPrice: promoCourses.patunganPrice,
+      title: courses.title,
+      image: courses.image,
+      priceLabel: courses.priceLabel,
+      priceNominal: courses.priceNominal,
+      status: courses.status,
+    })
+    .from(promoCourses)
+    .innerJoin(courses, eq(courses.id, promoCourses.courseId))
+    .where(
+      inArray(
+        promoCourses.campaignId,
+        active.map((c) => c.id)
+      )
+    )
+    .orderBy(asc(promoCourses.position), asc(promoCourses.courseId));
+  const byCampaign = new Map<number, typeof mrows>();
+  for (const r of mrows) {
+    const arr = byCampaign.get(r.campaignId);
+    if (arr) arr.push(r);
+    else byCampaign.set(r.campaignId, [r]);
+  }
+  return active.map((c) => {
+    const members = (byCampaign.get(c.id) ?? [])
+      .filter((r) => r.status === "published")
+      .map((r) => {
+        const discountPercent = c.type === "diskon" ? c.discountPercent : null;
+        return {
+          courseId: r.courseId,
+          title: r.title,
+          image: r.image,
+          priceLabel: r.priceLabel,
+          priceNominal: r.priceNominal,
+          discountPercent,
+          promoPrice:
+            discountPercent === null
+              ? null
+              : Math.max(0, r.priceNominal - promoDiscountAmount(r.priceNominal, discountPercent)),
+          badgeLabel: r.customBadge,
+          promoEndsAt: null as Date | null,
+          patunganPrice: r.patunganPrice,
+        };
+      });
+    return {
       slug: c.slug,
       title: c.title,
       badgeLabel: c.badgeLabel,
@@ -879,9 +929,8 @@ export const listPublicCampaigns = async (now: Date = new Date()) => {
       startsAt: c.startsAt,
       endsAt: c.endsAt,
       courses: members.map((m) => ({ ...m, badgeLabel: m.badgeLabel ?? c.badgeLabel, promoEndsAt: c.endsAt })),
-    });
-  }
-  return out;
+    };
+  });
 };
 
 export const getPublicCampaign = async (slug: string, now: Date = new Date()) => {

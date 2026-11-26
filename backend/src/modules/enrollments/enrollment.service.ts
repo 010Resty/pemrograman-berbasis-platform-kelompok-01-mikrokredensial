@@ -199,7 +199,8 @@ export const enrollFree = async (
 
 // ---------- Daftar kursus saya ----------
 
-export const listMyEnrollments = async (userId: number) => {
+export const listMyEnrollments = async (userId: number, limit = 200) => {
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || 200, 1), 500);
   const rows = await db
     .select({
       status: enrollments.status,
@@ -220,7 +221,8 @@ export const listMyEnrollments = async (userId: number) => {
     .from(enrollments)
     .innerJoin(courses, eq(courses.id, enrollments.courseId))
     .where(eq(enrollments.userId, userId))
-    .orderBy(desc(enrollments.enrolledAt));
+    .orderBy(desc(enrollments.enrolledAt))
+    .limit(safeLimit);
   return rows;
 };
 

@@ -3,8 +3,10 @@
 	import { onMount } from 'svelte';
 	import { focusTrap } from '$lib/actions/focusTrap';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 	import {
 		createBackendInvitation,
 		fetchInvitations,
@@ -92,22 +94,6 @@
 
 	const paged = $derived(filtered.slice((page - 1) * perPage, page * perPage));
 
-	function statusClass(s: UiStatus): string {
-		if (s === 'Accepted') return 'border-emerald-200 bg-emerald-50 text-emerald-700';
-		if (s === 'Pending') return 'border-amber-200 bg-amber-50 text-amber-700';
-		if (s === 'Cancelled') return 'border-red-200 bg-red-50 text-red-700';
-		return 'border-slate-200 bg-slate-100 text-slate-600';
-	}
-
-	/** Label tampil untuk status undangan. Nilai data tidak diubah. */
-	function statusLabel(s: UiStatus | 'all'): string {
-		if (s === 'Pending') return 'Menunggu';
-		if (s === 'Accepted') return 'Diterima';
-		if (s === 'Expired') return 'Kedaluarsa';
-		if (s === 'Cancelled') return 'Dibatalkan';
-		return 'Semua';
-	}
-
 	function filterLabel(f: Filter): string {
 		if (f === 'all') return 'Semua';
 		if (f === 'pending') return 'Menunggu';
@@ -139,6 +125,7 @@
 			items = await fetchInvitations();
 		} catch (e) {
 			loadError = messageOf(e, 'Gagal memuat undangan dari backend.');
+			toast.error(loadError);
 		} finally {
 			isLoading = false;
 		}
@@ -180,14 +167,17 @@
 		const email = formEmail.trim();
 		if (!name) {
 			formError = 'Nama lengkap wajib diisi.';
+			toast.error(formError);
 			return;
 		}
 		if (!email) {
 			formError = 'Email wajib diisi.';
+			toast.error(formError);
 			return;
 		}
 		if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
 			formError = 'Format email tidak valid (contoh: nama@aristoteles.ac.id).';
+			toast.error(formError);
 			return;
 		}
 		const dupe = items.some(
@@ -195,6 +185,7 @@
 		);
 		if (dupe) {
 			formError = 'Email ini sudah memiliki undangan aktif (Menunggu).';
+			toast.error(formError);
 			return;
 		}
 		isSubmitting = true;
@@ -217,6 +208,7 @@
 			await load();
 		} catch (e) {
 			formError = messageOf(e, 'Gagal membuat undangan. Coba lagi nanti.');
+			toast.error(formError);
 		} finally {
 			isSubmitting = false;
 		}
@@ -233,6 +225,7 @@
 			}, 2000);
 		} catch {
 			notice = 'Gagal menyalin otomatis. Salin manual dari kolom tautan bila diperlukan.';
+			toast.error(notice);
 		}
 	}
 
@@ -257,6 +250,7 @@
 			await load();
 		} catch (e) {
 			notice = messageOf(e, 'Gagal membatalkan undangan.');
+			toast.error(notice);
 		} finally {
 			revokeBusyId = null;
 		}
@@ -280,6 +274,7 @@
 			await load();
 		} catch (e) {
 			notice = messageOf(e, 'Gagal menerbitkan ulang undangan.');
+			toast.error(notice);
 		} finally {
 			reissueBusyId = null;
 		}
@@ -335,7 +330,10 @@
 					<span class="font-normal">(email gagal terkirim — kirim manual)</span>
 				{/if}
 			</p>
-			<p class="mt-1 font-mono break-all">{freshToken.inviteUrl}</p>
+			<code class="mt-1 block rounded-lg bg-white px-3 py-2 font-mono break-all ring-1 ring-emerald-200">{freshToken.inviteUrl}</code>
+			<p class="mt-1.5 font-semibold text-amber-800">
+				Jangan muat ulang halaman sebelum disalin — tautan hilang dan undangan harus dikirim ulang (tautan lama ikut hangus).
+			</p>
 			<button
 				type="button"
 				onclick={() => void copyFreshLink()}
@@ -417,9 +415,7 @@
 								<p class="truncate text-xs text-slate-500">{inv.email}</p>
 								<p class="mt-0.5 text-[11px] text-slate-400">s.d. {formatDate(inv.expiresAt)}</p>
 							</div>
-							<span class={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${statusClass(ui)}`}>
-								<span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{statusLabel(ui)}
-							</span>
+							<StatusBadge kind="invitation" status={ui} class="shrink-0 text-[11px] font-bold" />
 						</div>
 						{#if ui === 'Pending' || ui === 'Expired'}
 							<div class="mt-2.5 flex gap-2">
@@ -436,7 +432,8 @@
 					</li>
 				{/each}
 			</ol>
-			<div class="hidden overflow-x-auto md:block">
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll region keyboard: tabel lebar perlu tabindex 0 -->
+			<div class="table-scroll hidden md:block" tabindex="0" role="region" aria-label="Tabel undangan instruktur, geser horizontal">
 				<table class="w-full min-w-[820px] text-sm">
 					<caption class="sr-only">Daftar undangan instruktur</caption>
 					<thead class="bg-violet-700 text-white">
@@ -462,9 +459,7 @@
 								<td class="px-6 py-3.5 whitespace-nowrap text-slate-600">{formatDate(inv.createdAt)}</td>
 								<td class="px-6 py-3.5 whitespace-nowrap text-slate-600">{formatDate(inv.expiresAt)}</td>
 								<td class="px-6 py-3.5 text-center">
-									<span class={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${statusClass(ui)}`}>
-										<span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{statusLabel(ui)}
-									</span>
+									<StatusBadge kind="invitation" status={ui} class="text-[11px] font-bold" />
 								</td>
 								<td class="px-6 py-3.5">
 									<div class="flex justify-end gap-2">

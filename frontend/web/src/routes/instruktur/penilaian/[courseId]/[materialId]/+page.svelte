@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
+	import { SvelteSet } from 'svelte/reactivity';
 	import { page } from '$app/state';
 	import { resolve } from '$app/paths';
 	import { generateHTML } from '@tiptap/html';
@@ -15,7 +16,10 @@
 		type MaterialSubmissionItem
 	} from '$lib/api/submissions';
 	import { downloadSubmissionFile } from '$lib/services/submission.service';
+	import { toast } from '$lib/stores/toast.svelte';
 	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
+	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
+	import Breadcrumb from '$lib/components/ui/Breadcrumb.svelte';
 	import { createEditorExtensions } from '$lib/tiptap/extensions';
 	import '$lib/tiptap/content.css';
 
@@ -38,8 +42,8 @@
 		{ key: 'kerapian', label: 'Kerapian', hint: 'Tulisan rapi dan mudah dibaca.' }
 	] as const;
 	type RubrikKey = (typeof RUBRIK)[number]['key'];
-	/** Nilai cepat sekali ketuk (tetap bisa digeser presisi via slider). */
-	const QUICK_LEVELS = [0, 60, 75, 85, 100];
+	/** Nilai cepat sekali ketuk (selaras ambang lulus default 70; tetap bisa digeser presisi via slider). */
+	const QUICK_LEVELS = [0, 70, 85, 100];
 	let draftRubric: Record<string, Record<RubrikKey, number>> = $state({});
 
 	function rubricFor(key: string): Record<RubrikKey, number> {
@@ -69,29 +73,13 @@
 	let srvRows = $state<MaterialSubmissionItem[]>([]);
 	let srvNotice = $state('');
 	let srvNoticeError = $state(false);
-	let srvDownloading = $state<number | null>(null);
+	let srvDownloadingIds = new SvelteSet<number>();
 	let srvDownloadError = $state('');
 	let srvBriefHtml = $state('');
 	/** Baris yang sedang diubah nilainya (nilai ulang); null = mode lihat. */
 	let editingRow = $state<number | null>(null);
 
 	const srvPending = $derived(srvRows.filter((r) => r.status === 'submitted').length);
-
-	/** Badge presisi sesuai enum status backend (submitted/reviewed/revision_requested/passed/failed). */
-	function srvStatusMeta(status: string): { label: string; classes: string } {
-		switch (status) {
-			case 'submitted':
-				return { label: 'Menunggu', classes: 'border-amber-200 bg-amber-50 text-amber-700' };
-			case 'revision_requested':
-				return { label: 'Minta revisi', classes: 'border-violet-200 bg-violet-50 text-violet-700' };
-			case 'passed':
-				return { label: 'Lulus', classes: 'border-emerald-200 bg-emerald-50 text-emerald-700' };
-			case 'failed':
-				return { label: 'Tidak lulus', classes: 'border-red-200 bg-red-50 text-red-700' };
-			default:
-				return { label: 'Dinilai', classes: 'border-slate-200 bg-slate-100 text-slate-600' };
-		}
-	}
 
 	function srvNeedsGrade(r: MaterialSubmissionItem): boolean {
 		return r.status === 'submitted' || r.score === null;
@@ -150,6 +138,7 @@
 			editingRow = null;
 		} catch (e) {
 			srvError = e instanceof Error ? e.message : 'Gagal memuat pengumpulan.';
+			toast.error(srvError);
 		} finally {
 			srvLoading = false;
 		}
@@ -165,12 +154,17 @@
 
 	async function submitServerScore(id: number): Promise<void> {
 		const key = String(id);
+		const rawDecision = draftDecisions[key];
+		// Keputusan wajib dipilih eksplisit — jangan default Lulus diam-diam.
+		if (rawDecision !== 'passed' && rawDecision !== 'failed' && rawDecision !== 'revision_requested') {
+			srvNotice = 'Pilih keputusan (Lulus / Minta revisi / Tidak lulus) sebelum menyimpan nilai.';
+			srvNoticeError = true;
+			toast.error(srvNotice);
+			return;
+		}
 		const val = rubricAverage(key);
 		const rb = rubricFor(key);
-		const decision =
-			draftDecisions[key] === 'failed' || draftDecisions[key] === 'revision_requested'
-				? draftDecisions[key]
-				: 'passed';
+		const decision = rawDecision;
 		try {
 			const updated = await gradeMaterialSubmission(Number(page.params.materialId), id, {
 				score: val,
@@ -189,9 +183,11 @@
 				? `Nilai ${updated.score} (rubrik ${saved.kelengkapan}/${saved.ketepatan}/${saved.kerapian}) tersimpan untuk ${updated.studentName ?? 'peserta'}.`
 				: `Nilai ${updated.score} tersimpan untuk ${updated.studentName ?? 'peserta'}.`;
 			srvNoticeError = false;
+			window.dispatchEvent(new CustomEvent('instruktur:notif-refresh'));
 		} catch (e) {
 			srvNotice = e instanceof Error ? e.message : 'Gagal menyimpan nilai.';
 			srvNoticeError = true;
+			toast.error(srvNotice);
 		}
 	}
 
@@ -222,12 +218,13 @@
 	}
 
 	async function downloadServerFile(row: MaterialSubmissionItem): Promise<void> {
-		if (srvDownloading !== null) return;
+		if (srvDownloadingIds.has(row.id)) return;
 		if (!isServableSubmissionFile(row.fileUrl)) {
 			srvDownloadError = 'Berkas sumber tidak lagi tersimpan di server.';
+			toast.error(srvDownloadError);
 			return;
 		}
-		srvDownloading = row.id;
+		srvDownloadingIds.add(row.id);
 		srvDownloadError = '';
 		try {
 			const blob = await downloadSubmissionFile(fileUrl(row.fileUrl));
@@ -244,8 +241,9 @@
 			}
 		} catch (e) {
 			srvDownloadError = e instanceof Error ? e.message : 'Gagal mengunduh berkas.';
+			toast.error(srvDownloadError);
 		} finally {
-			srvDownloading = null;
+			srvDownloadingIds.delete(row.id);
 		}
 	}
 </script>
@@ -299,7 +297,7 @@
 									aria-pressed={rv === q}
 									aria-label={`${k.label} ${q}`}
 									title={`${k.label} = ${q}`}
-									class={`min-h-7 flex-1 rounded-lg px-1 text-[10px] font-extrabold transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${rv === q ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-blue-50 hover:text-blue-700'}`}
+									class={`min-h-11 flex-1 rounded-lg px-1 py-1 text-[10px] font-extrabold transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${rv === q ? 'bg-blue-600 text-white' : 'bg-white text-slate-500 ring-1 ring-slate-200 hover:bg-blue-50 hover:text-blue-700'}`}
 								>
 									{q}
 								</button>
@@ -328,6 +326,7 @@
 					bind:value={draftDecisions[key]}
 					class="min-w-0 flex-1 rounded-lg border border-slate-200 bg-white px-2 py-2 text-xs font-bold text-slate-700 focus:border-blue-500 focus:outline-none"
 				>
+					<option value="" disabled>— Pilih keputusan —</option>
 					<option value="passed">Lulus</option>
 					<option value="revision_requested">Minta revisi</option>
 					<option value="failed">Tidak lulus</option>
@@ -348,24 +347,13 @@
 		</div>
 	{/snippet}
 	{#if serverMode}
-		<nav
-			aria-label="Breadcrumb"
-			class="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500"
-		>
-			<a
-				href={resolve('/instruktur/penilaian')}
-				class="rounded font-semibold text-blue-600 hover:text-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-				>Penilaian</a
-			>
-			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
-			<span class="max-w-56 truncate font-semibold text-slate-600"
-				>{srvCourseTitle || `Kursus #${page.params.courseId}`}</span
-			>
-			<i class="fa-solid fa-chevron-right text-[10px] text-slate-300" aria-hidden="true"></i>
-			<span aria-current="page" class="max-w-64 truncate font-medium text-slate-700"
-				>{srvMaterialTitle || 'Memuat...'}</span
-			>
-		</nav>
+		<Breadcrumb
+			items={[
+				{ label: 'Penilaian', href: resolve('/instruktur/penilaian') },
+				{ label: srvCourseTitle || `Kursus #${page.params.courseId}` },
+				{ label: srvMaterialTitle || 'Memuat...' }
+			]}
+		/>
 
 		<section
 			aria-labelledby="srv-heading"
@@ -479,7 +467,6 @@
 				{:else}
 					<ol class="divide-y divide-slate-100 md:hidden" aria-label="Daftar pengumpulan">
 						{#each srvRows as r (r.id)}
-							{@const srvMeta = srvStatusMeta(r.status)}
 							<li class="px-4 py-4">
 								<div class="flex items-start justify-between gap-3">
 									<div class="flex min-w-0 items-center gap-2.5">
@@ -497,16 +484,13 @@
 											</p>
 										</div>
 									</div>
-									<span
-										class={`inline-flex shrink-0 items-center rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${srvMeta.classes}`}
-										>{srvMeta.label}</span
-									>
+									<StatusBadge kind="submission" status={r.status} class="shrink-0 text-[11px] font-bold" />
 								</div>
 								{#if isServableSubmissionFile(r.fileUrl)}
 									<button
 										type="button"
 										onclick={() => void downloadServerFile(r)}
-										disabled={srvDownloading !== null}
+										disabled={srvDownloadingIds.has(r.id)}
 										class="mt-2.5 inline-flex min-h-10 w-full items-center justify-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 hover:bg-violet-100 focus-visible:outline-2 focus-visible:outline-violet-600 disabled:cursor-not-allowed disabled:opacity-60"
 									>
 										<i class="fa-solid fa-file-pdf text-red-500" aria-hidden="true"></i>
@@ -596,11 +580,11 @@
 												<button
 													type="button"
 													onclick={() => void downloadServerFile(r)}
-													disabled={srvDownloading !== null}
+													disabled={srvDownloadingIds.has(r.id)}
 													title={r.originalName ?? 'Unduh PDF'}
 													class="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-violet-200 bg-violet-50 px-3 py-2 text-xs font-bold text-violet-700 transition-colors duration-200 ease-smooth hover:bg-violet-100 focus-visible:outline-2 focus-visible:outline-violet-600 disabled:cursor-not-allowed disabled:opacity-60"
 												>
-													{#if srvDownloading === r.id}
+													{#if srvDownloadingIds.has(r.id)}
 														<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i>
 													{:else}
 														<i class="fa-solid fa-file-pdf text-red-500" aria-hidden="true"></i>
@@ -618,13 +602,7 @@
 											{/if}
 										</td>
 										<td class="px-5 py-4">
-											{#each [srvStatusMeta(r.status)] as meta (meta.label)}
-												<span
-													class={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold ${meta.classes}`}
-												>
-													{meta.label}
-												</span>
-											{/each}
+											<StatusBadge kind="submission" status={r.status} />
 										</td>
 										<td class="px-5 py-4">
 											{#if srvNeedsGrade(r) || editingRow === r.id}

@@ -13,9 +13,9 @@ backend/
 │   ├── server.ts               # Entry point
 │   ├── middlewares/
 │   │   ├── auth.middleware.ts  # authenticate, requireRole, optionalAuthenticate
-│   │   └── rate-limit.middleware.ts  # in-memory per IP (umum + khusus OTP auth)
+│   │   └── rate-limit.middleware.ts  # in-memory per IP (umum + khusus OTP auth; multi-instance butuh Redis)
 │   ├── db/
-│   │   ├── schema.ts           # Seluruh tabel Drizzle
+│   │   ├── schema.ts           # ~30 tabel Drizzle + 40+ indeks (termasuk 15 indeks komposit migrasi 0035)
 │   │   ├── index.ts            # Pool MySQL + DATABASE_URL/DB_HOST… fallback
 │   │   ├── migrate.ts          # Runner migrasi (drizzle-orm migrator)
 │   │   └── seed.ts             # Data demo dev (JANGAN di production; abort bila users terisi)
@@ -23,22 +23,27 @@ backend/
 │   │   ├── response.ts         # Tipe envelope {status,message,data}
 │   │   └── mailer.ts           # SMTP Nodemailer (atau mode log bila tanpa SMTP)
 │   └── modules/
-│       ├── auth/               # register (selalu student), verify-email, login, me,
-│       │                       # forgot/verify-reset-code/reset-password, rate-limit OTP
-│       ├── courses/            # kursus + kurikulum (modul/submodul/materi)
-│       ├── progress/           # tandai/batalkan selesai, progres saya
-│       ├── quiz/               # bank soal + percobaan (nilai terbaik di server)
+│       ├── auth/               # register (selalu student), verify-email, login,
+│       │                       # forgot/verify-reset-code/reset-password, refresh rotasi + grace, logout, me
+│       ├── profile/            # profil milik sendiri (baca/ubah/hapus avatar)
+│       ├── courses/            # kursus + kurikulum (modul/submodul/materi, versi K-08 + riwayat)
+│       ├── categories/         # kategori kursus (publik + kelola admin)
+│       ├── progress/           # tandai/batalkan selesai, progres saya + ringkasan
+│       ├── quiz/               # bank soal + percobaan (nilai terbaik di server, agregat SQL)
 │       ├── enrollments/        # enroll gratis + grant/revoke admin + audit
-│       ├── submissions/        # kumpul tugas + nilai pengelola
-│       ├── certificates/       # kelayakan, terbit idempoten, verify publik, cabut
-│       ├── vouchers/           # buat/kelola admin + tukar atomik peserta
-│       ├── admin/              # kelola user + penugasan instruktur
-│       ├── invitations/        # undangan instruktur (token hash) + aktivasi
-│       ├── applications/       # pengajuan instruktur publik (rate-limit)
-│       ├── dashboard/          # ringkasan instruktur
-│       ├── uploads/            # upload base64 + serve berkas (assignment privat)
-│       └── payments/           # QRIS dinamis DOKU (gateway) + manual lawas, lihat README di dalamnya
-├── drizzle/                    # Migrasi 0000–0011 + meta/_journal.json
+│       ├── submissions/        # kumpul tugas + nilai pengelola + antrean review (filter ?courseId=)
+│       ├── certificates/       # kelayakan, terbit idempoten, verify publik, unduh PDF, cabut (eligibility batch)
+│       ├── vouchers/           # buat/kelola admin + tukar atomik peserta + statistik 1-query (/stats)
+│       ├── admin/              # kelola user + penugasan instruktur + laporan (agregat scoped per halaman)
+│       ├── invitations/        # undangan instruktur (token hash) + aktivasi + terbit ulang
+│       ├── applications/       # pengajuan instruktur publik (rate-limit) + tinjauan admin
+│       ├── dashboard/          # ringkasan instruktur (+ helper statistik scoped untuk laporan)
+│       ├── uploads/            # upload base64 + serve berkas (assignment privat, varian ?w=)
+│       ├── payments/           # QRIS dinamis DOKU (gateway) + manual lawas, lihat README di dalamnya
+│       ├── promos/             # promo diskon/kurasi/patungan + usulan instruktur
+│       ├── patungan/           # grup iuran patungan (lunas-semua baru grant)
+│       └── revenues/           # bagi hasil instruktur (snapshot per bayar) + payout
+├── drizzle/                    # Migrasi 0000–0035 + meta/_journal.json
 ├── docs/
 │   └── API_CONTRACT.md         # Kontrak endpoint dari kode aktual
 ├── uploads/                    # Byte berkas (nama UUID); metadata di tabel files
@@ -81,7 +86,7 @@ npm run db:seed       # DEV SAJA; abort bila tabel users sudah berisi data
 npm run dev     # tsx watch src/server.ts (http://localhost:3000)
 npm run build   # tsc → dist/
 npm start       # node dist/server.js
-npm test        # seluruh suite (DB tes terisolasi per file, dibuat+DROP otomatis)
+npm test        # seluruh suite (241 tes hijau; DB tes terisolasi per file, dibuat+DROP otomatis)
 npm run mail:check  # kirim email tes (butuh SMTP)
 ```
 

@@ -9,6 +9,7 @@
 	} from '$lib/api/admin';
 	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import type { BackendCourse } from '$lib/api/courses';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Detail instruktur dari backend (GET /api/v1/admin/users/:id).
@@ -56,6 +57,7 @@
 				user = null;
 			} else {
 				loadError = e instanceof Error ? e.message : 'Gagal memuat detail instruktur.';
+				toast.error(loadError);
 			}
 		} finally {
 			if (my === loadSeq) loading = false;
@@ -74,6 +76,7 @@
 		} catch (e) {
 			if (my !== coursesSeq) return;
 			coursesError = e instanceof Error ? e.message : 'Daftar kursus belum dapat dimuat.';
+			toast.error(coursesError);
 		} finally {
 			if (my === coursesSeq) coursesLoading = false;
 		}
@@ -124,6 +127,7 @@
 				: 'Akun dinonaktifkan. Pengguna tidak dapat masuk sampai diaktifkan lagi.';
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : 'Perubahan status gagal.';
+			toast.error(actionError);
 		} finally {
 			toggling = false;
 		}

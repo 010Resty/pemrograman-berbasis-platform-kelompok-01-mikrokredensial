@@ -47,6 +47,21 @@
 		if (event.key === 'Escape') {
 			event.stopPropagation();
 			close();
+			return;
+		}
+		if (event.key !== 'Tab' || !panelEl) return;
+		const focusables = [...panelEl.querySelectorAll<HTMLElement>(
+			'button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+		)];
+		if (focusables.length === 0) return;
+		const first = focusables[0];
+		const last = focusables[focusables.length - 1];
+		if (event.shiftKey && document.activeElement === first) {
+			event.preventDefault();
+			last.focus();
+		} else if (!event.shiftKey && document.activeElement === last) {
+			event.preventDefault();
+			first.focus();
 		}
 	}
 </script>
@@ -72,7 +87,7 @@
 					bind:this={closeBtn}
 					onclick={close}
 					aria-label="Tutup tampilan sertifikat"
-					class="flex min-h-10 min-w-10 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-blue-600"
+					class="flex min-h-11 min-w-11 items-center justify-center rounded-xl border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-800 focus-visible:outline-2 focus-visible:outline-blue-600"
 				>
 					<i class="fa-solid fa-xmark" aria-hidden="true"></i>
 				</button>

@@ -1,4 +1,5 @@
 import { apiRequest } from './backend';
+import { invalidateCache } from './cache';
 import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svelte';
 
 /**
@@ -115,10 +116,12 @@ export async function gradeMaterialSubmission(
 	input: GradeSubmissionInput
 ): Promise<MaterialSubmissionItem> {
 	try {
-		return await apiRequest<MaterialSubmissionItem>(
+		const out = await apiRequest<MaterialSubmissionItem>(
 			`/materials/${materialId}/submissions/${submissionId}/grade`,
 			{ method: 'POST', body: input, token: getAccessToken() }
 		);
+		invalidateCache('bell:');
+		return out;
 	} catch (e) {
 		await handlePrivateRequestError(e);
 		throw e;
@@ -156,12 +159,13 @@ export interface ReviewQueueResult {
 }
 
 /**
- * Antrean penilaian pengelola dalam satu respons
- * (GET /api/v1/instructor/review-queue). Pengganti kipas N request.
+ * Antrean penilaian pengelola dalam satu respons, opsional lingkup kursus
+ * (GET /api/v1/instructor/review-queue?courseId=). Pengganti kipas N request.
  */
-export async function fetchReviewQueue(): Promise<ReviewQueueResult> {
+export async function fetchReviewQueue(courseId?: number): Promise<ReviewQueueResult> {
 	try {
-		return await apiRequest<ReviewQueueResult>('/instructor/review-queue', {
+		const qs = courseId !== undefined ? `?courseId=${courseId}` : '';
+		return await apiRequest<ReviewQueueResult>(`/instructor/review-queue${qs}`, {
 			token: getAccessToken()
 		});
 	} catch (e) {

@@ -1,6 +1,10 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import Logo from '$lib/components/Logo.svelte';
+	import { lp, type Locale } from '$lib/i18n/locale';
+	import { t } from '$lib/i18n/index';
+
+	const lang: Locale = $derived(page.params.lang === 'en' ? 'en' : 'id');
 </script>
 
 <footer class="bg-abyss text-slate-300">
@@ -8,44 +12,43 @@
 		<div class="space-y-4">
 			<Logo size="md" showText={true} textSize="lg" dark={true} />
 			<p class="max-w-xs text-sm leading-relaxed text-slate-300">
-				Platform pembelajaran mikrokredensial: dari memilih pelatihan hingga memperoleh
-				sertifikat. Terstruktur, terukur, dan berkelanjutan.
+				{t(lang, 'footer.tagline')}
 			</p>
 		</div>
-		<nav aria-label="Navigasi footer">
-			<h2 class="font-heading text-sm font-bold tracking-wide text-white uppercase">Jelajah</h2>
+		<nav aria-label={t(lang, 'footer.explore')}>
+			<h2 class="font-heading text-sm font-bold tracking-wide text-white uppercase">{t(lang, 'footer.explore')}</h2>
 			<ul class="mt-4 space-y-2.5 text-sm">
-				<li><a href={resolve('/')} class="transition-colors duration-200 hover:text-white">Promo</a></li>
-				<li><a href={resolve('/pelatihan')} class="transition-colors duration-200 hover:text-white">Pelatihan</a></li>
-				<li><a href={resolve('/peringkat')} class="transition-colors duration-200 hover:text-white">Peringkat</a></li>
-				<li><a href={resolve('/tentang/arti-nama')} class="transition-colors duration-200 hover:text-white">Tentang</a></li>
-				<li><a href={resolve('/verifikasi')} class="transition-colors duration-200 hover:text-white">Verifikasi sertifikat</a></li>
+				<li><a href={lp(lang, '/')} class="transition-colors duration-200 hover:text-white">{t(lang, 'nav.promo')}</a></li>
+				<li><a href={lp(lang, '/pelatihan')} class="transition-colors duration-200 hover:text-white">{t(lang, 'nav.pelatihan')}</a></li>
+				<li><a href={lp(lang, '/peringkat')} class="transition-colors duration-200 hover:text-white">{t(lang, 'nav.peringkat')}</a></li>
+				<li><a href={lp(lang, '/tentang/arti-nama')} class="transition-colors duration-200 hover:text-white">{t(lang, 'nav.tentang')}</a></li>
+				<li><a href={lp(lang, '/verifikasi')} class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.verifyCert')}</a></li>
 			</ul>
 		</nav>
-		<nav aria-label="Portal footer">
-			<h2 class="font-heading text-sm font-bold tracking-wide text-white uppercase">Portal</h2>
+		<nav aria-label={t(lang, 'footer.portalTitle')}>
+			<h2 class="font-heading text-sm font-bold tracking-wide text-white uppercase">{t(lang, 'footer.portalTitle')}</h2>
 			<ul class="mt-4 space-y-2.5 text-sm">
-				<li><a href={resolve('/user')} class="transition-colors duration-200 hover:text-white">Portal peserta</a></li>
-				<li><a href={resolve('/instruktur')} class="transition-colors duration-200 hover:text-white">Portal instruktur</a></li>
-				<li><a href={resolve('/admin')} class="transition-colors duration-200 hover:text-white">Portal admin</a></li>
-				<li><a href={resolve('/pelatihan')} class="transition-colors duration-200 hover:text-white">Katalog lengkap</a></li>
+				<li><a href="/user" class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.student')}</a></li>
+				<li><a href="/instruktur" class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.teacher')}</a></li>
+				<li><a href="/admin" class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.admin')}</a></li>
+				<li><a href={lp(lang, '/pelatihan')} class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.catalog')}</a></li>
 			</ul>
 		</nav>
-		<nav aria-label="Informasi footer">
-			<h2 class="font-heading text-sm font-bold tracking-wide text-white uppercase">Informasi</h2>
+		<nav aria-label={t(lang, 'footer.infoTitle')}>
+			<h2 class="font-heading text-sm font-bold tracking-wide text-white uppercase">{t(lang, 'footer.infoTitle')}</h2>
 			<ul class="mt-4 space-y-2.5 text-sm">
-				<li><a href={resolve('/tentang/arti-nama')} class="transition-colors duration-200 hover:text-white">Tentang ARISTOTELES</a></li>
-				<li><a href={resolve('/tentang/cara-kerja')} class="transition-colors duration-200 hover:text-white">Cara kerja</a></li>
-				<li><a href={resolve('/tentang/kontak')} class="transition-colors duration-200 hover:text-white">Kontak kami</a></li>
-				<li><a href={resolve('/tentang/keunggulan')} class="transition-colors duration-200 hover:text-white">Keunggulan</a></li>
-				<li><a href={resolve('/syarat-ketentuan')} class="transition-colors duration-200 hover:text-white">Syarat &amp; ketentuan</a></li>
-				<li><a href={resolve('/kebijakan-privasi')} class="transition-colors duration-200 hover:text-white">Kebijakan privasi</a></li>
+				<li><a href={lp(lang, '/tentang/arti-nama')} class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.about')}</a></li>
+				<li><a href={lp(lang, '/tentang/cara-kerja')} class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.how')}</a></li>
+				<li><a href={lp(lang, '/tentang/kontak')} class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.contact')}</a></li>
+				<li><a href={lp(lang, '/tentang/keunggulan')} class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.advantages')}</a></li>
+				<li><a href={lp(lang, '/syarat-ketentuan')} class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.terms')}</a></li>
+				<li><a href={lp(lang, '/kebijakan-privasi')} class="transition-colors duration-200 hover:text-white">{t(lang, 'footer.privacy')}</a></li>
 			</ul>
 		</nav>
 	</div>
 	<div class="border-t border-white/10">
 		<p class="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-slate-300 sm:px-6 lg:px-8">
-			&copy; 2026 Aristoteles Platform Mikrokredensial. Semua hak dilindungi.
+			&copy; 2026 Aristoteles Platform Mikrokredensial. {t(lang, 'footer.rights')}
 		</p>
 	</div>
 </footer>

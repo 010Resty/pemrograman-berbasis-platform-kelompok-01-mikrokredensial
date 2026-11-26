@@ -203,9 +203,11 @@ export const createInvitation = async (
 // ---------- Daftar & cabut (admin) ----------
 
 export const listInvitations = async (
-  status?: string
+  status?: string,
+  limit = 200
 ): Promise<PublicInvitation[]> => {
   const allowed = ["pending", "accepted", "revoked", "expired"] as const;
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || 200, 1), 500);
   const where =
     status !== undefined && (allowed as readonly string[]).includes(status)
       ? eq(instructorInvitations.status, status as (typeof allowed)[number])
@@ -223,7 +225,8 @@ export const listInvitations = async (
     })
     .from(instructorInvitations)
     .where(where)
-    .orderBy(desc(instructorInvitations.createdAt), desc(instructorInvitations.id));
+    .orderBy(desc(instructorInvitations.createdAt), desc(instructorInvitations.id))
+    .limit(safeLimit);
   return rows;
 };
 

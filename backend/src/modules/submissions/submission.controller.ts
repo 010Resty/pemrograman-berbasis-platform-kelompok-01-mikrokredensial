@@ -130,11 +130,18 @@ export const listHandler = async (
       return;
     }
     try {
+      const limit =
+        typeof req.query.limit === "string" && /^\d+$/.test(req.query.limit)
+          ? Number(req.query.limit)
+          : undefined;
       const result = await listSubmissions(
         userId,
         req.user?.role ?? "",
         materialId,
-        filterUserId !== undefined ? { userId: filterUserId } : {}
+        {
+          ...(filterUserId !== undefined ? { userId: filterUserId } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+        }
       );
       res.status(200).json({
         status: "success",
@@ -266,6 +273,7 @@ export const gradeHandler = async (
 
 // GET /api/v1/instructor/review-queue — agregat antrean penilaian
 // (satu respons; pengganti kipas N request kursus × materi di klien).
+// ?courseId= opsional: lingkup satu kursus (tetap cek kepengelolaan).
 export const queueHandler = async (
   req: AuthenticatedRequest,
   res: Response,
@@ -274,10 +282,13 @@ export const queueHandler = async (
   try {
     const userId = needAuth(req, res);
     if (userId === null) return;
+    const rawCourse = req.query.courseId;
+    const courseId =
+      typeof rawCourse === "string" && /^\d+$/.test(rawCourse) ? Number(rawCourse) : undefined;
     res.status(200).json({
       status: "success",
       message: "Antrean penilaian instruktur",
-      data: await getInstructorReviewQueue(userId, req.user?.role ?? ""),
+      data: await getInstructorReviewQueue(userId, req.user?.role ?? "", { courseId }),
     });
   } catch (e) {
     next(e);

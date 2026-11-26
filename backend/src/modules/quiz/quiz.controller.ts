@@ -256,10 +256,14 @@ export const historyHandler = async (
     const userId = await guardRead(req, res, materialId);
     if (userId === null) return;
     try {
+      const limit =
+        typeof req.query.limit === "string" && /^\d+$/.test(req.query.limit)
+          ? Number(req.query.limit)
+          : undefined;
       res.status(200).json({
         status: "success",
         message: "Riwayat percobaan",
-        data: await getHistory(userId, materialId),
+        data: await getHistory(userId, materialId, limit ?? 50),
       });
     } catch (e) {
       if (!quizError(res, e)) throw e;

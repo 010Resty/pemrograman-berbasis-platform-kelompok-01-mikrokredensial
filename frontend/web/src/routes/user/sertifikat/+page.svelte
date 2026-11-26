@@ -3,8 +3,10 @@
 	import { resolve } from '$app/paths';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
 	
 	import { downloadMyCertificatePdf, fetchMyCertificates, type MyCertificate } from '$lib/api/progress';
+	import { toast } from '$lib/stores/toast.svelte';
 	import { fileUrl } from '$lib/api/courses';
 	import CertificateCover from '$lib/components/training/molecules/CertificateCover.svelte';
 
@@ -38,6 +40,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat sertifikat.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}
@@ -93,6 +96,7 @@
 			}
 		} catch (e) {
 			downloadError = e instanceof Error ? e.message : 'Gagal mengunduh sertifikat.';
+			toast.error(downloadError);
 			dlFailedId = cert.id;
 		} finally {
 			downloadingId = null;
@@ -200,10 +204,7 @@
 							href={`/user/sertifikat/${cert.id}`}
 						/>
 						<div class="mt-3 flex justify-center">
-							<div class="inline-flex items-center gap-1 rounded-full px-3 py-1 text-[11px] font-bold {active ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}">
-								<i class="fa-solid {active ? 'fa-circle-check' : 'fa-ban'}" aria-hidden="true"></i>
-								{active ? 'Aktif' : 'Dicabut'}
-							</div>
+							<StatusBadge kind="certificate" status={active ? 'issued' : 'revoked'} class="text-[11px] font-bold" />
 						</div>
 					</div>
 

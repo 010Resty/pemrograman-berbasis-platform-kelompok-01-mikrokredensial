@@ -307,3 +307,249 @@
 		transition-duration: 0.01ms !important;
 	}
 }
+
+/* Fondasi web modern (modern-web-guidance: dialog, accordion, forms,
+ * responsive-table, typography). Aditif saja — tidak mengubah token/desain. */
+@layer base {
+	/* Cegah zoom otomatis iOS: kontrol form minimal 16px. */
+	input,
+	select,
+	textarea {
+		font-size: max(1rem, 1em);
+	}
+
+	/* Keterbacaan tipografi modern. */
+	h1,
+	h2,
+	h3 {
+		text-wrap: balance;
+	}
+	p {
+		text-wrap: pretty;
+	}
+
+	/* Jangkar tidak tertutup header sticky. */
+	section[id] {
+		scroll-margin-block-start: 5rem;
+	}
+
+	/* Native <dialog>: rantai scroll berhenti di dialog, bukan halaman. */
+	dialog:modal {
+		overscroll-behavior: contain;
+	}
+	dialog::backdrop {
+		overflow: hidden;
+		overscroll-behavior: contain;
+		background: rgb(15 23 42 / 0.5);
+	}
+
+	/* Accordion native: marker bawaan diganti ikon komponen. */
+	summary {
+		list-style: none;
+	}
+	summary::-webkit-details-marker {
+		display: none;
+	}
+
+	/* Isi accordion bisa dianimasikan ke ukuran intrinsiknya. */
+	details::details-content {
+		interpolate-size: allow-keywords;
+		overflow: clip;
+		contain: layout;
+	}
+	details:not([open])::details-content {
+		block-size: 0;
+	}
+	@media (prefers-reduced-motion: no-preference) {
+		details::details-content {
+			transition:
+				block-size,
+				content-visibility,
+				display;
+			transition-duration: 0.3s;
+			transition-timing-function: ease-in-out;
+			transition-behavior: allow-discrete;
+		}
+	}
+}
+
+/* Transisi antar-halaman yang halus (progressive enhancement). */
+@view-transition {
+	navigation: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+	@view-transition {
+		navigation: none;
+	}
+}
+
+@layer components {
+	/* Pembungkus tabel responsif + akses keyboard (lih. laporan yang sudah benar). */
+	.table-scroll {
+		overflow: auto;
+		max-inline-size: 100%;
+		container-type: inline-size;
+	}
+	.table-scroll table {
+		border-collapse: separate;
+		border-spacing: 0;
+	}
+	.table-scroll thead {
+		position: sticky;
+		inset-block-start: 0;
+		z-index: 1;
+	}
+
+	/* Dropdown filter bermerek (modern-web-guidance: branded-select-styling,
+	 * custom-select-picker-layouts). `appearance: base-select` memberi
+	 * picker top-layer + checkmark + animasi; browser lama otomatis
+	 * fallback ke select standar (isi <button>/<selectedcontent> diabaikan). */
+	.filter-select,
+	.filter-select::picker(select) {
+		appearance: base-select;
+	}
+	.filter-select {
+		display: flex;
+		align-items: center;
+		inline-size: 100%;
+		min-inline-size: 12rem;
+		min-block-size: 44px;
+		padding: 0.45rem 0.875rem;
+		background: #fff;
+		border: 1px solid var(--color-border);
+		border-radius: 0.9rem;
+		box-shadow: 0 1px 2px rgb(15 23 42 / 0.05);
+		font-size: 0.75rem;
+		font-weight: 700;
+		color: var(--color-text);
+		cursor: pointer;
+		transition:
+			border-color 0.2s,
+			box-shadow 0.2s,
+			transform 0.2s;
+	}
+	@media (min-width: 640px) {
+		.filter-select {
+			inline-size: auto;
+		}
+	}
+	.filter-select-wide {
+		min-inline-size: 14rem;
+	}
+	.filter-select-compact {
+		min-inline-size: 0;
+		padding-inline: 0.625rem;
+	}
+	.filter-select:hover {
+		border-color: #93c5fd;
+		box-shadow: 0 6px 14px -6px rgb(37 99 235 / 0.3);
+		transform: translateY(-1px);
+	}
+	.filter-select:open {
+		border-color: var(--color-primary);
+		box-shadow: 0 0 0 4px rgb(37 99 235 / 0.12);
+		transform: none;
+	}
+	.filter-select > button {
+		display: flex;
+		align-items: center;
+		gap: 0.6rem;
+		inline-size: 100%;
+		padding: 0;
+		border: 0;
+		background: none;
+		font: inherit;
+		color: inherit;
+		cursor: pointer;
+	}
+	/* Panah bawaan browser disembunyikan — sudah ada .filter-chev kustom.
+	 * Di browser tanpa base-select aturan ini gugur sehingga panah native tetap tampil. */
+	.filter-select::picker-icon {
+		display: none;
+	}
+	.filter-select selectedcontent {
+		flex: 1;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		white-space: nowrap;
+		text-align: start;
+	}
+	.filter-tile {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		flex-shrink: 0;
+		inline-size: 1.75rem;
+		block-size: 1.75rem;
+		border-radius: 0.6rem;
+		font-size: 0.7rem;
+	}
+	.filter-tile-blue {
+		background: var(--color-primary-soft);
+		color: var(--color-primary);
+	}
+	.filter-tile-red {
+		background: #fef2f2;
+		color: #dc2626;
+	}
+	.filter-select .filter-chev {
+		margin-inline-start: auto;
+		font-size: 0.65rem;
+		color: var(--color-text-muted);
+		transition: rotate 0.2s;
+	}
+	.filter-select:open .filter-chev {
+		rotate: 180deg;
+		color: var(--color-primary);
+	}
+	.filter-select::picker(select) {
+		margin-block-start: 0.5rem;
+		background: #fff;
+		border: 1px solid var(--color-border);
+		border-radius: 1rem;
+		padding: 0.4rem;
+		box-shadow: 0 24px 48px -12px rgb(15 23 42 / 0.28);
+		max-inline-size: min(22rem, calc(100vw - 2rem));
+	}
+	@media (prefers-reduced-motion: no-preference) {
+		.filter-select::picker(select) {
+			transition:
+				opacity 0.18s ease,
+				transform 0.18s ease,
+				display 0.18s allow-discrete;
+		}
+		@starting-style {
+			.filter-select:open::picker(select) {
+				opacity: 0;
+				transform: translateY(-6px) scale(0.98);
+			}
+		}
+	}
+	.filter-select option {
+		display: flex;
+		align-items: center;
+		gap: 0.5rem;
+		padding: 0.625rem 0.75rem;
+		border-radius: 0.7rem;
+		font-size: 0.75rem;
+		font-weight: 600;
+		color: var(--color-text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+		cursor: pointer;
+	}
+	.filter-select option:hover {
+		background: var(--color-surface);
+		color: var(--color-text);
+	}
+	.filter-select option:checked {
+		background: var(--color-primary-soft);
+		color: var(--color-abyss);
+		font-weight: 800;
+	}
+	.filter-select option::checkmark {
+		font-weight: 900;
+		color: var(--color-primary);
+	}
+}

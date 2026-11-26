@@ -2,15 +2,19 @@
 
 > **Sumber kebenaran**: route (`src/modules/*/ *.routes.ts`), middleware
 > (`src/middlewares/auth.middleware.ts`), validator Zod di service,
-> controller, `src/db/schema.ts`, dan 7 file tes integrasi.
+> controller, `src/db/schema.ts`, dan 35+ file tes integrasi (241 tes hijau).
 > Dokumen ini **mendeskripsikan implementasi yang ada** — bukan usulan.
 > Prefix global: `/api/v1` (kecuali ditulis lain). Hal yang belum pasti
 > ditandai `[Perlu konfirmasi]`.
 >
-> Terakhir diselaraskan: Tahap 4 + migrasi `0008–0013` (payments, promo)
-> + patch keamanan 2026-11-04 (rate-limit auth/voucher/invitation/quiz/payments/upload,
-> escape LIKE, audit quiz/enrollment/submission/application/course/curriculum/payment/upload,
-> invite atomik, TiptapValidationError, trust proxy + CORS env, redaksi token di log).
+> Terakhir diselaraskan: 2026-11-24 — migrasi s/d `0035` (15 indeks
+> komposit hasil audit optimasi), `GET /admin/vouchers/stats`, filter
+> `GET /instructor/review-queue?courseId=`, proyeksi polling pembayaran,
+> agregat `getBest`/revenue/eligibility batch, paginasi daftar milik sendiri.
+> Suite penuh: 241 tes hijau di ~35 file (`npm test`).
+> Patch keamanan 2026-11-04 tetap berlaku (rate-limit auth/voucher/invitation/
+> quiz/payments/upload, escape LIKE, audit lintas modul, invite atomik,
+> TiptapValidationError, trust proxy + CORS env, redaksi token di log).
 > Lihat `git log` untuk detail per tahap.
 
 ## 1. Konvensi umum
@@ -103,6 +107,7 @@ katalog publik = `published` + `archived`; `draft` tidak bocor.
 | `PATCH /courses/:id` | teacher/admin + pengelola | 200 (termasuk ganti `status` draft↔published↔archived; `priceNominal` → `priceLabel` dihitung ulang; ganti `category` wajib aktif) | 400 schema parsial kosong/tak valid + `INVALID_CATEGORY`; 403 pengelola-bukan (`exists?403:404`) |
 | `DELETE /courses/:id` | teacher/admin + pengelola | 200 `data:null`; cascade tree via FK; cover internal `/api/v1/files/:id/content` dibersihkan best-effort | 403/404 pola sama |
 | `GET /instructor/courses[?scope=mine]` | teacher/admin | teacher (atau admin `scope=mine`): kursus yang diampu/dibuat; admin default: semua + filter `status` | 401/403 |
+| `GET /courses/rankings?limit=` | publik | 200 array `{courseId,title,category,level,image,priceLabel,priceNominal,period,studentCount,instructorNames[]}` — published saja, urut enrollment aktif terbanyak (tanpa rating; backend belum punya penilaian) | limit non-angka → default 10 (dibatasi 1–50) |
 
 Uji relevan: `material-pass-score.test.ts` (skema `passScore` materi).
 
@@ -200,7 +205,7 @@ Alur: `POST /api/v1/uploads` (`kind:"assignment"`, PDF ≤10MB, magic-bytes) →
 | `GET /materials/:id/submissions[?userId=]` | JWT | — | 200 `{manager,rows[]}` (peserta: milik sendiri; pengelola: semua + saring) | 403/404 |
 | `GET /materials/:id/submissions/status` | JWT + hak akses | — | 200 `{attempts,graded,passed,lastStatus,bestScore,lastSubmission}`; lulus menempel (`EXISTS passed`) | 403/404 |
 | `GET /materials/:id/submissions/:subId` | JWT | — | 200 (milik sendiri/pengelola; asing → 404) | 403/404 |
-| `GET /instructor/review-queue` | teacher/admin | — | 200 agregat `{courses[{tasks[{pending,graded,total,avgScore}]}],pendingTotal,gradedTotal,avgScore}` (kursus kelola; admin = semua) | 401/403 |
+| `GET /instructor/review-queue[?courseId=]` | teacher/admin | — | 200 agregat `{courses[{tasks[{pending,graded,total,avgScore}]}],pendingTotal,gradedTotal,avgScore}` (kursus kelola; admin = semua; `courseId` melingkupi 1 kursus + tetap cek kepengelolaan, bukan pengelola → kosong) | 401/403 |
 | `POST /materials/:id/submissions/:subId/grade` | teacher/admin pengelola | strict `{score 0–100, decision passed\|failed\|revision_requested **wajib**, feedback?(≤2000), rubric?{kelengkapan,ketepatan,kerapian 0–100}}` — skor atau rubrik wajib salah satu; bila rubrik dikirim, **server menghitung rata-rata bulat** (skor kiriman diabaikan) + simpan `rubric_scores` (null bila tanpa rubrik) | 200 + `gradedBy/gradedAt` + audit `submission.grade` (transaksi; audit catat rubrik) | 400 Zod; 403 `NOT_MANAGER`/role; 404 |
 
 Uji: `submissions.test.ts` (submit×N, validasi berkas, isolasi, revision→lulus, sticky-pass, proteksi berkas 6 skenario).
@@ -249,11 +254,12 @@ Uji: `certificates.test.ts` (8: eligible+terbit+idempoten+snapshot, NOT_ELIGIBLE
 | `POST /vouchers/validate` | JWT | strict `{code, courseId}` | 200 `{valid,code,discountType,discountValue,discountAmount,priceNominal}` (tanpa hanguskan kuota) | 400 `NOT_DISCOUNT`; 403/404/409 sama seperti redeem |
 | `POST /admin/vouchers` | admin | `{code?(4–32 A-Z0-9-, auto `ATS-XXXXXXXX`), courseId!, kind!, maxUses? (personal dipaksa 1; umum wajib ≥1), assignedUserId/email? (personal wajib, umum dilarang), discountType+discountValue? (wajib bila kind=diskon), expiresAt? (masa depan)}` | 201 (personal `assigned`, umum `available`) + audit | 400 validasi/`PERSONAL_MAX_USES`/`ASSIGNEE_FORBIDDEN`/`INVALID_EXPIRY`; 404 kursus/penerima; 409 `CODE_TAKEN` |
 | `GET /admin/vouchers?...` | admin | filter courseId/status/kind/q/limit(≤100)/page; status grup: `active` (=available/assigned belum kedaluwarsa), `expired` (=expired ATAU lewat tanggal) | 200 `{items[{remaining,assignedEmail...}],total}` (total = hitungan server) | — |
+| `GET /admin/vouchers/stats[?...]` | admin | filter courseId/kind/q yang sama (tanpa status) | 200 `{total,aktif,habis,kedaluarsa,total=aktif+habis+kedaluarsa+batal}` — 1 query agregat (ganti 5× list) | 401/403 |
 | `GET /admin/vouchers/:code` (+`/:code/redemptions`) | admin | — | 200 detail + `assignedEmail` + ≤50 redemptions terakhir + `redemptionCount` (total sebenarnya) | 404 |
 | `POST /admin/vouchers/:code/disable` | admin | `{reason?}` | 200 `revoked` + audit | 409 final/sudah-revoked |
 | `POST /admin/vouchers/:code/enable` | admin | — | 200 kembali ke `assigned`/`available` + audit | 409 bukan-revoked |
 
-Uji: `voucher-admin.test.ts` (11: create/validasi, redeem+redeemed, personal, mismatch/draft/ended, expired/disable/enable, **konkurensi 5 paralel**, users, assign, invitation).
+Uji: `voucher-admin.test.ts` (12: create/validasi, redeem+redeemed, personal, mismatch/draft/ended, expired/disable/enable, **konkurensi 5 paralel**, users, assign, invitation, **stats 1-query konsisten + filter + 403**).
 
 ---
 
@@ -370,12 +376,28 @@ Uji: `doku/__tests__/doku.test.ts` (unit kripto/status/gate/QR tanpa DB/jaringan
 
 ---
 
+## 10e. Bagi hasil instruktur + penarikan — `/admin/revenue-settings`, `/admin/payouts*`, `/me/earnings`, `/me/payouts`
+
+Persen global milik admin; snapshot hak per pembayaran terverifikasi (manual + webhook DOKU, idempoten per `paymentId`, `floor(amountPaid × persen / 100)`); transfer dana manual di luar sistem.
+
+| Endpoint | Auth/Role | Body | Sukses | Error |
+|---|---|---|---|---|
+| `GET /admin/revenue-settings` | admin | — | 200 `{instructorPercent, minWithdrawal}` (self-heal baris default 70/100000) | 403 |
+| `PUT /admin/revenue-settings` | admin + rate-limit | `{instructorPercent 1–99, minWithdrawal ≥ 0}` | 200 + audit `revenue.settings.update` (hanya pembayaran berikutnya) | 400 validasi; 403 |
+| `GET /admin/payouts?status=&limit=&page=` | admin | filter `diajukan/diproses/berhasil/ditolak` | 200 `{items(+instructorName/Email),total,page}` | 403 |
+| `POST /admin/payouts/:id/process` | admin + rate-limit | `{action: setujui\|tolak\|tandai-ditransfer, reason?}` (alasan wajib bila tolak) | 200 `{id,status}` + audit `payout.process`; transisi: diajukan→diproses (setujui), diproses→berhasil (tandai-ditransfer), diajukan/diproses→ditolak | 400 validasi/tanpa alasan; 404; 409 `PAYOUT_LOCKED` (transisi ilegal) |
+| `GET /me/earnings` | teacher | — | 200 `{totalEarned,available,pending,paid,percent,minWithdrawal,courses[{courseId,title,earned,payments}]}` (available = total − diajukan/diproses/berhasil) | 401/403 |
+| `GET /me/payouts?status=&limit=&page=` | teacher | — | 200 `{items,total,page,limit}` milik sendiri | 401/403 |
+| `POST /me/payouts` | teacher + rate-limit | `{amount int>0, bankName 1–100, accountNumber 4–50 (digit/spasi/strip), accountName 1–150}` | 201 `{id,amount,status:'diajukan',available}` + audit `payout.request`; kunci per instruktur (anti double-spend) | 400 validasi/`PAYOUT_BELOW_MINIMUM`/`PAYOUT_INSUFFICIENT`; 401/403 |
+
+---
+
 ## 11. Admin pengguna & instruktur — `/admin/users`, `/admin/courses/:id/instructors`
 
 | Endpoint | Role | Body | Sukses | Error |
 |---|---|---|---|---|
 | `GET /admin/overview` | admin | — | 200 `{totalStudents,totalTeachers,totalCourses,totalCertificates}` (4 agregat ringan untuk badge/kartu) | 403 |
-| `GET /admin/reports?from=&to=&courseId=&limit=&page=` | admin | `from/to` YYYY-MM-DD, `courseId` angka, `limit` 1–100 (default 100), `page` ≥ 1 | 200 `{summary{...},perCourse[...incl. paymentsDitolak],certificates{issued,revoked},filters,paging{page,limit,total},insights{funnel[{stage,label,basis,count,pctOfFirst,pctOfPrev|null bila tahap sblm. nol}],rates{approval,rejection,completion,certPerEnrollment,certified,revoke},note}}` (read-only; seluruh tahap funnel SATU lingkup filter — tahap 1 = pendaftar periode / peserta kursus; tiap tahap independen per tabel sehingga bisa naik; `avgProgress/pendingReviews` tetap snapshot) | 400 `INVALID_DATE/INVALID_RANGE/INVALID_COURSE_ID`; 403 |
+| `GET /admin/reports?from=&to=&courseId=&limit=&page=` | admin | `from/to` YYYY-MM-DD, `courseId` angka, `limit` 1–100 (default 100), `page` ≥ 1 | 200 `{summary{...},perCourse[...incl. paymentsDitolak],certificates{issued,revoked},filters,paging{page,limit,total},insights{funnel[{stage,label,basis,count,pctOfFirst,pctOfPrev|null bila tahap sblm. nol}],rates{approval,rejection,completion,certPerEnrollment,certified,revoke},note},monthly[{month YYYY-MM,revenue,payments,enrollments,certificates}]` (read-only; deret 12 bulan terakhir, atau bulan dalam rentang from–to bila keduanya diisi maks 24; menghormati filter courseId; seluruh tahap funnel SATU lingkup filter — tahap 1 = pendaftar periode / peserta kursus; tiap tahap independen per tabel sehingga bisa naik; `avgProgress/pendingReviews` tetap snapshot) | 400 `INVALID_DATE/INVALID_RANGE/INVALID_COURSE_ID`; 403 |
 | `GET /admin/users?role=&isActive=&q=&limit=&page=` | admin | — | 200 `{items{id,name,username,email,expertise,role,isActive,avatarUrl(/api/v1/files/:id/content\|null),coverUrl(\|null),createdAt},total}` **tanpa `passwordHash`** | 403 |
 | `GET /admin/users/:id` | admin | — | 200 detail + `{avatarUrl,coverUrl,enrollmentCount,certificateCount}` tanpa `passwordHash` | 403/404 |
 | `POST /admin/users` | admin | `{name 2–100, email, password 8–72}` (role dikunci `teacher`) | 201 + audit `user.create` | 400/409 `EMAIL_TAKEN` |
@@ -413,7 +435,7 @@ Token `randomBytes(32).hex`, hanya hash SHA-256 disimpan; default kedaluwarsa 7 
 ## 14. Keterbatasan yang diketahui (bukan kontrak, jangan diandalkan klien)
 
 1. Tidak ada endpoint yang menyetel enrollment `completed`/`expired` — status itu hanya dibaca.
-2. Rate limiting: `authOtpLimiter` (30x/15 mnt/IP/endpoint) di auth, `redeem`/`validate` voucher, `invitation validate/accept`, `POST quiz-attempts`, `POST /courses/:id/payments`, `PATCH /payments/:id/proof`, `POST /uploads`, `GET /files/:id/content` (via `publicReadLimiter` 600x/15 mnt), `GET /certificates/verify/:code`, katalog kursus/kurikulum publik + `GET /promos*` (via `publicReadLimiter`); `publicSubmitLimiter` di pengajuan publik. Limiter in-memory (multi-instance butuh Redis, lihat komentar `rate-limit.middleware.ts`); `trust proxy=1` aktif agar `req.ip` akurat di balik proxy. Token undangan di query (`GET /invitations/validate`) diredaksi dari access log.
+2. Rate limiting: `authOtpLimiter` (30x/15 mnt/IP/endpoint) di auth, `redeem`/`validate` voucher, `invitation validate/accept`, `POST quiz-attempts`, `POST /courses/:id/payments`, `PATCH /payments/:id/proof`, `POST /uploads`, `PUT /admin/revenue-settings`, `POST /admin/payouts/:id/process`, `POST /me/payouts`, `GET /files/:id/content` (via `publicReadLimiter` 600x/15 mnt), `GET /certificates/verify/:code`, katalog kursus/kurikulum publik + `GET /promos*` (via `publicReadLimiter`); `publicSubmitLimiter` di pengajuan publik. Limiter in-memory (multi-instance butuh Redis, lihat komentar `rate-limit.middleware.ts`); `trust proxy=1` aktif agar `req.ip` akurat di balik proxy. Token undangan di query (`GET /invitations/validate`) diredaksi dari access log.
 3. `GET /me/progress?courseId=` tidak mensyaratkan akses (membaca milik sendiri).
 4. Re-issue sertifikat pasca-revoke terminal (409). Snapshot kelayakan dibekukan by-design; penerbitan memverifikasi ulang keberadaan modul di dalam tx.
 5. Daftar kursus instruktur/admin tanpa pagination total (`array` mentah pada beberapa list progres/kuis). Daftar eligibility global dibatasi eksplisit 500 baris (`MAX_ELIGIBILITY_ROWS`). Daftar voucher admin: paginasi + filter status grup + hitungan per status semuanya server-side.

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { buildSrcSet } from '$lib/api/responsive';
 	let {
 		src,
 		alt,
@@ -12,6 +13,9 @@
 		intro?: string;
 		points?: string[];
 	} = $props();
+
+	/** Varian responsif backend (`?w=`); null = pakai `src` polos (mis. URL luar). */
+	const srcSet = $derived(buildSrcSet(src));
 </script>
 
 <div class="space-y-4">
@@ -19,7 +23,15 @@
 		<p class="text-sm leading-relaxed text-slate-600 sm:text-[15px]">{intro}</p>
 	{/if}
 	<figure class="overflow-hidden rounded-2xl border border-slate-200 bg-slate-900">
-		<img src={src} {alt} class="max-h-[480px] w-full object-contain bg-slate-900" loading="lazy" />
+		<img
+			src={src}
+			srcset={srcSet}
+			sizes="(max-width: 768px) 100vw, 768px"
+			{alt}
+			class="max-h-[480px] w-full bg-slate-900 object-contain"
+			loading="lazy"
+			decoding="async"
+		/>
 		{#if caption}
 			<figcaption class="flex items-start gap-2 px-4 py-3 text-xs leading-relaxed text-slate-300">
 				<i class="fa-solid fa-image mt-0.5 shrink-0 text-slate-400" aria-hidden="true"></i>

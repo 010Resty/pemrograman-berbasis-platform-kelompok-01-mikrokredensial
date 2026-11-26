@@ -1,5 +1,6 @@
 import type { Handle } from '@sveltejs/kit';
-import { dev } from '$app/environment';
+import { redirect } from '@sveltejs/kit';
+import { building, dev } from '$app/environment';
 import { env } from '$env/dynamic/public';
 
 /**
@@ -45,7 +46,36 @@ const POLICY = [
 ].join('; ');
 
 export const handle: Handle = async ({ event, resolve }) => {
-	const response = await resolve(event);
+	// `event.url.search` dilarang saat prerender — baca malas hanya bila perlu.
+	const pathname = event.url.pathname;
+
+	// Redirect URL lama tanpa prefix bahasa ke padanannya `/id/...`.
+	// Hanya GET navigasi (bukan API/aksi): segmen pertama yang bukan locale,
+	// portal, berkas statis, atau sitemap.
+	if (event.request.method === 'GET') {
+		const seg = pathname.split('/')[1] ?? '';
+		const reserved = ['id', 'en', 'api', 'user', 'admin', 'instruktur'];
+		if (
+			seg !== '' &&
+			!reserved.includes(seg) &&
+			!seg.includes('.') &&
+			pathname !== '/sitemap.xml'
+		) {
+			// `event.url.search` dilarang saat prerender/build — kosongkan saja.
+			const search = building ? '' : event.url.search;
+			throw redirect(308, `/id${pathname}${search}`);
+		}
+	}
+
+	const response = await resolve(event, {
+		// Bahasa Inggris: <html lang="en"> untuk pembaca layar + SEO.
+		transformPageChunk: ({ html }) => {
+			if (pathname === '/en' || pathname.startsWith('/en/')) {
+				return html.replace('<html lang="id">', '<html lang="en">');
+			}
+			return html;
+		}
+	});
 	response.headers.set(
 		dev ? 'Content-Security-Policy-Report-Only' : 'Content-Security-Policy',
 		POLICY

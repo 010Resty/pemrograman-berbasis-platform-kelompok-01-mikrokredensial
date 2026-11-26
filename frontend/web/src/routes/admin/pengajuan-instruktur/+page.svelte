@@ -9,6 +9,7 @@
 		type PengajuanInstruktur
 	} from '$lib/api/applications';
 	import { BackendRequestError } from '$lib/api/backend';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Daftar pengajuan minat instruktur (DATA BACKEND NYATA).
@@ -33,6 +34,14 @@
 	let loadError = $state('');
 	let requestSeq = 0;
 	let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+	function failLoad(e: unknown): void {
+		loadError =
+			e instanceof BackendRequestError && e.message
+				? e.message
+				: 'Gagal memuat pengajuan. Periksa koneksi backend lalu coba lagi.';
+		toast.error(loadError);
+	}
 
 	$effect(() => {
 		const q = query;
@@ -65,10 +74,7 @@
 				if (seq !== requestSeq) return;
 				items = [];
 				total = 0;
-				loadError =
-					e instanceof BackendRequestError && e.message
-						? e.message
-						: 'Gagal memuat pengajuan. Periksa koneksi backend lalu coba lagi.';
+				failLoad(e);
 			})
 			.finally(() => {
 				if (seq === requestSeq) loading = false;
@@ -148,10 +154,7 @@
 			})
 			.catch((e) => {
 				if (seq !== requestSeq) return;
-				loadError =
-					e instanceof BackendRequestError && e.message
-						? e.message
-						: 'Gagal memuat pengajuan. Periksa koneksi backend lalu coba lagi.';
+				failLoad(e);
 			})
 			.finally(() => {
 				if (seq === requestSeq) loading = false;
@@ -271,7 +274,8 @@
 				</li>
 			{/each}
 		</ol>
-		<div class="hidden overflow-x-auto md:block">
+		<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll region keyboard: tabel lebar perlu tabindex 0 -->
+		<div class="table-scroll hidden md:block" tabindex="0" role="region" aria-label="Tabel pengajuan instruktur, geser horizontal">
 			<table class="w-full min-w-[820px] text-sm">
 				<caption class="sr-only">Daftar pengajuan minat instruktur</caption>
 				<thead class="bg-teal-700 text-white">

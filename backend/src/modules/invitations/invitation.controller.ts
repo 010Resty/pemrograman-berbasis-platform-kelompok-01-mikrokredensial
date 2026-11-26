@@ -96,10 +96,14 @@ export const listHandler = async (
     if (userId === null) return;
     void userId;
     const status = typeof req.query.status === "string" ? req.query.status : undefined;
+    const limit =
+      typeof req.query.limit === "string" && /^\d+$/.test(req.query.limit)
+        ? Number(req.query.limit)
+        : undefined;
     res.status(200).json({
       status: "success",
       message: "Daftar undangan instruktur",
-      data: { items: await listInvitations(status) },
+      data: { items: await listInvitations(status, limit ?? 200) },
     });
   } catch (e) {
     next(e);

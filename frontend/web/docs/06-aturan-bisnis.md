@@ -1,6 +1,6 @@
 # 06 — Aturan Bisnis ARISTOTELES (K-01–K-08)
 
-> Pisahkan fakta kode dari aturan final. `[Terverifikasi]` = perilaku kode saat ini. `[Keputusan pengguna]` = aturan disepakati 2026-10-24. `[Belum diputuskan]` = butuh jawaban.
+> Pisahkan fakta kode dari aturan final. `[Terverifikasi]` = perilaku kode saat ini (2026-11-24). `[Keputusan pengguna]` = aturan disepakati 2026-10-24 (diperbarui 2026-11-02). `[Belum diputuskan]` = butuh jawaban.
 
 ## Peran [Keputusan pengguna]
 
@@ -12,43 +12,43 @@
 
 - Hanya admin dapat membuat/mengundang instruktur fase awal. Tanpa pendaftaran bebas.
 - Alur [Keputusan pengguna 2026-11-02]: admin buat undangan (email+nama) → token 1x pakai kedaluwarsa 7 hari → pendaftar atur password sendiri → akun aktif; klik link = aktivasi, tanpa OTP.
-- Gap [Terverifikasi]: `register/+page.svelte` masih izinkan peran `teacher` bebas → belum sesuai, jangan tandai selesai.
+- Status [Terverifikasi]: backend undangan + SMTP + aktivasi; `register/+page.svelte` selalu buat student (pilihan teacher hanya informatif); UI admin label bahasa ganda.
 
 ## K-02 Kuis [Keputusan pengguna]
 
 - Tanpa batas percobaan. Acuan = nilai terbaik. Default 70, instruktur dapat ubah per kuis. Lulus bertahan walau coba berikut lebih rendah. Riwayat persisten di backend.
 - Uji: coba 60 lalu 80 → lulus pakai 80; coba 90 lalu 50 → tetap lulus.
-- Gap [Terverifikasi]: `quiz-results.svelte.ts` simpan terakhir saja, belum terbaik/riwayat. `DEFAULT_PASS_SCORE` + `normalizePassScore` di `quiz-drafts.ts` sudah sesuai untuk ambang per kuis.
+- Status [Terverifikasi]: agregat SQL di server (`COUNT/MAX/lulus-menempel`); `QuizMaterial` tampilkan terbaik + riwayat; `DEFAULT_PASS_SCORE` + `normalizePassScore` + indeks memori di `quiz-drafts.ts`.
 
 ## K-03 Voucher [Keputusan pengguna]
 
 - Resmi, hanya admin buat/kelola, 1 voucher = 1 akun + 1 kursus, tukar kode oleh peserta, validasi 4 cocok (akun, kursus, kode, status) di backend, 1x pakai, status `Aktif/Digunakan/Dinonaktifkan`, tetap tersedia sampai dipakai/dinonaktifkan, catat penerima+kursus+waktu+status, anti-race tanpa akses ganda. Masa berlaku opsional.
 - Jenis `diskon` (opsi A, disepakati pemilik produk): potongan harga persen (1–100) atau nominal rupiah, dipakai saat bayar, hangus saat pembayaran disetujui. Jenis `personal`/`umum` tetap akses penuh dan TIDAK dapat ditukar di halaman pembayaran.
-- Gap [Terverifikasi]: `VALID_CODES` + `ownedCourses` lokal belum validasi apa pun.
+- Status [Terverifikasi]: tukar atomik + statistik 1-query + validasi tanpa hangus; UI label bahasa ganda.
 
-## K-04 Materi [Keputusan pengguna + perilaku saat ini sesuai]
+## K-04 Materi [Keputusan pengguna + perilaku sesuai, Terverifikasi]
 
-- Perilaku [Terverifikasi]: navigasi Berikutnya memanggil `markDone` di `user/kursusku/.../+page.svelte`; kuis via `onPass`, tugas via `onSubmit`.
+- Perilaku: navigasi Berikutnya memanggil `markDone` di `user/kursusku/.../+page.svelte`; kuis via `onPass`, tugas via `onSubmit`.
 - Aturan: materi biasa selesai via Berikutnya, tanpa tombol terpisah. Berikutnya tidak meluluskan kuis/tugas.
 
 ## K-05 Sertifikat modul [Keputusan pengguna]
 
-- Otomatis hanya bila semua materi wajib selesai + kuis wajib lulus + tugas wajib penuhi syarat. Per modul 1 sertifikat. Identitas/tanggal/verifikasi/pencabutan sebagai kebutuhan sistem.
-- Gap [Terverifikasi]: UI sertifikat statis, belum gate `isModuleComplete` di `certificates.ts`.
+- Otomatis hanya bila semua materi wajib selesai + kuis wajib lulus + tugas wajib penuhi syarat. Per modul 1 sertifikat. Identitas = nama+email+judul modul+tanggal+kode verifikasi + tautan cek `/verifikasi` (tanpa NIM/foto).
+- Status [Terverifikasi]: gate otomatis + level kursus (supersede) + PDF + verify publik + QR + cabut beralasan; terbit ulang pasca-cabut ditolak 409.
 
 ## K-06 Tugas [Keputusan pengguna]
 
 - Kumpul ulang tanpa batas sampai lulus. Belum lulus = belum penuhi sertifikat. Nilai pakai rubrik. Simpan riwayat berkas+waktu+nilai+feedback+status di backend.
 - Rubrik seragam nasional [Keputusan pengguna 2026-11-02]: 3 kriteria tetap (Kelengkapan, Ketepatan isi, Kerapian), bobot sama, rata-rata = nilai.
-- Perilaku [Terverifikasi]: `AssignmentMaterial.svelte` izinkan `revising` tanpa batas — sebagian sesuai.
+- Status [Terverifikasi]: `AssignmentMaterial` izinkan `revising` tanpa batas; rata-rata dihitung server; keputusan eksplisit di UI penilaian.
 
 ## K-07 Modul independen [Keputusan pengguna]
 
 - Setelah punya akses kursus, bisa mulai modul mana saja. Tiap modul sertifikat sendiri. Kunci sekuensial hanya dalam sub-modul yang sama [Keputusan pengguna 2026-11-02: aturan tunggal, tanpa daftar manual].
-- Gap [Terverifikasi]: `isModuleLocked` di `courses.ts` masih kunci antar-modul → bertentangan, perlu ubah frontend + backend.
+- Status [Terverifikasi]: server tidak mengunci antar-modul; UI kunci hanya `isMaterialLocked` dalam sub-modul; copy pembayaran diperbaiki ("mulai dari modul mana pun").
 
 ## K-08 Perubahan materi [Keputusan pengguna]
 
 - Tidak hapus progres otomatis. Ulang hanya materi terdampak bila perubahan penting. Catat perubahan + terdampak + alasan + status.
 - Penting [Keputusan pengguna 2026-11-02] = ubah isi kuis/tugas/ambang lulus atau hapus materi; ringan = typo/format/sampul/judul. Diputus instruktur pemilik kursus.
-- Gap [Terverifikasi]: `curriculum.ts` tanpa versi/log.
+- Status [Terverifikasi]: `expectedUpdatedAt` + 409 `MATERIAL_CONFLICT` + audit + `GET /materials/:id/changes`; progres tidak terhapus; riwayat tampil di editor.

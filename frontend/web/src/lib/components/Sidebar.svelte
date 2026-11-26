@@ -83,6 +83,13 @@
 		return null;
 	});
 
+	// Gambar profil bisa gagal dimuat (jaringan/CORB) — jatuhkan ke inisial.
+	let avatarFailed = $state(false);
+	$effect(() => {
+		void profileAvatarUrl;
+		avatarFailed = false;
+	});
+
 	function isActive(href: string): boolean {
 		if (href === '/user' || href === '/admin' || href === '/instruktur')
 			return currentPath === href || currentPath === href + '/';
@@ -209,13 +216,14 @@
 				aria-hidden="true"
 			></div>
 			<div class="relative shrink-0">
-				{#if safeAvatarUrl}
+				{#if safeAvatarUrl && !avatarFailed}
 					<img
 						src={safeAvatarUrl}
 						alt={profileAlt}
 						class="h-12 w-12 rounded-full object-cover shadow-md ring-2 ring-white"
 						loading="lazy"
 						referrerpolicy="no-referrer"
+						onerror={() => (avatarFailed = true)}
 					/>
 				{:else}
 					<span

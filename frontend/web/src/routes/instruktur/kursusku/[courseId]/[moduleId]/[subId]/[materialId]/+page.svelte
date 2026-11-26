@@ -9,6 +9,7 @@
 	import type { CourseModule } from '$lib/data/courses';
 	import { resolveServerCourse, isServerKelola, isServerId, updateMaterial, fetchMaterialDetail, fetchMaterialChanges, type ChangeSignificance, type MaterialChangeRow } from '$lib/api/courses';
 	import { fetchQuizQuestions, saveQuizSet } from '$lib/api/quiz';
+	import { toast } from '$lib/stores/toast.svelte';
 	import {
 		loadCurriculumDraft,
 		saveCurriculumDraft,
@@ -41,7 +42,7 @@
 		validateTaskDraft,
 		type TaskDraft
 	} from '$lib/stores/task-drafts';
-	import MaterialEditor from '$lib/components/training/organisms/MaterialEditor.svelte';
+	import MaterialEditor from '$lib/components/training/organisms/AsyncMaterialEditor.svelte';
 	import MaterialPreview from '$lib/components/training/organisms/MaterialPreview.svelte';
 	import QuizBuilder from '$lib/components/training/organisms/QuizBuilder.svelte';
 	import TaskBriefBuilder from '$lib/components/training/organisms/TaskBriefBuilder.svelte';
@@ -153,6 +154,7 @@
 			})
 			.catch((e) => {
 				changesError = e instanceof Error ? e.message : 'Gagal memuat riwayat.';
+				toast.error(changesError);
 			})
 			.finally(() => {
 				changesLoading = false;
@@ -482,6 +484,7 @@
 			}));
 		} catch (e) {
 			serverQuizError = e instanceof Error ? e.message : 'Gagal memuat kuis server.';
+			toast.error(serverQuizError);
 		} finally {
 			serverQuizLoading = false;
 		}

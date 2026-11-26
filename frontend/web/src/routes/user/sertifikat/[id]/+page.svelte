@@ -5,6 +5,7 @@
 	import CertificateCover from '$lib/components/training/molecules/CertificateCover.svelte';
 	import { downloadMyCertificatePdf, fetchMyCertificates, type MyCertificate } from '$lib/api/progress';
 	import { fileUrl } from '$lib/api/courses';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Detail satu sertifikat milik sendiri: fasimil besar + data + unduh PDF.
@@ -54,6 +55,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat sertifikat.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}
@@ -95,6 +97,7 @@
 			}
 		} catch (e) {
 			downloadError = e instanceof Error ? e.message : 'Gagal mengunduh sertifikat.';
+			toast.error(downloadError);
 		} finally {
 			downloading = false;
 		}

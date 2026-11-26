@@ -103,10 +103,11 @@ const clearCoursePdfCacheForSigner = async (teacherId: number): Promise<number> 
       .from(courses)
       .where(eq(courses.createdBy, teacherId));
     const candidates = [...new Set([...linked.map((r) => r.courseId), ...created.map((r) => r.id)])];
-    const signed: number[] = [];
-    for (const cid of candidates) {
-      if ((await primaryInstructorId(cid)) === teacherId) signed.push(cid);
-    }
+    // Batch: 1× primaryBatchByCourse (dulu N× primaryInstructorId sekuensial).
+    const batch = await primaryBatchByCourse(candidates);
+    const signed: number[] = candidates.filter(
+      (cid) => batch.get(cid)?.signerId === teacherId
+    );
     if (signed.length === 0) return 0;
     const certRows = await db
       .select({ code: certificates.code })
@@ -187,32 +188,102 @@ export const removeMySignature = async (teacherId: number) => {
   return { fileId: null as number | null };
 };
 
+/** Hasil resolusi penanda tangan utama per kursus (aturan SAMA seperti
+ * `primaryInstructorId` + nama di PDF: pengampu ter awal → pembuat kursus).
+ * Satu batch untuk banyak kursus: 3 query total (dulu sampai 6×C query). */
+export interface CoursePrimary {
+  signerId: number | null;
+  name: string | null;
+  signatureUrl: string | null;
+}
+
+export const primaryBatchByCourse = async (
+  courseIds: number[]
+): Promise<Map<number, CoursePrimary>> => {
+  const uniq = [...new Set(courseIds.filter((id) => Number.isInteger(id) && id > 0))];
+  const out = new Map<number, CoursePrimary>();
+  for (const cid of courseIds) {
+    if (!out.has(cid))
+      out.set(cid, { signerId: null, name: null, signatureUrl: null });
+  }
+  if (uniq.length === 0) return out;
+  try {
+    const [links, owned] = await Promise.all([
+      db
+        .select({
+          courseId: courseInstructors.courseId,
+          userId: courseInstructors.userId,
+        })
+        .from(courseInstructors)
+        .where(inArray(courseInstructors.courseId, uniq))
+        .orderBy(
+          asc(courseInstructors.courseId),
+          asc(courseInstructors.assignedAt),
+          asc(courseInstructors.userId)
+        ),
+      db
+        .select({ id: courses.id, createdBy: courses.createdBy })
+        .from(courses)
+        .where(inArray(courses.id, uniq)),
+    ]);
+    const firstLink = new Map<number, number>();
+    for (const l of links) {
+      if (!firstLink.has(l.courseId)) firstLink.set(l.courseId, l.userId);
+    }
+    const ownerByCourse = new Map(
+      owned.map((o) => [o.id, o.createdBy as number | null])
+    );
+    const signerByCourse = new Map<number, number | null>();
+    for (const cid of uniq) {
+      signerByCourse.set(cid, firstLink.get(cid) ?? ownerByCourse.get(cid) ?? null);
+    }
+    const signerIds = [
+      ...new Set(
+        [...signerByCourse.values()].filter(
+          (id): id is number => id !== null
+        )
+      ),
+    ];
+    const nameByUser = new Map<number, string>();
+    const sigByUser = new Map<number, number | null>();
+    if (signerIds.length > 0) {
+      const us = await db
+        .select({
+          id: users.id,
+          name: users.name,
+          signatureFileId: users.signatureFileId,
+        })
+        .from(users)
+        .where(inArray(users.id, signerIds));
+      for (const u of us) {
+        nameByUser.set(u.id, u.name);
+        sigByUser.set(u.id, u.signatureFileId ?? null);
+      }
+    }
+    for (const cid of uniq) {
+      const sid = signerByCourse.get(cid) ?? null;
+      const fid = sid !== null ? (sigByUser.get(sid) ?? null) : null;
+      out.set(cid, {
+        signerId: sid,
+        name: sid !== null ? (nameByUser.get(sid) ?? null) : null,
+        signatureUrl: fid ? `/api/v1/files/${fid}/content` : null,
+      });
+    }
+  } catch (e) {
+    console.error("[certificate] Gagal batch instruktur utama:", e);
+  }
+  return out;
+};
+
 /** URL tanda tangan penanda tangan per kursus (batch; null = fallback nama diketik). */
 export const signatureUrlsByCourse = async (
   courseIds: number[]
 ): Promise<Map<number, string | null>> => {
+  const batch = await primaryBatchByCourse(courseIds);
   const out = new Map<number, string | null>();
-  await Promise.all(
-    [...new Set(courseIds)].map(async (cid) => {
-      try {
-        const signerId = await primaryInstructorId(cid);
-        if (!signerId) {
-          out.set(cid, null);
-          return;
-        }
-        const u = await db
-          .select({ signatureFileId: users.signatureFileId })
-          .from(users)
-          .where(eq(users.id, signerId))
-          .limit(1);
-        const fid = u[0]?.signatureFileId ?? null;
-        out.set(cid, fid ? `/api/v1/files/${fid}/content` : null);
-      } catch (e) {
-        console.error("[certificate] Gagal membaca URL tanda tangan:", e);
-        out.set(cid, null);
-      }
-    })
-  );
+  for (const [cid, v] of batch) out.set(cid, v.signatureUrl);
+  // Pertahankan kunci untuk id tak valid (dulu: null per course).
+  for (const cid of courseIds) if (!out.has(cid)) out.set(cid, null);
   return out;
 };
 

@@ -8,6 +8,7 @@ import {
   createCourse,
   getCourseById,
   listCourses,
+  listRankings,
   listMyCourses,
   updateCourse,
   deleteCourse,
@@ -92,6 +93,19 @@ export const listPublic = async (
       { limit: q.limit, page: q.page, sort: q.sort }
     );
     res.status(200).json({ status: "success", message: "Daftar kursus", data });
+  } catch (error) {
+    next(error);
+  }
+};
+
+// GET /api/v1/courses/rankings — peringkat publik per jumlah peserta (tanpa rating).
+// WAJIB di atas "/:id" agar tidak tertelan param id.
+export const listRankingsPublic = async (req: Request, res: Response, next: NextFunction) => {
+  try {
+    const raw = Array.isArray(req.query.limit) ? req.query.limit[0] : req.query.limit;
+    const limit = typeof raw === "string" && /^\d+$/.test(raw) ? Number(raw) : 10;
+    const data = await listRankings(limit);
+    res.status(200).json({ status: "success", message: "Peringkat kursus", data });
   } catch (error) {
     next(error);
   }

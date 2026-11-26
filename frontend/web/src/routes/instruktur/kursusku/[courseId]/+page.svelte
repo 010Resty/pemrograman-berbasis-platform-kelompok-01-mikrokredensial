@@ -58,6 +58,7 @@
 			.then((res) => {
 				if (!res) {
 					serverError = 'Kursus tidak ditemukan di server.';
+					toast.error(serverError);
 					return;
 				}
 				serverCourse = res;
@@ -72,6 +73,7 @@
 			})
 			.catch((e: unknown) => {
 				serverError = e instanceof Error ? e.message : 'Gagal memuat kursus dari server.';
+				toast.error(serverError);
 			})
 			.finally(() => {
 				serverLoading = false;
@@ -207,7 +209,9 @@
 			const remote = await fetchModules(courseId);
 			markSaved(`Tersinkron ke server: ${remote.length} modul tercatat.`);
 		} catch (e) {
-			markSaved(e instanceof Error ? e.message : 'Gagal memeriksa simpanan server.');
+			const msg = e instanceof Error ? e.message : 'Gagal memeriksa simpanan server.';
+			markSaved(msg);
+			toast.error(msg);
 		}
 	}
 
@@ -240,7 +244,9 @@
 				isPublished = next;
 				markSaved(next ? 'Kursus diterbitkan.' : 'Kursus dikembalikan ke draft.');
 			} catch (e) {
-				markSaved(e instanceof Error ? e.message : 'Gagal mengubah status kursus.');
+				const msg = e instanceof Error ? e.message : 'Gagal mengubah status kursus.';
+				markSaved(msg);
+				toast.error(msg);
 			}
 			return;
 		}
@@ -473,6 +479,7 @@
 			eTools = detail.tools && detail.tools.length > 0 ? [...detail.tools] : [''];
 		} catch (e) {
 			editServerError = e instanceof Error ? e.message : 'Gagal memuat info kursus.';
+			toast.error(editServerError);
 		} finally {
 			editPrefilling = false;
 			focusEditTitle();
@@ -509,10 +516,12 @@
 		if (!file) return;
 		if (!file.type.startsWith('image/')) {
 			editErrors['cover'] = 'Berkas sampul harus berupa gambar (JPG/PNG/WebP).';
+			toast.error(editErrors['cover']);
 			return;
 		}
 		if (file.size > 2 * 1024 * 1024) {
 			editErrors['cover'] = 'Ukuran gambar maksimal 2 MB.';
+			toast.error(editErrors['cover']);
 			return;
 		}
 		const reader = new FileReader();
@@ -533,6 +542,8 @@
 		if (!serverMode || !serverCourse || editSaving) return;
 		editServerError = '';
 		if (!eValidate()) {
+			const firstEditError = Object.values(editErrors)[0];
+			if (firstEditError) toast.error(firstEditError);
 			focusEditTitle();
 			return;
 		}
@@ -590,6 +601,7 @@
 		} catch (err) {
 			editServerError =
 				err instanceof Error ? err.message : 'Gagal menyimpan info kursus. Coba lagi.';
+			toast.error(editServerError);
 		} finally {
 			editSaving = false;
 		}

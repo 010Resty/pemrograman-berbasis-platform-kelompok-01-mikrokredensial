@@ -11,6 +11,7 @@
 		fetchMyProgressSummary,
 		type MyCertificate
 	} from '$lib/api/progress';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	interface Module {
 		id: number;
@@ -59,6 +60,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat dasbor.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}

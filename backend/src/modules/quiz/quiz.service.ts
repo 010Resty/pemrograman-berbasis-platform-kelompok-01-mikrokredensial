@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, desc, eq, inArray } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db";
 import {
   auditLogs,
@@ -421,16 +421,19 @@ export const gradeAttempt = async (
 /** Riwayat milik pengguna, terbaru dulu (tanpa kunci/snapshot). */
 export const getHistory = async (
   userId: number,
-  materialId: number
+  materialId: number,
+  limit = 50
 ): Promise<PublicAttempt[]> => {
   await requireQuizMaterial(materialId);
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || 50, 1), 200);
   const rows = await db
     .select()
     .from(quizAttempts)
     .where(
       and(eq(quizAttempts.userId, userId), eq(quizAttempts.materialId, materialId))
     )
-    .orderBy(desc(quizAttempts.attemptedAt), desc(quizAttempts.id));
+    .orderBy(desc(quizAttempts.attemptedAt), desc(quizAttempts.id))
+    .limit(safeLimit);
   return rows.map(toPublicAttempt);
 };
 
@@ -448,13 +451,21 @@ export const getBest = async (
   materialId: number
 ): Promise<BestResult> => {
   const mat = await requireQuizMaterial(materialId);
+  // Agregat di SQL (1 baris) — ganti load semua skor + MAX/some di JS.
+  // passed tetap sticky per snapshot: ada_attempt dengan score >= passScore-nya sendiri.
   const rows = await db
-    .select({ score: quizAttempts.score, passScore: quizAttempts.passScore })
+    .select({
+      n: sql<number>`count(*)`,
+      best: sql<number | null>`max(${quizAttempts.score})`,
+      passedCount:
+        sql<number>`sum(case when ${quizAttempts.score} >= ${quizAttempts.passScore} then 1 else 0 end)`,
+    })
     .from(quizAttempts)
     .where(
       and(eq(quizAttempts.userId, userId), eq(quizAttempts.materialId, materialId))
     );
-  if (rows.length === 0) {
+  const n = Number(rows[0]?.n ?? 0);
+  if (n === 0) {
     return {
       materialId,
       attempts: 0,
@@ -465,9 +476,9 @@ export const getBest = async (
   }
   return {
     materialId,
-    attempts: rows.length,
-    bestScore: Math.max(...rows.map((r) => r.score)),
+    attempts: n,
+    bestScore: rows[0]?.best ?? null,
     effectivePassScore: mat.passScore ?? 70,
-    passed: rows.some((r) => r.score >= r.passScore),
+    passed: Number(rows[0]?.passedCount ?? 0) > 0,
   };
 };

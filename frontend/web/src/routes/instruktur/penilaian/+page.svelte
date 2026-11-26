@@ -3,6 +3,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import UiStatCard from '$lib/components/ui/StatCard.svelte';
 	import { loadInstructorReviewQueue, type QueueCourse } from '$lib/api/grading-queue';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Antrean penilaian dari backend (tanpa data contoh).
@@ -34,6 +35,7 @@
 			partial = q.partial;
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Gagal memuat antrean penilaian.';
+			toast.error(loadError);
 		} finally {
 			loading = false;
 		}

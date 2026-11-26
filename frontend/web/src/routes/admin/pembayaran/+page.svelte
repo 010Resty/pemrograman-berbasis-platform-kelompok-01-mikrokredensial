@@ -3,6 +3,7 @@
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
+	import ModalShell from '$lib/components/ModalShell.svelte';
 	import {
 		downloadProofFile,
 		fetchAdminPayments,
@@ -10,6 +11,7 @@
 		type AdminPaymentRow,
 		type PaymentStatus
 	} from '$lib/api/payments';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	const filters: { value: PaymentStatus | 'all'; label: string }[] = [
 		{ value: 'menunggu', label: 'Menunggu' },
@@ -50,6 +52,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat antrean pembayaran.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}
@@ -88,6 +91,7 @@
 		// disaring server): jangan fetch, tampilkan pesan saja.
 		if (!row.proofFileId) {
 			proofErrorById = { ...proofErrorById, [row.id]: 'Belum ada bukti bayar dari peserta.' };
+			toast.error(proofErrorById[row.id]);
 			return;
 		}
 		proofLoadingId = row.id;
@@ -100,6 +104,7 @@
 				...proofErrorById,
 				[row.id]: e instanceof Error ? e.message : 'Gagal memuat bukti.'
 			};
+			toast.error(proofErrorById[row.id]);
 		} finally {
 			if (proofLoadingId === row.id) proofLoadingId = null;
 		}
@@ -130,6 +135,7 @@
 		verifyError = '';
 		if (verifyDecision === 'tolak' && !verifyReason.trim()) {
 			verifyError = 'Alasan penolakan wajib diisi.';
+			toast.error(verifyError);
 			return;
 		}
 		// Terima = dianggap lunas persis sebesar tagihan. Backend tetap butuh
@@ -137,6 +143,7 @@
 		const row = items.find((i) => i.id === verifyId);
 		if (!row) {
 			verifyError = 'Data pembayaran tidak ditemukan. Muat ulang antrean.';
+			toast.error(verifyError);
 			return;
 		}
 		verifyBusy = true;
@@ -152,6 +159,7 @@
 			await load();
 		} catch (e) {
 			verifyError = e instanceof Error ? e.message : 'Verifikasi gagal. Coba lagi.';
+			toast.error(verifyError);
 		} finally {
 			verifyBusy = false;
 		}
@@ -346,14 +354,35 @@
 
 {#if verifyId !== null}
 	{@const row = items.find((i) => i.id === verifyId)}
-	<div
-		class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 p-4"
-		role="dialog"
-		aria-modal="true"
-		aria-labelledby="verify-title"
+	<ModalShell
+		open={verifyId !== null}
+		onclose={closeVerify}
+		loading={verifyBusy}
+		title="Verifikasi pembayaran"
+		icon="fa-check-double"
 	>
-		<div class="w-full max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-			<h2 id="verify-title" class="text-base font-extrabold text-slate-900">Verifikasi pembayaran</h2>
+		{#snippet footer()}
+			<button
+				type="button"
+				onclick={closeVerify}
+				disabled={verifyBusy}
+				class="inline-flex min-h-11 flex-1 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50 sm:flex-none sm:px-5"
+			>
+				Batal
+			</button>
+			<button
+				type="button"
+				onclick={() => void submitVerify()}
+				disabled={verifyBusy}
+				class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60 sm:flex-none sm:px-5"
+			>
+				{#if verifyBusy}
+					<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Menyimpan…
+				{:else}
+					<i class="fa-solid fa-check" aria-hidden="true"></i> Simpan keputusan
+				{/if}
+			</button>
+		{/snippet}
 			<p class="mt-1 font-mono text-xs text-slate-500">{row?.invoice ?? ''} · {row ? formatIDR(row.amountExpected) : ''}</p>
 			{#if row?.proofFileId}
 				<div class="mt-3 overflow-hidden rounded-xl border border-slate-200">
@@ -420,31 +449,8 @@
 			{#if verifyError}
 				<p role="alert" class="mt-3 rounded-xl border border-red-200 bg-red-50 px-4 py-2.5 text-xs font-semibold text-red-700">{verifyError}</p>
 			{/if}
-			<div class="mt-4 flex gap-2">
-				<button
-					type="button"
-					onclick={closeVerify}
-					disabled={verifyBusy}
-					class="inline-flex min-h-11 flex-1 items-center justify-center rounded-xl border border-slate-200 px-4 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-50"
-				>
-					Batal
-				</button>
-				<button
-					type="button"
-					onclick={() => void submitVerify()}
-					disabled={verifyBusy}
-					class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 text-xs font-bold text-white transition-colors hover:bg-blue-700 disabled:cursor-wait disabled:opacity-60"
-				>
-					{#if verifyBusy}
-						<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Menyimpan…
-					{:else}
-						<i class="fa-solid fa-check" aria-hidden="true"></i> Simpan keputusan
-					{/if}
-				</button>
-			</div>
 			<p class="mt-3 text-[11px] leading-relaxed text-slate-400">
 				Menerima pembayaran akan memberi akses kursus ke peserta + menghanguskan voucher diskon bila ada.
 			</p>
-		</div>
-	</div>
+	</ModalShell>
 {/if}

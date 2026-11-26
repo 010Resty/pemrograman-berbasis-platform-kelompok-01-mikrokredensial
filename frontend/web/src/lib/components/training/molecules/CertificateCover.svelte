@@ -143,7 +143,7 @@
 				>
 					{instructorName ?? 'Instruktur Utama'}
 				</p>
-				<p class="text-[0.64em] text-slate-400">Instruktur Utama</p>
+				<p class="text-[0.64em] text-slate-500">Instruktur Utama</p>
 				<p class="mt-[0.4em] text-[0.68em] text-slate-500">{issuedLabel}</p>
 			</div>
 			<div class="flex shrink-0 flex-col items-center" style="margin-right: 0.4em;">

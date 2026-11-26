@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { resolve } from '$app/paths';
+	import { lp, type Locale } from '$lib/i18n/locale';
+	import { t } from '$lib/i18n/index';
 	import roketImg from '$lib/assets/roket.png';
 
 	/**
@@ -8,28 +9,27 @@
 	 * otomatis bila rute tidak ditemukan atau `error()` dilempar.
 	 */
 
+	const lang: Locale = $derived(page.url.pathname === '/en' || page.url.pathname.startsWith('/en/') ? 'en' : 'id');
 	const status = $derived(page.status);
 	const isNotFound = $derived(status === 404);
-	const title = $derived(isNotFound ? 'Halaman tidak ditemukan' : 'Terjadi kesalahan');
+	const title = $derived(isNotFound ? t(lang, 'error.notFound') : t(lang, 'error.generic'));
 	const message = $derived(
 		page.error?.message ||
-			(isNotFound
-				? 'Alamat yang Anda buka tidak terdaftar di ARISTOTELES.'
-				: 'Sesuatu tidak beres di sisi kami. Coba lagi nanti.')
+			(isNotFound ? t(lang, 'error.notFoundDesc') : t(lang, 'error.genericDesc'))
 	);
 
 	function goBack(): void {
 		// Bila tidak ada riwayat (mis. tab baru / tautan langsung),
 		// history.back() tidak ke mana-mana — kembali ke beranda saja.
 		if (window.history.length > 1) window.history.back();
-		else window.location.assign(resolve('/'));
+		else window.location.assign(lp(lang, '/'));
 	}
 </script>
 
 <svelte:head>
 	<title>{status} · {title} — ARISTOTELES</title>
-	<meta name="description" content="Halaman error ARISTOTELES." />
-	<meta name="robots" content="noindex, nofollow" />
+	<meta name="description" content={t(lang, 'error.meta')} />
+	<meta name="robots" content="noindex,nofollow" />
 </svelte:head>
 
 <div class="relative flex min-h-screen items-center justify-center overflow-hidden bg-gradient-to-b from-ice via-white to-slate-50 p-4">
@@ -47,7 +47,7 @@
 			<div class="relative mx-auto w-fit">
 				<img
 					src={roketImg}
-					alt="Ilustrasi roket meluncur"
+					alt={t(lang, 'error.rocketAlt')}
 					loading="eager"
 					class="mx-auto h-56 w-auto drop-shadow-2xl"
 				/>
@@ -60,17 +60,17 @@
 			<p class="mt-2 text-sm leading-relaxed text-slate-500">{message}</p>
 			<div class="mt-6 flex flex-col gap-2.5 sm:flex-row">
 				<a
-					href={resolve('/')}
+					href={lp(lang, '/')}
 					class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-blue-600/25 transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 				>
-					<i class="fa-solid fa-house" aria-hidden="true"></i> Beranda
+					<i class="fa-solid fa-house" aria-hidden="true"></i> {t(lang, 'error.home')}
 				</a>
 				<button
 					type="button"
 					onclick={goBack}
 					class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-5 py-2.5 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
 				>
-					<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> Kembali
+					<i class="fa-solid fa-arrow-left" aria-hidden="true"></i> {t(lang, 'error.back')}
 				</button>
 			</div>
 		</div>

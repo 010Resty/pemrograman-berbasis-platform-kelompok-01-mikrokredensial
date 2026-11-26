@@ -10,6 +10,7 @@
 		timeAgo,
 		type InstructorDashboard
 	} from '$lib/api/dashboard';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	interface StatItem {
 		label: string;
@@ -42,6 +43,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat dasbor.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}

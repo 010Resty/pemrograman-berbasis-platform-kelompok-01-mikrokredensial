@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import { isServerId } from '$lib/api/courses';
 	import { resolveMediaSrc } from '$lib/tiptap/extensions';
+	import { buildSrcSet } from '$lib/api/responsive';
 	import { BackendRequestError } from '$lib/api/backend';
 	import {
 		fetchQuizBest,
@@ -11,6 +12,7 @@
 		type QuizAttemptResult,
 		type QuizBest
 	} from '$lib/api/quiz';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Kuis peserta — server-only (K-02).
@@ -212,6 +214,7 @@
 			/* Tetap di halaman: hasil tampil inline di bawah (tanpa navigasi). */
 		} catch (e) {
 			submitError = friendlyError(e, 'Gagal mengirim jawaban.');
+			toast.error(submitError);
 		} finally {
 			sending = false;
 		}
@@ -287,11 +290,15 @@
 							</span>
 						</legend>
 						{#if media.imageUrl}
+							{@const imgSrc = resolveMediaSrc(media.imageUrl)}
 							<img
-								src={resolveMediaSrc(media.imageUrl)}
+								src={imgSrc}
+								srcset={buildSrcSet(imgSrc)}
+								sizes="(max-width: 768px) 100vw, 640px"
 								alt={`Gambar pendukung soal ${qi + 1}`}
 								class="mb-3 max-h-72 w-full rounded-xl border border-slate-200 object-contain bg-slate-50"
 								loading="lazy"
+								decoding="async"
 							/>
 						{/if}
 						{#if media.audioUrl}

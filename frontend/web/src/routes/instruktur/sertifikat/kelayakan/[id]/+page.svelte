@@ -7,6 +7,7 @@
 		type EligibilityDetail
 	} from '$lib/api/certificates';
 	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Detail kelayakan satu peserta pada satu modul: rincian materi/kuis/tugas
@@ -29,6 +30,7 @@
 			phase = 'ready';
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Gagal memuat detail kelayakan.';
+			toast.error(loadError);
 			phase = 'error';
 		}
 	}

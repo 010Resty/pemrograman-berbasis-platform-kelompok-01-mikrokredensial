@@ -305,6 +305,26 @@ export function loginRequest(
 }
 
 /**
+ * Login with UNIRA (SIMAT) via backend (`POST /api/v1/auth/unira/login`).
+ * Frontend tidak pernah memanggil api.unira.ac.id langsung: password NIM
+ * hanya dikirim ke backend sendiri, yang menukarnya ke token UNIRA
+ * server-side lalu menerbitkan sesi Aristoteles biasa (AuthPayload sama
+ * seperti login email agar store/silent-refresh tidak berubah).
+ */
+export function uniraLoginRequest(
+	username: string,
+	password: string,
+	timeoutMs: number = getLoginTimeoutMs()
+): Promise<AuthPayload> {
+	return apiRequest<AuthPayload>('/auth/unira/login', {
+		method: 'POST',
+		body: { username, password },
+		timeoutMs,
+		noAuthRetry: true
+	});
+}
+
+/**
  * Langkah 1 registrasi: minta kode OTP 6 digit (TANPA membuat akun).
  * Akun permanen baru dibuat server saat POST /auth/verify-email berhasil.
  * Data registrasi hanya tersimpan sementara di server sampai kode diverifikasi.

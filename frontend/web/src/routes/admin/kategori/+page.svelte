@@ -2,6 +2,7 @@
 	import { browser } from '$app/environment';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 	import {
 		createCategory,
 		deleteCategory,
@@ -53,6 +54,7 @@
 			items = await fetchAdminCategories();
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Gagal memuat kategori.';
+			toast.error(loadError);
 		} finally {
 			loading = false;
 		}
@@ -82,6 +84,7 @@
 		notice = '';
 		if (newName.trim().length < 2) {
 			createError = 'Nama kategori minimal 2 karakter.';
+			toast.error(createError);
 			return;
 		}
 		creating = true;
@@ -93,6 +96,7 @@
 			await load();
 		} catch (e) {
 			createError = e instanceof Error ? e.message : 'Gagal menambah kategori.';
+			toast.error(createError);
 		} finally {
 			creating = false;
 		}
@@ -127,10 +131,12 @@
 		const name = editName.trim();
 		if (name.length < 2) {
 			editError = 'Nama kategori minimal 2 karakter.';
+			toast.error(editError);
 			return;
 		}
 		if (name === c.name) {
 			editError = 'Tidak ada perubahan.';
+			toast.error(editError);
 			return;
 		}
 		editBusy = true;
@@ -141,6 +147,7 @@
 			await load();
 		} catch (e) {
 			editError = e instanceof Error ? e.message : 'Gagal memperbarui kategori.';
+			toast.error(editError);
 		} finally {
 			editBusy = false;
 		}
@@ -167,6 +174,7 @@
 			await load();
 		} catch (e) {
 			notice = e instanceof Error ? e.message : 'Gagal mengubah status.';
+			toast.error(notice);
 		} finally {
 			toggleBusy = false;
 		}
@@ -198,6 +206,7 @@
 			// Modal SENGAJA tidak ditutup: admin harus sadar hapus gagal
 			// (mis. 409 masih dipakai kursus), bukan mengira berhasil.
 			deleteError = e instanceof Error ? e.message : 'Gagal menghapus kategori.';
+			toast.error(deleteError);
 		} finally {
 			deleteBusy = false;
 		}

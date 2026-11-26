@@ -2,7 +2,6 @@
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
-	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
 	import { getCurrentUser, homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
@@ -10,12 +9,14 @@
 	import { fetchMyCertificates, fetchMyEnrollments } from '$lib/api/progress';
 	import type { MyCertificate, MyEnrollment } from '$lib/api/progress';
 	import { fetchMyPayments } from '$lib/api/payments';
+	import { cachedGet } from '$lib/api/cache';
 	import type { MyPaymentListItem } from '$lib/api/payments';
 	import { fetchMyPatunganGroups } from '$lib/api/patungan';
 	import type { PatunganGroupSummary } from '$lib/api/patungan';
 	import { fileUrl } from '$lib/api/courses';
 	import { syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
 	import { untrack } from 'svelte';
+	import { useBadgePolling } from '$lib/stores/badge-poll.svelte';
 
 	let { children } = $props();
 
@@ -51,14 +52,19 @@
 	async function loadBadges(): Promise<void> {
 		if (refreshing) return;
 		refreshing = true;
+		// Badge bell boleh basi ≤45 dtk (disegarkan tiap navigasi/fokus/60 dtk).
+		// JANGAN dipakai untuk polling status bayar / akses / progres.
+		const BELL_MS = 45_000;
 		try {
 			const [enrollments, certs, pending, rejected, patungan] = await Promise.all([
-				fetchMyEnrollments(),
-				fetchMyCertificates(),
-				fetchMyPayments({ status: 'menunggu', limit: 3 }),
+				cachedGet('bell:user:enrollments', BELL_MS, () => fetchMyEnrollments()),
+				cachedGet('bell:user:certs', BELL_MS, () => fetchMyCertificates()),
+				cachedGet('bell:user:pending', BELL_MS, () => fetchMyPayments({ status: 'menunggu', limit: 3 })),
 				// Hanya penolakan yang belum dibaca — yang sudah dibuka hilang dari bell.
-				fetchMyPayments({ status: 'ditolak', unseen: true, limit: 3 }),
-				fetchMyPatunganGroups().catch((): PatunganGroupSummary[] => [])
+				cachedGet('bell:user:rejected', BELL_MS, () => fetchMyPayments({ status: 'ditolak', unseen: true, limit: 3 })),
+				cachedGet('bell:user:patungan', BELL_MS, () =>
+					fetchMyPatunganGroups().catch((): PatunganGroupSummary[] => [])
+				)
 			]);
 			myEnrollments = enrollments;
 			myIssuedCerts = certs.filter((c) => c.status === 'issued');
@@ -98,31 +104,12 @@
 		void path;
 	});
 
-	$effect(() => {
-		if (!browser) return;
-		const onVisible = () => {
-			if (document.visibilityState === 'visible' && phase === 'ready') void loadBadges();
-		};
-		const onFocus = () => {
-			if (phase === 'ready') void loadBadges();
-		};
-		// Keputusan yang baru dibaca di halaman pembayaran langsung
-		// menyegarkan bell tanpa menunggu interval/navigasi.
-		const onDecided = () => {
-			if (phase === 'ready') void loadBadges();
-		};
-		document.addEventListener('visibilitychange', onVisible);
-		window.addEventListener('focus', onFocus);
-		window.addEventListener('user:notif-refresh', onDecided);
-		const timer = setInterval(() => {
-			if (phase === 'ready') void loadBadges();
-		}, 60000);
-		return () => {
-			document.removeEventListener('visibilitychange', onVisible);
-			window.removeEventListener('focus', onFocus);
-			window.removeEventListener('user:notif-refresh', onDecided);
-			clearInterval(timer);
-		};
+	// Keputusan yang baru dibaca di halaman pembayaran langsung
+	// menyegarkan bell tanpa menunggu interval/navigasi.
+	useBadgePolling({
+		load: () => void loadBadges(),
+		isReady: () => phase === 'ready',
+		eventName: 'user:notif-refresh'
 	});
 
 	async function runVerify(): Promise<void> {
@@ -252,6 +239,10 @@
 	const avatarSrc = $derived(session?.avatarUrl ? fileUrl(session.avatarUrl) : null);
 </script>
 
+<svelte:head>
+	<meta name="robots" content="noindex, nofollow" />
+</svelte:head>
+
 <svelte:window onkeydown={handleWindowKeydown} />
 
 <!-- Skip link untuk keyboard / screen reader -->
@@ -301,13 +292,13 @@
 			</button>
 			<Logo size="sm" showText={true} textSize="md" />
 			<a
-				href="/user/sertifikat"
+				href="/user/pembayaran"
 				class="relative flex min-h-11 min-w-11 items-center justify-center rounded-lg p-2 text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600"
 				aria-label={notifLabel}
 			>
 				<i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
 				{#if notifCount > 0}
-					<span class="absolute top-0.5 right-0.5 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white" aria-hidden="true">{notifCount}</span>
+					<span class="absolute top-0.5 right-0.5 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-bold text-white" aria-hidden="true">{notifCount > 9 ? '9+' : notifCount}</span>
 				{/if}
 			</a>
 		</div>
@@ -331,7 +322,7 @@
 						>
 							<i class="fa-solid fa-bell text-lg" aria-hidden="true"></i>
 							{#if notifCount > 0}
-								<span class="absolute top-1 right-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold text-white" aria-hidden="true">{notifCount}</span>
+								<span class="absolute top-1 right-1 inline-flex min-h-5 min-w-5 items-center justify-center rounded-full border-2 border-white bg-red-500 px-1 text-[10px] font-bold text-white" aria-hidden="true">{notifCount > 9 ? '9+' : notifCount}</span>
 							{/if}
 						</button>
 

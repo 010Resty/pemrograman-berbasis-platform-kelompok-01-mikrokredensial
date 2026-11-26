@@ -72,6 +72,7 @@
 			}
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Gagal memuat data promo.';
+			toast.error(loadError);
 		} finally {
 			loading = false;
 		}
@@ -342,6 +343,7 @@
 	}}
 	onsuccess={(title) => {
 		toast.success(`“${title}” diajukan ke promo, menunggu persetujuan admin.`);
+		window.dispatchEvent(new CustomEvent('instruktur:notif-refresh'));
 		void load();
 	}}
 />

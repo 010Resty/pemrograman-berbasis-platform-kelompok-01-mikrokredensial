@@ -11,6 +11,7 @@ import voucherRoutes from "./modules/vouchers/voucher.routes";
 import adminRoutes from "./modules/admin/admin.routes";
 import invitationRoutes from "./modules/invitations/invitation.routes";
 import paymentRoutes from "./modules/payments/payment.routes";
+import revenueRoutes from "./modules/revenues/revenue.routes";
 import promoRoutes from "./modules/promos/promo.routes";
 import patunganRoutes from "./modules/patungan/patungan.routes";
 import profileRoutes from "./modules/profile/profile.routes";
@@ -68,13 +69,18 @@ app.use(morgan(":method :redacted-url :status :response-time ms - :res[content-l
 
 // Body parsing (batas JSON dinaikkan untuk transport unggahan base64;
 // validasi ukuran per-jenis tetap ditegakkan di modul uploads).
-// `verify` menyimpan salinan byte mentah (dipakai verifikasi signature
-// webhook DOKU) tanpa mengubah perilaku parsing JSON yang sudah ada.
+// `verify` hanya menyimpan salinan byte mentah untuk webhook DOKU
+// (verifikasi signature RSA butuh RAW body); request lain tidak disalin
+// agar tidak menggandakan memori ~15MB per request.
 app.use(
   express.json({
     limit: "15mb",
     verify: (req, _res, buf) => {
-      (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+      const url =
+        ((req as unknown as { originalUrl?: string }).originalUrl ?? "") as string;
+      if (url.includes("/payments/doku/notify")) {
+        (req as unknown as { rawBody?: Buffer }).rawBody = Buffer.from(buf);
+      }
     },
   })
 );
@@ -121,6 +127,8 @@ app.use("/api/v1", invitationRoutes);
 app.use("/api/v1", applicationRoutes);
 // Pembayaran QRIS manual: ajukan + bukti (peserta), verifikasi + grant (admin)
 app.use("/api/v1", paymentRoutes);
+// Bagi hasil instruktur + penarikan (persen global admin, snapshot per bayar).
+app.use("/api/v1", revenueRoutes);
 // Promo kurasi admin (diskon persen / pajang / patungan).
 app.use("/api/v1", promoRoutes);
 // Grup patungan: anggota username tervalidasi, iuran sendiri-sendiri,

@@ -28,6 +28,7 @@
 	} from '$lib/api/courses';
 	import { fetchMyProgressIds, markMaterialComplete } from '$lib/api/progress';
 	import { resolve } from '$app/paths';
+	import { toast } from '$lib/stores/toast.svelte';
 	import QuizMaterial from '$lib/components/materials/QuizMaterial.svelte';
 	import AssignmentMaterial from '$lib/components/materials/AssignmentMaterial.svelte';
 	import type { AssignmentDetail } from '$lib/data/material-details';
@@ -174,6 +175,7 @@
 				notFound = true;
 			} else {
 				loadError = e instanceof Error ? e.message : 'Gagal memuat materi.';
+				toast.error(loadError);
 			}
 		} finally {
 			if (my === loadSeq) loading = false;
@@ -207,6 +209,7 @@
 			access = a;
 		} catch (e) {
 			enrollError = e instanceof Error ? e.message : 'Gagal mendaftar kursus.';
+			toast.error(enrollError);
 		} finally {
 			enrolling = false;
 		}

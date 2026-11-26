@@ -1,5 +1,7 @@
 # Dokumentasi Setup Database Backend — Aristoteles
 
+> Diperbarui 2026-11-24. Kondisi awal (MySQL 8.4.3 via Laragon, DB `aristotle`) tetap berlaku; skema kini ~30 tabel + migrasi s/d `0035`.
+
 ## 1. Teknologi
 
 - Database: MySQL 8.4.3
@@ -18,15 +20,14 @@ MySQL dijalankan melalui Laragon dengan konfigurasi berikut:
 | Host | `localhost` |
 | Port | `3306` |
 | Username | `root` |
-| Database yang berhasil digunakan | `aristotle` |
+| Database pengembangan | `aristotle` |
+| Database tes (dibuat+DROP otomatis oleh suite) | `aristoteles_test_*` (satu per file tes) |
 
-Database lokal digunakan untuk pengembangan dan pengujian backend.
-
-> Catatan: nama database yang berhasil digunakan pada tahap ini adalah `aristotle`. Pastikan nama tersebut konsisten dengan konfigurasi `.env` dan database yang digunakan anggota tim.
+> Catatan: nama database dev yang dipakai adalah `aristotle`. Pastikan konsisten dengan `.env` dan database anggota tim.
 
 ## 3. Environment Variables
 
-File konfigurasi lokal berada di `backend/.env`.
+File konfigurasi lokal berada di `backend/.env` (contoh: `backend/.env.example`).
 
 ```env
 DB_HOST=localhost
@@ -34,115 +35,56 @@ DB_PORT=3306
 DB_USER=root
 DB_PASSWORD=
 DB_NAME=aristotle
-DATABASE_URL=mysql://root:@localhost:3306/aristotle
+# atau satu DATABASE_URL=mysql://root:@localhost:3306/aristotle (diprioritaskan)
+JWT_SECRET=<min. 32 karakter acak — server menolak start tanpanya>
 ```
 
-Sesuaikan nilai variabel dengan konfigurasi MySQL lokal masing-masing anggota tim. Jangan mengunggah file `.env` yang berisi kredensial atau rahasia ke repository.
+Sesuaikan nilai dengan MySQL lokal masing-masing anggota tim. Jangan mengunggah file `.env` yang berisi kredensial atau rahasia ke repository.
 
 ## 4. Konfigurasi Drizzle
 
-File konfigurasi Drizzle berada di `backend/drizzle.config.ts`.
+File konfigurasi Drizzle berada di `backend/drizzle.config.ts` (schema `./src/db/schema.ts`, output `./drizzle`, dialect MySQL). Perintah dijalankan dari direktori `backend`.
 
-Konfigurasi menggunakan:
+## 5. Schema Database (ringkas)
 
-- Schema: `./src/db/schema.ts`
-- Output migrasi: `./drizzle`
-- Dialect: MySQL
-- Environment variables dimuat melalui `dotenv/config`.
+Schema didefinisikan dalam `backend/src/db/schema.ts` (~30 tabel; relasi via foreign key):
 
-Perintah Drizzle dijalankan dari direktori `backend` agar path schema dan output mengacu pada direktori yang benar.
+- Identitas & akses: `users`, `refresh_tokens`, `email_verification_pending`, `password_reset_otps`, `instructor_invitations`, `instructor_applications`.
+- Katalog & kurikulum: `courses`, `course_categories`, `course_instructors`, `modules`, `sub_modules`, `materials`, `files`, `file_variants`.
+- Belajar: `enrollments` (PK gabungan `user_id` + `course_id`), `progress` (PK `user_id` + `material_id`), `quiz_questions`, `quiz_options`, `quiz_attempts`, `submissions`.
+- Niaga: `vouchers`, `voucher_redemptions`, `payments`, `promo_campaigns`, `promo_courses`, `promo_course_proposals`, `patungan_groups`, `patungan_group_members`, `revenue_settings`, `revenue_ledger`, `payouts`.
+- Hasil & audit: `certificates`, `audit_logs`.
+- Migrasi `0035` menambah 15 indeks komposit (laporan, eligibility, antrean, voucher, pembayaran).
 
-## 5. Schema Database
+## 6. Migrasi
 
-Schema didefinisikan dalam `backend/src/db/schema.ts`.
-
-Sebanyak 11 tabel telah diterapkan ke database lokal:
-
-1. `users`
-2. `instructor_invitations`
-3. `courses`
-4. `modules`
-5. `materials`
-6. `enrollments`
-7. `quiz_attempts`
-8. `submissions`
-9. `progress`
-10. `vouchers`
-11. `certificates`
-
-Relasi antartabel menggunakan foreign key. Tabel `enrollments` menggunakan primary key gabungan antara `user_id` dan `course_id`.
-
-## 6. Pengecekan Schema
-
-Jalankan dari direktori `backend`:
+Dari direktori `backend`:
 
 ```bash
-npx drizzle-kit check:mysql
+npm run db:generate   # buat file migrasi baru dari schema (jangan edit migrasi lama)
+npm run db:migrate     # terapkan ke DB sesuai .env (kini s/d 0035)
+npm run db:seed        # DEV SAJA; abort bila tabel users sudah berisi data
 ```
 
-Untuk menghasilkan file migrasi dari perubahan schema:
-
-```bash
-npx drizzle-kit generate:mysql
-```
-
-Perintah `generate:mysql` menghasilkan file SQL migrasi, sedangkan `push:mysql` menerapkan perubahan schema secara langsung ke database.
-
-Sebelum menerapkan perubahan, periksa file SQL dan pastikan database target sudah benar. Jangan menjalankan perubahan destruktif tanpa persetujuan tim.
+Periksa file SQL sebelum menerapkan; jangan menjalankan perubahan destruktif tanpa persetujuan tim. Tes backend (`npm test`, 241 hijau) membuat+DROP database `aristoteles_test_*` sendiri — tidak menyentuh DB dev.
 
 ## 7. Status Implementasi
 
 - [x] MySQL lokal tersedia melalui Laragon.
-- [x] Konfigurasi Drizzle dapat membaca schema.
-- [x] Pengecekan schema berhasil.
-- [x] Sebelas tabel diterapkan ke database lokal.
-- [x] Validasi akhir desain schema bersama ketua tim.
-- [x] Pengujian koneksi database dari aplikasi backend.
-- [x] Pengujian integrasi database pada fitur autentikasi.
-- [x] Penyelarasan migrasi untuk seluruh anggota tim.
+- [x] Schema + 15 indeks komposit (migrasi 0035) diterapkan.
+- [x] Auth penuh: register OTP → verifikasi → login → refresh rotasi → logout (`aristoteles_test_auth` hijau).
+- [x] Pengujian integrasi seluruh modul: `npm test` 241/241 hijau.
+- [x] Penyelarasan migrasi untuk seluruh anggota tim (journal `drizzle/meta/_journal.json` — jangan edit manual).
 
 ## 8. Catatan
 
 File `.env` bersifat lokal dan tidak boleh di-commit. Dokumentasi ini mencatat kondisi pengembangan saat ini; perubahan schema selanjutnya harus dikoordinasikan agar konsisten dengan repository dan database anggota tim.
 
-## Integrasi Database dan Autentikasi
+## Autentikasi (kondisi kini — menggantikan catatan lama)
 
-### Database MySQL
-Backend menggunakan MySQL dengan Drizzle ORM. Konfigurasi koneksi disimpan pada file `.env` lokal dan tidak boleh di-commit ke repository.
-
-Database yang digunakan pada lingkungan pengembangan adalah `aristotle`. Struktur database terdiri dari 11 tabel sesuai schema pada `backend/src/db/schema.ts`.
-
-### Registrasi
-Endpoint: `POST /api/v1/auth/register`
-
-Data yang diperlukan:
-- `name`
-- `email`
-- `password`
-
-Password di-hash sebelum disimpan ke database. Email yang sudah terdaftar ditolak dengan respons `400 Bad Request`. Jika berhasil, endpoint mengembalikan `201 Created` beserta data pengguna dan access token.
-
-### Login
-Endpoint: `POST /api/v1/auth/login`
-
-Data yang diperlukan:
-- `email`
-- `password`
-
-Backend memeriksa akun pada database dan memverifikasi password. Jika berhasil, endpoint mengembalikan `200 OK` beserta data pengguna dan access token. Kredensial yang salah menghasilkan `400 Bad Request`.
-
-### Autentikasi Token
-Endpoint yang membutuhkan autentikasi menerima token melalui header:
-
-`Authorization: Bearer <accessToken>`
-
-Middleware memverifikasi JWT, termasuk issuer dan audience. Token yang tidak ada, tidak valid, atau kedaluwarsa ditolak dengan `401 Unauthorized`.
-
-### Pengujian
-Pengujian manual menggunakan Thunder Client:
-- `GET /health` — memastikan server aktif.
-- `POST /api/v1/auth/register` — menguji registrasi pengguna.
-- `POST /api/v1/auth/login` — menguji login dan penerbitan token.
-- `GET /api/v1/auth/me` — menguji autentikasi token dan mengambil data pengguna.
-
-Pengujian register, login, dan endpoint `/me` telah dilakukan pada lingkungan pengembangan.
+- Register: `POST /api/v1/auth/register` `{name, username, email, password}` → 201 + OTP ke email (akun BELUM dibuat; peran selalu `student`).
+- Verifikasi: `POST /api/v1/auth/verify-email` `{email, code}` → 201 + `{accessToken (15 mnt), refreshToken, user}`.
+- Login: `POST /api/v1/auth/login` → 200 + pasangan token; kredensial salah = generik 400; nonaktif = 403.
+- Refresh: `POST /api/v1/auth/refresh` (rotasi sekali pakai + grace window); Logout: `POST /api/v1/auth/logout`.
+- Endpoint privat memakai header `Authorization: Bearer <accessToken>`.
+- Manual: `GET /health` (server aktif, tanpa auth).

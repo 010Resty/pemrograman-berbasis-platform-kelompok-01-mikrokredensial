@@ -218,10 +218,27 @@ export const teacherCanAccessFile = async (
     .innerJoin(materials, eq(materials.id, submissions.materialId))
     .innerJoin(modules, eq(modules.id, materials.moduleId))
     .where(eq(submissions.fileId, fileId));
-  for (const r of rows) {
-    if (await canManageCourse(teacherId, role, r.courseId)) return true;
-  }
-  return false;
+  if (rows.length === 0) return false;
+  if (role === "admin") return true;
+  // Batch: 2 query untuk semua kursus (dulu N× canManageCourse sekuensial).
+  const uniq = [...new Set(rows.map((r) => r.courseId))];
+  const [owned, links] = await Promise.all([
+    db
+      .select({ id: courses.id, createdBy: courses.createdBy })
+      .from(courses)
+      .where(inArray(courses.id, uniq)),
+    db
+      .select({ courseId: courseInstructors.courseId })
+      .from(courseInstructors)
+      .where(
+        and(
+          eq(courseInstructors.userId, teacherId),
+          inArray(courseInstructors.courseId, uniq)
+        )
+      ),
+  ]);
+  if (owned.some((c) => c.createdBy === teacherId)) return true;
+  return links.length > 0;
 };
 
 // ---------- Pengumpulan ----------
@@ -310,6 +327,7 @@ export const createSubmission = async (
 
 export interface ListSubmissionsFilter {
   userId?: number;
+  limit?: number;
 }
 
 /** Daftar submission: pengelola melihat semua (opsional saring peserta),
@@ -321,6 +339,10 @@ export const listSubmissions = async (
   filter: ListSubmissionsFilter = {}
 ): Promise<{ manager: boolean; rows: PublicSubmission[] }> => {
   await requireTaskMaterial(materialId);
+  const safeLimit = Math.min(
+    Math.max(Math.floor(filter.limit ?? 100) || 100, 1),
+    200
+  );
   const courseId = await isCourseManagerOfMaterial(viewerId, role, materialId);
   if (courseId !== null || role === "admin") {
     const conditions = [eq(submissions.materialId, materialId)];
@@ -331,7 +353,8 @@ export const listSubmissions = async (
       .select()
       .from(submissions)
       .where(and(...conditions))
-      .orderBy(desc(submissions.submittedAt), desc(submissions.id));
+      .orderBy(desc(submissions.submittedAt), desc(submissions.id))
+      .limit(safeLimit);
     return { manager: true, rows: await withFileMeta(rows) };
   }
   // Peserta: butuh hak akses belajar, lalu hanya baris milik sendiri.
@@ -355,7 +378,8 @@ export const listSubmissions = async (
         eq(submissions.userId, viewerId)
       )
     )
-    .orderBy(desc(submissions.submittedAt), desc(submissions.id));
+    .orderBy(desc(submissions.submittedAt), desc(submissions.id))
+    .limit(safeLimit);
   return { manager: false, rows: await withFileMeta(rows) };
 };
 
@@ -398,7 +422,8 @@ export interface ReviewQueueResult {
  */
 export const getInstructorReviewQueue = async (
   viewerId: number,
-  role: string
+  role: string,
+  filter: { courseId?: number } = {}
 ): Promise<ReviewQueueResult> => {
   const managedIds = async (): Promise<number[]> => {
     if (role === "admin") {
@@ -425,7 +450,14 @@ export const getInstructorReviewQueue = async (
     gradedTotal: 0,
     avgScore: null,
   };
-  if (courseIds.length === 0) return empty;
+  // Filter satu kursus (halaman penilaian per kursus): tetap verifikasi
+  // kepengelolaan — bukan pengelola/admin → kosong (tanpa bocor).
+  let scopeIds = courseIds;
+  if (filter.courseId !== undefined) {
+    if (!courseIds.includes(filter.courseId)) return empty;
+    scopeIds = [filter.courseId];
+  }
+  if (scopeIds.length === 0) return empty;
 
   const courseRows = await db
     .select({
@@ -435,7 +467,7 @@ export const getInstructorReviewQueue = async (
       image: courses.image,
     })
     .from(courses)
-    .where(inArray(courses.id, courseIds));
+    .where(inArray(courses.id, scopeIds));
 
   const modRows = await db
     .select({
@@ -445,7 +477,7 @@ export const getInstructorReviewQueue = async (
       position: modules.position,
     })
     .from(modules)
-    .where(inArray(modules.courseId, courseIds))
+    .where(inArray(modules.courseId, scopeIds))
     .orderBy(asc(modules.courseId), asc(modules.position), asc(modules.id));
   if (modRows.length === 0) {
     return {
@@ -548,7 +580,7 @@ export const getInstructorReviewQueue = async (
     tasksByCourse.set(courseId, list);
   }
 
-  const courseOrder = new Map(courseIds.map((id, i) => [id, i]));
+  const courseOrder = new Map(scopeIds.map((id, i) => [id, i]));
   const outCourses: QueueCourseItem[] = courseRows
     .map((c) => {
       const tasks = tasksByCourse.get(c.id) ?? [];

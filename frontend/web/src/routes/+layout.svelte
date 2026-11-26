@@ -1,4 +1,5 @@
 <script lang="ts">
+	import '../app.css';
 	import { aristotelesLogo as favicon } from '$lib/assets/logo';
 	import ToastViewport from '$lib/components/ToastViewport.svelte';
 

@@ -1,10 +1,12 @@
 <script lang="ts">
 	import { browser } from '$app/environment';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import Breadcrumb from '$lib/components/ui/Breadcrumb.svelte';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import UiStatCard from '$lib/components/ui/StatCard.svelte';
 	import Pagination from '$lib/components/Pagination.svelte';
 	import { fetchAdminReports, type AdminReports } from '$lib/api/admin';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	type Preset = 'all' | 'd7' | 'd30' | 'custom';
 
@@ -23,8 +25,11 @@
 	let data = $state<AdminReports | null>(null);
 	let loading = $state(true);
 	let loadError = $state('');
+	/** Tab tampilan laporan (kurangi scroll HP; data tetap dimuat penuh sekali). */
+	let lapTab = $state<'ringkasan' | 'tren' | 'kursus'>('ringkasan');
 	let csvBusy = $state(false);
 	let csvError = $state('');
+	let csvTruncated = $state(false);
 	let started = false;
 	let loadSeq = 0;
 
@@ -59,6 +64,9 @@
 		return Number(courseIdInput.trim());
 	}
 
+	/** Input ID diisi tapi bukan angka → beri tahu (filter diabaikan). */
+	const courseIdInvalid = $derived(courseIdInput.trim() !== '' && !/^\d+$/.test(courseIdInput.trim()));
+
 	async function load(): Promise<void> {
 		const my = ++loadSeq;
 		loading = true;
@@ -77,6 +85,7 @@
 			if (my !== loadSeq) return;
 			data = null;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat laporan.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}
@@ -118,24 +127,6 @@
 	function formatPct(n: number): string {
 		return `${Number(n || 0).toLocaleString('id-ID', { maximumFractionDigits: 1 })}%`;
 	}
-
-	const funnelStageColors = ['#1d4ed8', '#1e40af', '#2563eb', '#0f766e'];
-
-	/** Indeks tahap dengan penurunan terbesar (selisih % dari awal antar tahap). */
-	const biggestDropIndex = $derived.by(() => {
-		const f = data?.insights?.funnel;
-		if (!f || f.length < 2) return -1;
-		let best = -1;
-		let bestDrop = 0;
-		for (let i = 1; i < f.length; i++) {
-			const drop = f[i - 1].pctOfFirst - f[i].pctOfFirst;
-			if (drop > bestDrop) {
-				bestDrop = drop;
-				best = i;
-			}
-		}
-		return bestDrop > 0 ? best : -1;
-	});
 
 	const payTotal = $derived(
 		(data?.summary.paymentsMenunggu ?? 0) +
@@ -182,6 +173,7 @@
 		if (csvBusy) return;
 		csvBusy = true;
 		csvError = '';
+		csvTruncated = false;
 		try {
 			const range = effectiveRange();
 			// Ambil halaman penuh agar CSV tidak terpotong paginasi tabel.
@@ -191,6 +183,7 @@
 				limit: 100,
 				page: 1
 			});
+			if (full.paging.total > full.perCourse.length) csvTruncated = true;
 			const s = full.summary;
 			const lines: string[] = ['bagian,metrik,nilai'];
 			const row = (bagian: string, metrik: string, nilai: string | number): void => {
@@ -230,6 +223,10 @@
 				row('insight-rates', 'certificatePerEnrollment', r.certificatePerEnrollment);
 				row('insight-rates', 'enrollmentCertified', r.enrollmentCertified);
 				row('insight-rates', 'certificateRevoke', r.certificateRevoke);
+			lines.push('bulanan,bulan,pendapatan,pembayaran,enrollment,sertifikat');
+			for (const m of full.monthly) {
+				lines.push(['bulanan', m.month, m.revenue, m.payments, m.enrollments, m.certificates].join(','));
+			}
 			}
 			lines.push(
 				'kursus,courseId,title,status,studentCount,avgProgress,pendingReviews,revenueVerified,paymentsMenunggu,paymentsDiverifikasi,certificatesIssued,certificatesRevoked'
@@ -263,10 +260,47 @@
 			URL.revokeObjectURL(url);
 		} catch (e) {
 			csvError = e instanceof Error ? e.message : 'Gagal mengunduh CSV.';
+			toast.error(csvError);
 		} finally {
 			csvBusy = false;
 		}
 	}
+
+	type MonthlyMetric = 'revenue' | 'payments' | 'enrollments' | 'certificates';
+
+	const monthlyMetrics: { value: MonthlyMetric; label: string }[] = [
+		{ value: 'revenue', label: 'Pendapatan' },
+		{ value: 'payments', label: 'Pembayaran' },
+		{ value: 'enrollments', label: 'Enrollment' },
+		{ value: 'certificates', label: 'Sertifikat' }
+	];
+
+	const MONTH_SHORT = ['Jan', 'Feb', 'Mar', 'Apr', 'Mei', 'Jun', 'Jul', 'Agu', 'Sep', 'Okt', 'Nov', 'Des'];
+
+	let monthlyMetric = $state<MonthlyMetric>('revenue');
+
+	function monthLabel(ym: string): string {
+		const parts = ym.split('-').map(Number);
+		const y = parts[0];
+		const m = parts[1];
+		if (!y || !m || m < 1 || m > 12) return ym;
+		return `${MONTH_SHORT[m - 1]} ${String(y).slice(2)}`;
+	}
+
+	function monthlyValue(r: { revenue: number; payments: number; enrollments: number; certificates: number }): string {
+		if (monthlyMetric === 'revenue') return formatIDR(r.revenue);
+		return fmt(r[monthlyMetric]);
+	}
+
+	const monthlyMax = $derived(
+		Math.max(1, ...(data?.monthly.map((r) => r[monthlyMetric]) ?? [0]))
+	);
+
+	const monthlyAria = $derived.by(() => {
+		if (!data?.monthly.length) return 'Belum ada data bulanan';
+		const label = monthlyMetrics.find((m) => m.value === monthlyMetric)?.label ?? '';
+		return `Tren bulanan ${label}: ${data.monthly.map((r) => `${monthLabel(r.month)} ${monthlyValue(r)}`).join(', ')}`;
+	});
 
 	const rangeLabel = $derived.by(() => {
 		if (!data) return '';
@@ -296,6 +330,7 @@
 </svelte:head>
 
 <div class="page-wrap page-stack">
+	<Breadcrumb items={[{ label: 'Dasbor', href: '/admin' }, { label: 'Laporan' }]} />
 	<PageHeader
 		eyebrow="Admin · Laporan"
 		title="Laporan Platform"
@@ -308,7 +343,7 @@
 				type="button"
 				onclick={() => setPreset(p.value)}
 				aria-pressed={preset === p.value}
-				class={`rounded-xl px-4 py-2 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${
+				class={`inline-flex min-h-11 items-center rounded-xl px-4 py-2 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${
 					preset === p.value
 						? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
 						: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -322,7 +357,7 @@
 			<input
 				type="date"
 				bind:value={fromInput}
-				class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+				class="min-h-11 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 			/>
 		</label>
 		<label class="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600">
@@ -330,7 +365,7 @@
 			<input
 				type="date"
 				bind:value={toInput}
-				class="rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+				class="min-h-11 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 			/>
 		</label>
 		<label class="inline-flex items-center gap-1.5 text-xs font-bold text-slate-600">
@@ -340,13 +375,13 @@
 				inputmode="numeric"
 				placeholder="opsional"
 				bind:value={courseIdInput}
-				class="w-28 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+				class="w-28 min-h-11 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
 			/>
 		</label>
 		<button
 			type="button"
 			onclick={applyCustom}
-			class="rounded-xl bg-slate-800 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-slate-900 focus-visible:outline-2 focus-visible:outline-slate-800"
+			class="inline-flex min-h-11 items-center rounded-xl bg-slate-800 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-slate-900 focus-visible:outline-2 focus-visible:outline-slate-800"
 		>
 			Terapkan
 		</button>
@@ -354,7 +389,7 @@
 			type="button"
 			onclick={() => void downloadCsv()}
 			disabled={csvBusy || data === null}
-			class="inline-flex min-h-9 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
+			class="inline-flex min-h-11 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-bold text-slate-700 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
 		>
 			<i class="fa-solid fa-download" aria-hidden="true"></i>
 			{csvBusy ? 'Menyiapkan…' : 'Unduh CSV'}
@@ -362,6 +397,12 @@
 	</div>
 	{#if csvError}
 		<p role="alert" class="text-xs font-semibold text-red-600">{csvError}</p>
+	{/if}
+	{#if csvTruncated}
+		<p role="note" class="text-xs font-semibold text-amber-700">CSV hanya memuat 100 kursus pertama — sempitkan filter tanggal atau pilih kursus tertentu bila data terpotong.</p>
+	{/if}
+	{#if courseIdInvalid}
+		<p role="alert" class="text-xs font-semibold text-red-600">Kursus ID harus angka — filter kursus diabaikan.</p>
 	{/if}
 
 	{#if loading}
@@ -393,6 +434,23 @@
 				· Kursus ID <span class="font-bold text-slate-700">{data.filters.courseId}</span>
 			{/if}
 		</p>
+		<div class="flex flex-wrap gap-2" role="group" aria-label="Tampilan laporan">
+			{#each [{ v: 'ringkasan', label: 'Ringkasan' }, { v: 'tren', label: 'Tren' }, { v: 'kursus', label: 'Per kursus' }] as t (t.v)}
+				<button
+					type="button"
+					onclick={() => (lapTab = t.v as typeof lapTab)}
+					aria-pressed={lapTab === t.v}
+					class={`inline-flex min-h-11 items-center rounded-xl px-4 py-2 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${
+						lapTab === t.v
+							? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
+							: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+					}`}
+				>
+					{t.label}
+				</button>
+			{/each}
+		</div>
+		{#if lapTab === 'ringkasan'}
 		<div class="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
 			<UiStatCard label="Total Peserta" value={fmt(data.summary.totalStudents)} sub="akun terdaftar" icon="fa-users" tone="blue" />
 			<UiStatCard label="Instruktur" value={fmt(data.summary.totalTeachers)} sub="akun pengampu" icon="fa-chalkboard-user" tone="violet" />
@@ -405,70 +463,6 @@
 		</div>
 
 		{#if data.insights}
-			<section aria-labelledby="h-alur" class="overflow-hidden rounded-2xl border border-slate-200/60 bg-white">
-				<div class="border-b border-slate-100 p-6 pb-4">
-					<h2 id="h-alur" class="text-lg font-bold text-slate-900">Alur konversi</h2>
-					<p class="mt-0.5 text-xs text-slate-500">
-						{data.insights.note} Lebar corong = proporsi terhadap tahap pertama.
-					</p>
-				</div>
-				<div
-					class="space-y-1 p-6"
-					role="img"
-					aria-label={`Corong konversi: ${data.insights.funnel.map((f) => `${f.label} ${fmt(f.count)} (${formatPct(f.pctOfFirst)} dari awal)`).join(', ')}`}
-				>
-					{#each data.insights.funnel as f, i (f.stage)}
-						<div>
-							<div class="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
-								<p class="flex items-center gap-2 text-sm">
-									<span
-										class="inline-flex h-6 w-6 items-center justify-center rounded-full bg-slate-900 text-[11px] font-bold text-white"
-										aria-hidden="true">{i + 1}</span
-									>
-									<span class="font-bold text-slate-900">{f.label}</span>
-									<span
-										class={`rounded-full border px-2 py-0.5 text-[11px] font-bold ${f.basis === 'snapshot' ? 'border-violet-200 bg-violet-50 text-violet-700' : 'border-blue-200 bg-blue-50 text-blue-700'}`}
-									>
-										{f.basis === 'snapshot' ? 'Snapshot' : 'Filter'}
-									</span>
-								</p>
-								<p class="text-sm text-slate-600 tabular-nums">
-									<span class="text-base font-extrabold text-slate-900">{fmt(f.count)}</span>
-									<span class="mx-1.5 text-slate-300" aria-hidden="true">•</span>
-									<span class="font-bold text-blue-700">{formatPct(f.pctOfFirst)}</span> dari awal
-									<span class="mx-1.5 text-slate-300" aria-hidden="true">•</span>
-									{#if f.pctOfPrev !== null}
-										<span class="font-semibold">{formatPct(f.pctOfPrev)}</span> lanjut
-									{:else if i > 0}
-										<span class="font-semibold text-slate-400" title="Tak terdefinisi: tahap sebelumnya nol">—</span> lanjut
-									{/if}
-								</p>
-							</div>
-							<div class="mt-1.5 h-9 overflow-hidden rounded-lg bg-slate-100">
-								<div
-									class="flex h-full items-center justify-end rounded-lg px-3 transition-[width]"
-									style={`width:${f.count > 0 ? Math.max(14, Math.min(100, f.pctOfFirst)) : 0}%;background:linear-gradient(90deg, ${funnelStageColors[i % funnelStageColors.length]}cc, ${funnelStageColors[i % funnelStageColors.length]})`}
-								>
-									{#if f.count > 0}
-										<span class="text-xs font-bold whitespace-nowrap text-white tabular-nums">{fmt(f.count)}</span>
-									{/if}
-								</div>
-							</div>
-						</div>
-						{#if i < data.insights.funnel.length - 1}
-							<p class="flex items-center justify-center gap-2 py-0.5 text-xs text-slate-500">
-								<i class="fa-solid fa-arrow-down" aria-hidden="true"></i>
-								{#if biggestDropIndex === i + 1}
-									<span class="rounded-full bg-amber-100 px-2.5 py-0.5 font-bold text-amber-800">penurunan terbesar</span>
-								{:else}
-									<span>lanjut ke tahap {i + 2}</span>
-								{/if}
-							</p>
-						{/if}
-					{/each}
-				</div>
-			</section>
-
 			<section aria-labelledby="h-persen" class="overflow-hidden rounded-2xl border border-slate-200/60 bg-white">
 				<div class="border-b border-slate-100 p-6 pb-4">
 					<h2 id="h-persen" class="text-lg font-bold text-slate-900">Persentase kunci</h2>
@@ -546,7 +540,83 @@
 				</ul>
 			</section>
 		</div>
+		{/if}
 
+		{#if lapTab === 'tren'}
+		<section aria-labelledby="h-bulanan" class="overflow-hidden rounded-2xl border border-slate-200/60 bg-white">
+			<div class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 p-6 pb-4">
+				<div>
+					<h2 id="h-bulanan" class="text-lg font-bold text-slate-900">Perkembangan bulanan</h2>
+					<p class="mt-0.5 text-xs text-slate-500">
+						12 bulan terakhir (atau rentang filter bila tanggal awal + akhir diisi). Angka dari server, bukan contoh.
+					</p>
+				</div>
+				<div class="flex flex-wrap gap-2" role="group" aria-label="Pilih metrik tren bulanan">
+					{#each monthlyMetrics as m (m.value)}
+						<button
+							type="button"
+							onclick={() => (monthlyMetric = m.value)}
+							aria-pressed={monthlyMetric === m.value}
+							class={`rounded-xl px-3 py-1.5 text-xs font-bold transition-colors focus-visible:outline-2 focus-visible:outline-blue-600 ${
+								monthlyMetric === m.value
+									? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
+									: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+							}`}
+						>
+							{m.label}
+						</button>
+					{/each}
+				</div>
+			</div>
+			{#if !data.monthly.length}
+				<EmptyState
+					icon="fa-chart-column"
+					title="Belum ada data bulanan"
+					description="Coba rentang tanggal yang lebih lebar."
+				/>
+			{:else}
+				<div class="p-6">
+					<table class="sr-only">
+						<caption>Tren bulanan: {monthlyMetrics.find((m) => m.value === monthlyMetric)?.label}</caption>
+						<thead><tr><th scope="col">Bulan</th><th scope="col">Nilai</th></tr></thead>
+						<tbody>
+							{#each data.monthly as r (r.month)}
+								<tr><td>{monthLabel(r.month)}</td><td>{monthlyValue(r)}</td></tr>
+							{/each}
+						</tbody>
+					</table>
+					<div
+						class="flex h-52 items-end gap-1.5 sm:gap-2.5"
+						role="img"
+						aria-label={monthlyAria}
+					>
+						{#each data.monthly as r (r.month)}
+							{@const v = r[monthlyMetric]}
+							{@const pct = monthlyMax > 0 ? (v / monthlyMax) * 100 : 0}
+							<div class="flex min-w-0 flex-1 flex-col items-center gap-1.5" title={`${monthLabel(r.month)}: ${monthlyValue(r)}`}>
+								<span class="text-[10px] font-bold tabular-nums text-slate-700 lg:text-xs">
+									{v === 0 ? '—' : monthlyMetric === 'revenue' && v >= 1000000 ? `${(v / 1000000).toLocaleString('id-ID', { maximumFractionDigits: 1 })} jt` : monthlyValue(r)}
+								</span>
+								<div class="flex w-full flex-1 items-end rounded-lg bg-slate-100">
+									<div
+										class={`w-full rounded-lg transition-[height] ${v > 0 ? 'bg-gradient-to-t from-blue-700 to-sky-400' : ''}`}
+										style={`height:${v > 0 ? Math.max(4, pct) : 0}%`}
+									></div>
+								</div>
+								<span class="w-full truncate text-center text-[10px] font-bold text-slate-500 sm:text-[11px]">{monthLabel(r.month)}</span>
+							</div>
+						{/each}
+					</div>
+					<p class="mt-3 text-xs text-slate-500" role="status">
+						Puncak: <span class="font-bold text-slate-800">{monthlyValue(data.monthly.reduce((a, b) => (b[monthlyMetric] > a[monthlyMetric] ? b : a)))}</span>
+						pada <span class="font-bold text-slate-800">{monthLabel(data.monthly.reduce((a, b) => (b[monthlyMetric] > a[monthlyMetric] ? b : a)).month)}</span>.
+					</p>
+				</div>
+			{/if}
+		</section>
+		{/if}
+
+		{#if lapTab === 'kursus'}
 		<section aria-labelledby="h-perkursus" class="overflow-hidden rounded-2xl border border-slate-200/60 bg-white">
 			<div class="border-b border-slate-100 p-6 pb-4">
 				<h2 id="h-perkursus" class="text-lg font-bold text-slate-900">Per kursus</h2>
@@ -562,7 +632,7 @@
 				/>
 			{:else}
 				<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll region keyboard: tabel lebar perlu tabindex 0 -->
-				<div class="overflow-x-auto" tabindex="0" role="region" aria-label="Tabel kinerja per kursus, geser horizontal">
+				<div class="table-scroll overflow-x-auto" tabindex="0" role="region" aria-label="Tabel kinerja per kursus, geser horizontal">
 					<table class="w-full min-w-[880px] text-left text-sm">
 						<caption class="sr-only">Kinerja per kursus: peserta, progres, antrean, pendapatan, pembayaran, sertifikat</caption>
 						<thead>
@@ -582,7 +652,7 @@
 								<tr class="transition-colors hover:bg-slate-50">
 									<td class="max-w-56 px-6 py-3.5">
 										<span class="block truncate font-semibold text-slate-800" title={c.title}>{c.title}</span>
-										<span class="block text-xs text-slate-400">ID {c.courseId}</span>
+										<span class="block text-xs text-slate-500">ID {c.courseId}</span>
 									</td>
 									<td class="px-4 py-3.5">
 										<span class={`rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${courseStatusClass(c.status)}`}>
@@ -665,5 +735,6 @@
 				</ul>
 			{/if}
 		</section>
+		{/if}
 	{/if}
 </div>

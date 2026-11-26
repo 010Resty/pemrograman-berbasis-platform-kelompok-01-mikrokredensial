@@ -1,4 +1,5 @@
 import { apiRequest, BackendRequestError } from './backend';
+import { invalidateCache } from './cache';
 import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svelte';
 
 /**
@@ -62,11 +63,13 @@ export async function createPayment(
 	input: { gateway?: PaymentGateway; proofFileId?: number; voucherCode?: string; patunganGroupId?: number } = {}
 ): Promise<MyPayment> {
 	try {
-		return await apiRequest<MyPayment>(`/courses/${courseId}/payments`, {
+		const created = await apiRequest<MyPayment>(`/courses/${courseId}/payments`, {
 			method: 'POST',
 			body: input,
 			token: getAccessToken()
 		});
+		invalidateCache('bell:');
+		return created;
 	} catch (e) {
 		await handlePrivateRequestError(e);
 		throw e;
@@ -154,11 +157,13 @@ export async function fetchMyPayments(params: {
 /** Tandai keputusan pembayaran sudah dibaca (bell hilang). */
 export async function markMyPaymentsSeen(courseId?: number): Promise<{ seen: number }> {
 	try {
-		return await apiRequest<{ seen: number }>('/me/payments/seen', {
+		const out = await apiRequest<{ seen: number }>('/me/payments/seen', {
 			method: 'POST',
 			body: courseId !== undefined ? { courseId } : {},
 			token: getAccessToken()
 		});
+		invalidateCache('bell:');
+		return out;
 	} catch (e) {
 		await handlePrivateRequestError(e);
 		throw e;
@@ -243,10 +248,12 @@ export async function downloadProofFile(fileId: number): Promise<Blob> {
  * Berhasil = baris hilang total; gagal (sudah diputus admin) = pesan error. */
 export async function cancelPayment(paymentId: number): Promise<{ id: number; courseId: number; cancelled: boolean }> {
 	try {
-		return await apiRequest<{ id: number; courseId: number; cancelled: boolean }>(
+		const out = await apiRequest<{ id: number; courseId: number; cancelled: boolean }>(
 			`/payments/${paymentId}`,
 			{ method: 'DELETE', token: getAccessToken() }
 		);
+		invalidateCache('bell:');
+		return out;
 	} catch (e) {
 		await handlePrivateRequestError(e);
 		throw e;
@@ -297,10 +304,12 @@ export async function verifyPayment(
 	input: { decision: 'terima' | 'tolak'; amountPaid?: number; reason?: string }
 ): Promise<{ id: number; status: PaymentStatus }> {
 	try {
-		return await apiRequest<{ id: number; status: PaymentStatus }>(
+		const out = await apiRequest<{ id: number; status: PaymentStatus }>(
 			`/admin/payments/${paymentId}/verify`,
 			{ method: 'POST', body: input, token: getAccessToken() }
 		);
+		invalidateCache('bell:');
+		return out;
 	} catch (e) {
 		await handlePrivateRequestError(e);
 		throw e;

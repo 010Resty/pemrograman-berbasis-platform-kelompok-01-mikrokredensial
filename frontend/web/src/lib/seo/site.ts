@@ -33,6 +33,25 @@ export function canonicalPath(path: string, origin?: string): string {
 	return `${getSiteUrl(origin)}${clean}`;
 }
 
+/**
+ * Tautan hreflang untuk halaman ber-URL per bahasa.
+ * `altUrls('/id/pelatihan', origin)` → id/en/x-default absolut.
+ * Path tanpa prefix locale dianggap varian Indonesia lalu dibuatkan pasangannya.
+ */
+export function altUrls(
+	path: string,
+	origin?: string
+): Array<{ hreflang: string; href: string }> {
+	const clean = path.startsWith('/') ? path : `/${path}`;
+	const rest = clean.replace(/^\/(id|en)(?=\/|$)/, '') || '/';
+	const suffix = rest === '/' ? '' : rest;
+	return [
+		{ hreflang: 'id', href: canonicalPath(`/id${suffix}`, origin) },
+		{ hreflang: 'en', href: canonicalPath(`/en${suffix}`, origin) },
+		{ hreflang: 'x-default', href: canonicalPath(`/id${suffix}`, origin) }
+	];
+}
+
 export interface SitemapEntry {
 	path: string;
 	changefreq: 'daily' | 'weekly' | 'monthly' | 'yearly';

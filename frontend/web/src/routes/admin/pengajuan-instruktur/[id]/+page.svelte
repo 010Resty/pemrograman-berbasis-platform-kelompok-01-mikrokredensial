@@ -4,6 +4,7 @@
 	import { page } from '$app/state';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 	import { formatBytes } from '$lib/types/submission';
+	import { toast } from '$lib/stores/toast.svelte';
 	import { BackendRequestError } from '$lib/api/backend';
 	import {
 		deleteApplicationRequest,
@@ -41,6 +42,7 @@
 	function showNotice(message: string, ok: boolean): void {
 		notice = message;
 		noticeOk = ok;
+		if (!ok && message.trim()) toast.error(message);
 	}
 
 	function statusBadge(status: ApplicationStatus): string {

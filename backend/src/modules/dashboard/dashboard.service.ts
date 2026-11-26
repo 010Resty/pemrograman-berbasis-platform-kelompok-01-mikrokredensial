@@ -73,6 +73,102 @@ const emptyDashboard = (): InstructorDashboard => ({
   totals: { activeCourses: 0, draftCourses: 0, totalStudents: 0, pendingReviews: 0 },
 });
 
+export interface CourseStats {
+  studentCount: number;
+  pendingCount: number;
+  avgProgress: number;
+}
+
+/** Statistik per kursus untuk sekumpulan id (dipakai laporan admin agar
+ *  tidak memuat agregat seluruh katalog). Rumus sama persis dengan dasbor:
+ *  peserta aktif, antrean submitted, progres = selesai/(peserta×materi). */
+export const getCourseStatsMap = async (
+  courseIds: number[]
+): Promise<Map<number, CourseStats>> => {
+  const out = new Map<number, CourseStats>();
+  const uniq = [...new Set(courseIds.filter((id) => Number.isInteger(id) && id > 0))];
+  if (uniq.length === 0) return out;
+  for (const id of uniq) {
+    out.set(id, { studentCount: 0, pendingCount: 0, avgProgress: 0 });
+  }
+  const [studentRows, pendingRows, materialRows, doneRows] = await Promise.all([
+    db
+      .select({
+        courseId: enrollments.courseId,
+        count: sql<number>`count(*)`,
+      })
+      .from(enrollments)
+      .where(
+        and(
+          inArray(enrollments.courseId, uniq),
+          inArray(enrollments.status, [...ACTIVE_ENROLLMENT])
+        )
+      )
+      .groupBy(enrollments.courseId),
+    db
+      .select({
+        courseId: modules.courseId,
+        count: sql<number>`count(*)`,
+      })
+      .from(submissions)
+      .innerJoin(materials, eq(submissions.materialId, materials.id))
+      .innerJoin(modules, eq(materials.moduleId, modules.id))
+      .where(
+        and(
+          inArray(modules.courseId, uniq),
+          eq(submissions.status, "submitted")
+        )
+      )
+      .groupBy(modules.courseId),
+    db
+      .select({
+        courseId: modules.courseId,
+        count: sql<number>`count(*)`,
+      })
+      .from(materials)
+      .innerJoin(modules, eq(materials.moduleId, modules.id))
+      .where(inArray(modules.courseId, uniq))
+      .groupBy(modules.courseId),
+    db
+      .select({
+        courseId: modules.courseId,
+        count: sql<number>`count(*)`,
+      })
+      .from(progress)
+      .innerJoin(materials, eq(progress.materialId, materials.id))
+      .innerJoin(modules, eq(materials.moduleId, modules.id))
+      .innerJoin(
+        enrollments,
+        and(
+          eq(enrollments.userId, progress.userId),
+          eq(enrollments.courseId, modules.courseId),
+          inArray(enrollments.status, [...ACTIVE_ENROLLMENT])
+        )
+      )
+      .where(inArray(modules.courseId, uniq))
+      .groupBy(modules.courseId),
+  ]);
+  const studentsByCourse = new Map(studentRows.map((r) => [r.courseId, Number(r.count)]));
+  const pendingByCourse = new Map(pendingRows.map((r) => [r.courseId, Number(r.count)]));
+  const materialsByCourse = new Map(materialRows.map((r) => [r.courseId, Number(r.count)]));
+  const doneByCourse = new Map(doneRows.map((r) => [r.courseId, Number(r.count)]));
+  for (const id of uniq) {
+    const students = studentsByCourse.get(id) ?? 0;
+    const totalMats = materialsByCourse.get(id) ?? 0;
+    const done = doneByCourse.get(id) ?? 0;
+    const avgProgress =
+      students > 0 && totalMats > 0
+        ? Math.round((done / (students * totalMats)) * 100)
+        : 0;
+    out.set(id, {
+      studentCount: students,
+      pendingCount: pendingByCourse.get(id) ?? 0,
+      avgProgress: Math.min(100, Math.max(0, avgProgress)),
+    });
+  }
+  return out;
+};
+
 /** Ringkasan dasbor instruktur — murni dari database (tanpa data contoh). */
 export const getInstructorDashboard = async (
   viewerId: number,

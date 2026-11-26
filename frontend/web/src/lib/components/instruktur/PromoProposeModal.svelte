@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { fetchPromos, proposeCourseToPromo, type PromoCampaign } from '$lib/api/promos';
+	import ModalShell from '$lib/components/ModalShell.svelte';
 
 	/**
 	 * Formulir pengajuan kursus milik instruktur ke sebuah kampanye promo.
@@ -92,46 +93,17 @@
 	}
 </script>
 
-{#if open}
-	<div
-		class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/50 p-4 sm:items-center"
-		role="presentation"
-		onclick={(e) => {
-			if (e.target === e.currentTarget) close();
-		}}
+	<ModalShell
+		open={open}
+		onclose={close}
+		loading={busy}
+		title="Ajukan ke Promo"
+		icon="fa-paper-plane"
 	>
-		<div
-			tabindex="-1"
-			role="dialog"
-			aria-modal="true"
-			aria-labelledby="promo-apply-title"
-			onkeydown={(e) => {
-				if (e.key === 'Escape') {
-					e.stopPropagation();
-					close();
-				}
-			}}
-			class="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl sm:p-6"
-		>
-			<div class="mb-4 flex items-start justify-between gap-3">
-				<div>
-					<h2 id="promo-apply-title" class="text-base font-extrabold text-slate-900 sm:text-lg">
-						Ajukan ke Promo
-					</h2>
-					<p class="mt-0.5 text-xs text-slate-500">
-						{course?.title ?? ''} — tampil di promo setelah disetujui admin.
-					</p>
-				</div>
-				<button
-					type="button"
-					onclick={close}
-					disabled={busy}
-					aria-label="Tutup formulir pengajuan promo"
-					class="flex min-h-11 min-w-11 items-center justify-center rounded-xl p-2 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-				>
-					<i class="fa-solid fa-xmark text-lg" aria-hidden="true"></i>
-				</button>
-			</div>
+		<p class="-mt-2 text-xs text-slate-500">
+			{course?.title ?? ''} — tampil di promo setelah disetujui admin.
+		</p>
+		<div class="mt-3">
 			{#if loading}
 				<p class="flex items-center gap-2 py-6 text-xs font-semibold text-slate-500" role="status">
 					<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat daftar promo…
@@ -219,5 +191,4 @@
 				</form>
 			{/if}
 		</div>
-	</div>
-{/if}
+	</ModalShell>

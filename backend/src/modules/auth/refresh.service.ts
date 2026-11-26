@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { and, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull, lt } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "../../db";
 import { refreshTokens, users } from "../../db/schema";
@@ -7,6 +7,7 @@ import {
   AuthValidationError,
   createAccessToken,
 } from "./auth.service";
+import { resolveAvatarUrl } from "../../utils/avatar";
 
 /**
  * Sesi refresh untuk klien mobile (Flutter, online-only).
@@ -75,6 +76,7 @@ interface RefreshAccount {
   email: string;
   role: string;
   avatarFileId: number | null;
+  photoUrl: string | null;
   isActive: boolean;
 }
 
@@ -87,6 +89,7 @@ const loadActiveAccount = async (userId: number): Promise<RefreshAccount | null>
       email: users.email,
       role: users.role,
       avatarFileId: users.avatarFileId,
+      photoUrl: users.photoUrl,
       isActive: users.isActive,
     })
     .from(users)
@@ -115,9 +118,7 @@ const buildRefreshResponse = (
     username: user.username,
     email: user.email,
     role: user.role,
-    avatarUrl: user.avatarFileId
-      ? `/api/v1/files/${user.avatarFileId}/content`
-      : null,
+    avatarUrl: resolveAvatarUrl(user.avatarFileId, user.photoUrl ?? null, user.id),
   },
 });
 
@@ -248,4 +249,18 @@ export const revokeRefreshTokens = async (
       and(eq(refreshTokens.userId, userId), isNull(refreshTokens.revokedAt))
     );
   return 1;
+};
+
+/**
+ * Bersihkan baris refresh token yang sudah lama kedaluwarsa.
+ * Opsional untuk cron/ops (mis. harian); TIDAK dipanggil otomatis agar
+ * tidak mengubah perilaku runtime/test. Hapus hanya yang kedaluwarsa
+ * lebih dari `graceDays` agar balapan refresh di grace window aman.
+ */
+export const purgeExpiredRefreshTokens = async (
+  graceDays = 7
+): Promise<void> => {
+  const safeDays = Math.min(Math.max(Math.floor(graceDays) || 7, 1), 90);
+  const cutoff = new Date(Date.now() - safeDays * 24 * 60 * 60 * 1000);
+  await db.delete(refreshTokens).where(lt(refreshTokens.expiresAt, cutoff));
 };

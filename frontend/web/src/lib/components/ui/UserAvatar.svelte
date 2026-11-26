@@ -23,6 +23,13 @@
 		name.trim().split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase() || '?'
 	);
 
+	// Gambar eksternal bisa gagal (404/hotlink/CORB) — jatuhkan ke inisial.
+	let failed = $state(false);
+	$effect(() => {
+		void avatarUrl;
+		failed = false;
+	});
+
 	const src = $derived.by((): string | null => {
 		const raw = (avatarUrl ?? '').trim();
 		if (!raw || raw.length > 2048 || /[\s<>"]/.test(raw)) return null;
@@ -39,11 +46,12 @@
 	});
 </script>
 
-{#if src}
+{#if src && !failed}
 	<img
 		{src}
 		alt=""
 		loading="lazy"
+		onerror={() => (failed = true)}
 		class={`${size} ${rounded} shrink-0 object-cover shadow-sm`}
 		aria-hidden="true"
 	/>

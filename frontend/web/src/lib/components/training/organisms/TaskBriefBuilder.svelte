@@ -2,7 +2,7 @@
 	import type { JSONContent } from '@tiptap/core';
 	import type { TaskDraft } from '$lib/stores/task-drafts';
 	import { validateTaskDraft } from '$lib/stores/task-drafts';
-	import MaterialEditor from '$lib/components/training/organisms/MaterialEditor.svelte';
+	import MaterialEditor from '$lib/components/training/organisms/AsyncMaterialEditor.svelte';
 
 	/**
 	 * Pembuat penugasan instruktur dalam 3 bagian wajib:

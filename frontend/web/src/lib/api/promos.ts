@@ -1,4 +1,5 @@
 import { apiRequest } from './backend';
+import { invalidateCache } from './cache';
 import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svelte';
 
 /**
@@ -265,20 +266,24 @@ export function fetchMyPromoProposals(): Promise<PromoProposal[]> {
 }
 
 /** Tandai semua keputusan atas pengajuanku sudah dibaca. */
-export function markPromoProposalsSeen(): Promise<{ seen: number }> {
-	return instructorRequest<{ seen: number }>('/instructor/promo-proposals/seen', 'POST', {});
+export async function markPromoProposalsSeen(): Promise<{ seen: number }> {
+	const out = await instructorRequest<{ seen: number }>('/instructor/promo-proposals/seen', 'POST', {});
+	invalidateCache('bell:');
+	return out;
 }
 
 /** Ajukan kursus milikku ke sebuah kampanye (butuh approve admin). */
-export function proposeCourseToPromo(
+export async function proposeCourseToPromo(
 	slug: string,
 	input: { courseId: number; customBadge?: string; patunganPrice?: number; note?: string }
 ): Promise<PromoProposal> {
-	return instructorRequest<PromoProposal>(
+	const out = await instructorRequest<PromoProposal>(
 		`/instructor/promos/${encodeURIComponent(slug)}/proposals`,
 		'POST',
 		input
 	);
+	invalidateCache('bell:');
+	return out;
 }
 
 /** Antrean pengajuan untuk admin (filter status opsional). */
@@ -288,13 +293,17 @@ export function fetchAdminPromoProposals(status?: string): Promise<AdminPromoPro
 }
 
 /** Setujui pengajuan: kursus masuk promo. */
-export function approvePromoProposal(id: number): Promise<PromoProposal> {
-	return adminRequest<PromoProposal>(`/admin/promo-proposals/${id}/approve`, 'POST', {});
+export async function approvePromoProposal(id: number): Promise<PromoProposal> {
+	const out = await adminRequest<PromoProposal>(`/admin/promo-proposals/${id}/approve`, 'POST', {});
+	invalidateCache('bell:');
+	return out;
 }
 
 /** Tolak pengajuan beserta catatan keputusan opsional. */
-export function rejectPromoProposal(id: number, note?: string): Promise<PromoProposal> {
-	return adminRequest<PromoProposal>(`/admin/promo-proposals/${id}/reject`, 'POST', {
+export async function rejectPromoProposal(id: number, note?: string): Promise<PromoProposal> {
+	const out = await adminRequest<PromoProposal>(`/admin/promo-proposals/${id}/reject`, 'POST', {
 		note: note ?? undefined
 	});
+	invalidateCache('bell:');
+	return out;
 }

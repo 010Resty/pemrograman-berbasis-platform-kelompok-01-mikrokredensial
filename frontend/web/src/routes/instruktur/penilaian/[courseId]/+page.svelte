@@ -4,9 +4,11 @@
 	import { getCourseById } from '$lib/data/courses';
 	import { getCourseMeta } from '$lib/data/course-meta';
 	import { tasksOfCourse } from '$lib/data/grading';
-	import { loadCourseTree, loadMyCourses } from '$lib/stores/instructor-courses.svelte';
-	import { fetchMaterialSubmissions } from '$lib/api/submissions';
+	import { loadMyCourses } from '$lib/stores/instructor-courses.svelte';
+	import { fetchReviewQueue } from '$lib/api/submissions';
+	import Pagination from '$lib/components/Pagination.svelte';
 	import type { BackendCourse } from '$lib/api/courses';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	const courseId = $derived(Number(page.params.courseId));
 	const course = $derived(getCourseById(courseId));
@@ -14,6 +16,14 @@
 	const tasks = $derived(tasksOfCourse(courseId));
 
 	let search = $state('');
+	/* Paginasi klien: DOM grid dibatasi per halaman. */
+	let pageNum = $state(1);
+	let perPage = $state(12);
+	$effect(() => {
+		void search;
+		void perPage;
+		pageNum = 1;
+	});
 
 	/* ---- Cabang server: id milik kursus kelola (data backend penuh). ---- */
 	let serverCourse = $state<BackendCourse | null>(null);
@@ -42,50 +52,23 @@
 			serverCourse = found;
 			serverTasks = [];
 			if (!found) return;
-			const tree = await loadCourseTree(cid);
-			const flat: Array<{ id: number; title: string; moduleLabel: string; duration: string | null }> = [];
-			let mi = 0;
-			for (const mod of tree) {
-				mi += 1;
-				const mats = (mod.subModules?.flatMap((s) => s.materials) ?? mod.materials).filter(
-					(m) => m.type === 'tugas' && Number.isInteger(Number(m.id))
-				);
-				for (const m of mats) {
-					flat.push({
-						id: Number(m.id),
-						title: m.title,
-						moduleLabel: `Modul ${mi}: ${mod.title}`,
-						duration: (m as { duration?: string | null }).duration ?? null
-					});
-				}
-			}
-			const settled = await Promise.all(
-				flat.map(async (f) => {
-					try {
-						const subs = await fetchMaterialSubmissions(f.id);
-						if (!subs.manager) return { task: null, failed: true };
-						return {
-							task: {
-								materialId: f.id,
-								title: f.title,
-								moduleLabel: f.moduleLabel,
-								duration: f.duration,
-								pending: subs.rows.filter((r) => r.status === 'submitted').length,
-								total: subs.rows.length
-							},
-							failed: false
-						};
-					} catch {
-						return { task: null, failed: true };
-					}
-				})
-			);
-			serverTasks = settled.flatMap((s) => (s.task ? [s.task] : []));
-			serverPartial = settled.some((s) => s.failed);
+			// Satu panggilan agregat lingkup kursus (ganti kipas N request per materi).
+			const queue = await fetchReviewQueue(cid);
+			const entry = queue.courses.find((c) => c.id === cid);
+			serverTasks = (entry?.tasks ?? []).map((t) => ({
+				materialId: t.materialId,
+				title: t.title,
+				moduleLabel: `Modul ${t.moduleIndex}: ${t.moduleTitle}`,
+				duration: t.duration,
+				pending: t.pending,
+				total: t.total
+			}));
+			serverPartial = false;
 		} catch (e) {
 			serverCourse = null;
 			serverTasks = [];
 			serverError = e instanceof Error ? e.message : 'Gagal memuat penugasan dari server.';
+			toast.error(serverError);
 		} finally {
 			serverLoading = false;
 		}
@@ -126,8 +109,7 @@
 		total: number;
 	}
 
-	const rows = $derived.by((): TaskRow[] => {
-		const q = search.trim().toLowerCase();
+	const rows = $derived.by((): TaskRow[] => {		const q = search.trim().toLowerCase();
 		if (serverCourse) {
 			return serverTasks
 				.filter(
@@ -174,6 +156,9 @@
 
 	const pendingTotal = $derived(rows.reduce((n, r) => n + r.pending, 0));
 	const submitTotal = $derived(rows.reduce((n, r) => n + r.total, 0));
+	const totalPages = $derived(Math.max(1, Math.ceil(rows.length / Math.max(1, perPage))));
+	const safePage = $derived(Math.min(Math.max(1, pageNum), totalPages));
+	const pagedRows = $derived(rows.slice((safePage - 1) * perPage, safePage * perPage));
 </script>
 
 <svelte:head>
@@ -309,7 +294,7 @@
 			</div>
 		{:else}
 			<div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
-				{#each rows as row (row.key)}
+				{#each pagedRows as row (row.key)}
 					<a
 						href={`/instruktur/penilaian/${courseId}/${row.materialId}`}
 						aria-label={`Buka tugas ${row.title}: ${row.pending} menunggu dari ${row.total} pengumpulan`}
@@ -354,6 +339,11 @@
 					</a>
 				{/each}
 			</div>
+			{#if rows.length > perPage}
+				<div class="mt-4 overflow-hidden rounded-2xl border border-slate-200/70 bg-white">
+					<Pagination bind:page={pageNum} bind:perPage totalItems={rows.length} itemLabel="penugasan" id="penilaian-rows" />
+				</div>
+			{/if}
 		{/if}
 	{/if}
 </div>

@@ -294,7 +294,7 @@
 							onclick={() => moveQuestion(qi, -1)}
 							disabled={qi === 0}
 							aria-label={`Pindah soal ${qi + 1} ke atas`}
-							class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-all hover:border-amber-300 hover:text-amber-600 focus-visible:outline-2 focus-visible:outline-amber-600 disabled:cursor-not-allowed disabled:opacity-35"
+							class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-all hover:border-amber-300 hover:text-amber-600 focus-visible:outline-2 focus-visible:outline-amber-600 disabled:cursor-not-allowed disabled:opacity-35"
 						>
 							<i class="fa-solid fa-arrow-up text-[11px]" aria-hidden="true"></i>
 						</button>
@@ -303,7 +303,7 @@
 							onclick={() => moveQuestion(qi, 1)}
 							disabled={qi === questions.length - 1}
 							aria-label={`Pindah soal ${qi + 1} ke bawah`}
-							class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-all hover:border-amber-300 hover:text-amber-600 focus-visible:outline-2 focus-visible:outline-amber-600 disabled:cursor-not-allowed disabled:opacity-35"
+							class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-500 transition-all hover:border-amber-300 hover:text-amber-600 focus-visible:outline-2 focus-visible:outline-amber-600 disabled:cursor-not-allowed disabled:opacity-35"
 						>
 							<i class="fa-solid fa-arrow-down text-[11px]" aria-hidden="true"></i>
 						</button>
@@ -312,7 +312,7 @@
 							onclick={() => removeQuestion(qi)}
 							disabled={questions.length <= 1}
 							aria-label={`Hapus soal ${qi + 1}`}
-							class="flex min-h-9 min-w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition-all hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-35"
+							class="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-400 transition-all hover:border-red-300 hover:bg-red-50 hover:text-red-600 focus-visible:outline-2 focus-visible:outline-red-500 disabled:cursor-not-allowed disabled:opacity-35"
 						>
 							<i class="fa-solid fa-trash text-[11px]" aria-hidden="true"></i>
 						</button>
@@ -351,7 +351,7 @@
 												xi === qi ? { ...x, answer: oi } : x
 											);
 										}}
-										class="h-4 w-4 shrink-0 cursor-pointer accent-amber-600"
+										class="h-5 w-5 shrink-0 cursor-pointer accent-amber-600"
 										aria-label={`Kunci soal ${qi + 1}: opsi ${String.fromCharCode(65 + oi)}`}
 									/>
 									<span

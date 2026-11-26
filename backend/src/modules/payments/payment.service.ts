@@ -29,6 +29,7 @@ import {
   computeExpectedTotal,
   isAmountSufficient,
 } from "./payment.rules";
+import { recordRevenueSnapshot } from "../revenues/revenue.service";
 import { getUploadsDir } from "../uploads/upload.service";
 import { DokuError, createDokuQrisOrder } from "../doku/doku.client";
 import { isDokuConfigured, loadDokuConfig } from "../doku/doku.config";
@@ -536,8 +537,31 @@ export const cancelPayment = async (userId: number, paymentId: number) => {
 
 /** Status pembayaran terakhir peserta untuk satu kursus (polling). */
 export const myPaymentForCourse = async (userId: number, courseId: number) => {
+  // Proyeksi eksplisit tanpa dokuQrString (TEXT besar, diambil via GET /payments/:id/qr)
+  // dan tanpa dokuReferenceId internal — hemat IO pada polling 5 detik.
   const rows = await db
-    .select()
+    .select({
+      id: payments.id,
+      userId: payments.userId,
+      courseId: payments.courseId,
+      invoice: payments.invoice,
+      method: payments.method,
+      amountExpected: payments.amountExpected,
+      amountPaid: payments.amountPaid,
+      voucherCode: payments.voucherCode,
+      discountAmount: payments.discountAmount,
+      promoSlug: payments.promoSlug,
+      patunganGroupId: payments.patunganGroupId,
+      proofFileId: payments.proofFileId,
+      status: payments.status,
+      rejectReason: payments.rejectReason,
+      gateway: payments.gateway,
+      dokuExpiresAt: payments.dokuExpiresAt,
+      verifiedBy: payments.verifiedBy,
+      verifiedAt: payments.verifiedAt,
+      studentSeenAt: payments.studentSeenAt,
+      createdAt: payments.createdAt,
+    })
     .from(payments)
     .where(and(eq(payments.userId, userId), eq(payments.courseId, courseId)))
     .orderBy(desc(payments.id))
@@ -866,6 +890,8 @@ const grantIndividualSuccess = async (
     .update(payments)
     .set({ status: "diverifikasi", amountPaid: opts.amountPaid, verifiedBy: opts.actorUserId, verifiedAt: new Date() })
     .where(eq(payments.id, p.id));
+  // Snapshot hak instruktur (persen saat verifikasi; tanpa instruktur = dilewati).
+  await recordRevenueSnapshot(tx, p.id, p.courseId, opts.amountPaid);
   await tx.insert(auditLogs).values({
     actorUserId: opts.actorUserId,
     action: opts.auditAction,
@@ -906,6 +932,8 @@ const grantPatunganSuccess = async (
     .update(payments)
     .set({ status: "diverifikasi", amountPaid: opts.amountPaid, verifiedBy: opts.actorUserId, verifiedAt: new Date() })
     .where(eq(payments.id, p.id));
+  // Snapshot hak instruktur per iuran patungan (persen saat verifikasi).
+  await recordRevenueSnapshot(tx, p.id, p.courseId, opts.amountPaid);
   await setMemberPaymentState(tx, p.patunganGroupId, p.userId, { paymentStatus: "diverifikasi", paymentId: p.id });
   const groupCompleted = await tryCompleteGroup(tx, opts.actorUserId, p.patunganGroupId);
   await tx.insert(auditLogs).values({

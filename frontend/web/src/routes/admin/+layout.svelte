@@ -2,12 +2,13 @@
 	import { page } from '$app/state';
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
-	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
 	import { getCurrentUser, homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
 	import { fetchAdminOverview } from '$lib/api/admin';
+	import { cachedGet } from '$lib/api/cache';
+	import { useBadgePolling } from '$lib/stores/badge-poll.svelte';
 	import { fetchAdminPayments } from '$lib/api/payments';
 	import { fetchAdminPromoProposals } from '$lib/api/promos';
 	import { listApplicationsRequest } from '$lib/api/applications';
@@ -79,8 +80,11 @@
 	async function loadBadges(): Promise<void> {
 		if (refreshing) return;
 		refreshing = true;
+		// Badge bell boleh basi ≤45 dtk (polling 60 dtk; keputusan admin
+		// memicu refresh eksplisit via event + invalidasi cache).
+		const BELL_MS = 45_000;
 		try {
-			const overview = await fetchAdminOverview();
+			const overview = await cachedGet('bell:admin:overview', BELL_MS, () => fetchAdminOverview());
 			studentBadge = fmtCount(overview.totalStudents);
 			teacherBadge = fmtCount(overview.totalTeachers);
 			courseBadge = fmtCount(overview.totalCourses);
@@ -89,22 +93,30 @@
 		}
 		// Antrean terpisah agar gagal satu tidak menghilangkan lainnya.
 		try {
-			const pays = await fetchAdminPayments({ status: 'menunggu', limit: 1 });
+			const pays = await cachedGet('bell:admin:pays', BELL_MS, () =>
+				fetchAdminPayments({ status: 'menunggu', limit: 1 })
+			);
 			pendingPayments = pays.total;
 		} catch {
 			// Abaikan: bell cukup tidak menyala.
 		}
 		try {
 			const [submitted, underReview] = await Promise.all([
-				listApplicationsRequest({ status: 'submitted', limit: 1 }),
-				listApplicationsRequest({ status: 'under_review', limit: 1 })
+				cachedGet('bell:admin:apps-sub', BELL_MS, () =>
+					listApplicationsRequest({ status: 'submitted', limit: 1 })
+				),
+				cachedGet('bell:admin:apps-ur', BELL_MS, () =>
+					listApplicationsRequest({ status: 'under_review', limit: 1 })
+				)
 			]);
 			pendingApplications = submitted.total + underReview.total;
 		} catch {
 			// Abaikan: bell cukup tidak menyala.
 		}
 		try {
-			const proposals = await fetchAdminPromoProposals('pending');
+			const proposals = await cachedGet('bell:admin:promos', BELL_MS, () =>
+				fetchAdminPromoProposals('pending')
+			);
 			pendingPromoProposals = proposals.length;
 		} catch {
 			// Abaikan: bell cukup tidak menyala.
@@ -125,31 +137,12 @@
 		void path;
 	});
 
-	$effect(() => {
-		if (!browser) return;
-		const onVisible = () => {
-			if (document.visibilityState === 'visible' && phase === 'ready') void loadBadges();
-		};
-		const onFocus = () => {
-			if (phase === 'ready') void loadBadges();
-		};
-		// Keputusan dari halaman kelola (mis. setujui/tolak pengajuan promo)
-		// langsung menyegarkan bell tanpa menunggu interval/navigasi.
-		const onDecided = () => {
-			if (phase === 'ready') void loadBadges();
-		};
-		document.addEventListener('visibilitychange', onVisible);
-		window.addEventListener('focus', onFocus);
-		window.addEventListener('admin:notif-refresh', onDecided);
-		const timer = setInterval(() => {
-			if (phase === 'ready') void loadBadges();
-		}, 60000);
-		return () => {
-			document.removeEventListener('visibilitychange', onVisible);
-			window.removeEventListener('focus', onFocus);
-			window.removeEventListener('admin:notif-refresh', onDecided);
-			clearInterval(timer);
-		};
+	// Keputusan dari halaman kelola (mis. setujui/tolak pengajuan promo)
+	// langsung menyegarkan bell tanpa menunggu interval/navigasi.
+	useBadgePolling({
+		load: () => void loadBadges(),
+		isReady: () => phase === 'ready',
+		eventName: 'admin:notif-refresh'
 	});
 
 	// Profil dari sesi auth (bukan data dummy): nama/email milik akun yang login.
@@ -197,7 +190,8 @@
 					href: '/admin/promos',
 					badge: pendingPromoProposals > 0 ? fmtCount(pendingPromoProposals) : undefined
 				},
-				{ label: 'Pembayaran', icon: 'fa-money-bill-transfer', href: '/admin/pembayaran' }
+				{ label: 'Pembayaran', icon: 'fa-money-bill-transfer', href: '/admin/pembayaran' },
+				{ label: 'Bagi Hasil', icon: 'fa-hand-holding-dollar', href: '/admin/bagi-hasil' }
 			]
 		},
 		{
@@ -233,6 +227,10 @@
 		}
 	}
 </script>
+
+<svelte:head>
+	<meta name="robots" content="noindex, nofollow" />
+</svelte:head>
 
 <svelte:window onkeydown={handleWindowKeydown} />
 

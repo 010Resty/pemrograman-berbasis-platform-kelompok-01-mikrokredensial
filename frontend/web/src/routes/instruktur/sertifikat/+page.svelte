@@ -24,6 +24,7 @@
 	import { fetchMyCourses, fetchModules, fileUrl } from '$lib/api/courses';
 	import { uploadFile } from '$lib/api/uploads';
 	import WarningModal from '$lib/components/WarningModal.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Menu Sertifikat instruktur — 4 tab: ringkasan, kursus, kelayakan, riwayat.
@@ -112,6 +113,7 @@
 				if (courses.length === 0) coursesError = '';
 			} catch (e) {
 				coursesError = e instanceof Error ? e.message : 'Gagal memuat kursus.';
+				toast.error(coursesError);
 			} finally {
 				coursesLoaded = true;
 			}
@@ -140,6 +142,7 @@
 				}));
 			} catch (e) {
 				modulesError[courseId] = e instanceof Error ? e.message : 'Gagal memuat modul.';
+				toast.error(modulesError[courseId]);
 			} finally {
 				modulesLoading[courseId] = false;
 			}
@@ -167,6 +170,7 @@
 		} catch (e) {
 			if (my !== summaryReq) return;
 			summary.error = e instanceof Error ? e.message : 'Gagal memuat ringkasan.';
+			toast.error(summary.error);
 			summary.phase = 'error';
 		}
 	}
@@ -215,6 +219,7 @@
 		} catch (e) {
 			if (my !== moduleStatusReq || target !== selModuleId) return;
 			moduleStatus.error = e instanceof Error ? e.message : 'Gagal memuat status modul.';
+			toast.error(moduleStatus.error);
 			moduleStatus.phase = 'error';
 		}
 	}
@@ -252,6 +257,7 @@
 		} catch (e) {
 			if (my !== eligibilityReq) return;
 			eligibility.error = e instanceof Error ? e.message : 'Gagal memuat kelayakan.';
+			toast.error(eligibility.error);
 			eligibility.phase = 'error';
 		}
 	}
@@ -286,6 +292,7 @@
 		} catch (e) {
 			if (my !== historyReq) return;
 			history.error = e instanceof Error ? e.message : 'Gagal memuat riwayat.';
+			toast.error(history.error);
 			history.phase = 'error';
 		}
 	}
@@ -309,6 +316,7 @@
 			sigPhase = 'ready';
 		} catch (e) {
 			sigError = e instanceof Error ? e.message : 'Gagal memuat tanda tangan.';
+			toast.error(sigError);
 			sigPhase = 'error';
 		}
 	}
@@ -323,14 +331,17 @@
 		const okExt = /\.(jpe?g|png|webp)$/i.test(file.name);
 		if (!okType && !okExt) {
 			sigError = 'Tanda tangan harus berupa gambar (JPG/PNG/WebP).';
+			toast.error(sigError);
 			return;
 		}
 		if (file.size > 2 * 1024 * 1024) {
 			sigError = 'Ukuran gambar melebihi 2 MB.';
+			toast.error(sigError);
 			return;
 		}
 		if (file.size === 0) {
 			sigError = 'Berkas kosong.';
+			toast.error(sigError);
 			return;
 		}
 		sigError = '';
@@ -353,6 +364,7 @@
 				`Tanda tangan tersimpan.${res.clearedPdfs > 0 ? ` ${res.clearedPdfs} PDF lama ikut diperbarui.` : ''} Unduhan sertifikat berikutnya memakai tanda tangan baru.`;
 		} catch (e) {
 			sigError = e instanceof Error ? e.message : 'Gagal menyimpan tanda tangan.';
+			toast.error(sigError);
 		} finally {
 			sigBusy = false;
 		}
@@ -368,6 +380,7 @@
 			sigNotice = 'Tanda tangan dilepas. PDF berikutnya kembali memakai nama diketik.';
 		} catch (e) {
 			sigError = e instanceof Error ? e.message : 'Gagal melepas tanda tangan.';
+			toast.error(sigError);
 		} finally {
 			sigBusy = false;
 		}

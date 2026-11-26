@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { and, asc, desc, eq } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
 import { db } from "../../db";
 import { auditLogs, courses, modules, subModules, materials, users } from "../../db/schema";
 import { canManageCourse } from "./course.service";
@@ -269,14 +269,25 @@ export const deleteSubModule = async (subId: number, actorId: number | null = nu
   // Hapus materi di dalamnya dulu agar sesuai janji UI
   // ("beserta N materi di dalamnya akan dihapus").
   // Baris progres/kuis/pengumpulan ikut terhapus via FK cascade.
+  // Batch dalam 1 transaksi (dulu N× transaksi per materi): audit per materi
+  // tetap ditulis satu per satu (riwayat K-08 per materi utuh) + 1 delete.
   const kids = await db
     .select({ id: materials.id })
     .from(materials)
     .where(eq(materials.subModuleId, subId));
-  for (const k of kids) {
-    await deleteMaterial(k.id, actorId);
-  }
   await db.transaction(async (tx) => {
+    if (kids.length > 0) {
+      await tx.insert(auditLogs).values(
+        kids.map((k) => ({
+          actorUserId: actorId,
+          action: "curriculum.material.delete",
+          targetType: "curriculum",
+          targetIdInt: k.id,
+          metadata: { materialId: k.id },
+        }))
+      );
+      await tx.delete(materials).where(eq(materials.subModuleId, subId));
+    }
     await writeCurriculaAudit(tx, {
       actorUserId: actorId,
       action: "curriculum.submodule.delete",
@@ -324,6 +335,29 @@ export const listMaterialsBySub = async (subId: number) =>
 
 export const listMaterialsByModule = async (moduleId: number) =>
   db.select().from(materials).where(eq(materials.moduleId, moduleId)).orderBy(asc(materials.position), asc(materials.id));
+
+/**
+ * Hitung materi per modul dalam 1 query (untuk cek "modul bermateri" —
+ * dulu N× `listMaterialsByModule` yang memuat MEDIUMTEXT content).
+ * Kembalikan peta moduleId → jumlah materi (modul tanpa baris = 0/absen).
+ */
+export const countMaterialsByModules = async (
+  moduleIds: number[]
+): Promise<Map<number, number>> => {
+  const uniq = [...new Set(moduleIds.filter((id) => Number.isInteger(id) && id > 0))];
+  const out = new Map<number, number>();
+  if (uniq.length === 0) return out;
+  const rows = await db
+    .select({
+      moduleId: materials.moduleId,
+      n: sql<number>`count(*)`,
+    })
+    .from(materials)
+    .where(inArray(materials.moduleId, uniq))
+    .groupBy(materials.moduleId);
+  for (const r of rows) out.set(r.moduleId, Number(r.n));
+  return out;
+};
 
 export const getMaterial = async (materialId: number) => {
   const rows = await db.select().from(materials).where(eq(materials.id, materialId)).limit(1);

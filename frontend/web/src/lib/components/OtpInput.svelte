@@ -1,5 +1,8 @@
 <script lang="ts">
 	import { tick } from 'svelte';
+	import { page } from '$app/state';
+	import { t } from '$lib/i18n/index';
+	import { type Locale } from '$lib/i18n/locale';
 
 	interface Props {
 		value?: string;
@@ -14,8 +17,11 @@
 		length = 6,
 		id = 'otp',
 		disabled = false,
-		label = 'Kode verifikasi 6 digit'
+		label
 	}: Props = $props();
+
+	const lang: Locale = $derived(page.params.lang === 'en' ? 'en' : 'id');
+	const groupLabel = $derived(label ?? t(lang, 'otp.label'));
 
 	// Satu string digit; kotak dirender dari sini agar tidak menangkap nilai awal prop.
 	let digits = $state(value);
@@ -62,8 +68,8 @@
 </script>
 
 <fieldset>
-	<legend class="sr-only">{label}</legend>
-	<div class="flex justify-between gap-2" role="group" aria-label={label}>
+	<legend class="sr-only">{groupLabel}</legend>
+	<div class="flex justify-between gap-2" role="group" aria-label={groupLabel}>
 		{#each Array.from({ length }, (_, i) => i) as i (i)}
 			<input
 				id={i === 0 ? id : `${id}-${i + 1}`}
@@ -77,7 +83,7 @@
 				oninput={(e) => handleInput(i, e)}
 				onkeydown={(e) => handleKeydown(i, e)}
 				onpaste={handlePaste}
-				aria-label={`Digit ${i + 1} dari ${length}`}
+				aria-label={t(lang, 'otp.digit', { i: i + 1, n: length })}
 				class="h-12 w-full min-w-0 rounded-xl border border-slate-200 bg-white text-center text-lg font-bold text-slate-900 transition-all placeholder:text-slate-300 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none disabled:cursor-not-allowed disabled:opacity-60"
 			/>
 		{/each}

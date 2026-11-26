@@ -1,7 +1,7 @@
 import { z } from "zod";
-import { eq, and, or, like, inArray, desc, asc } from "drizzle-orm";
+import { eq, and, or, like, inArray, desc, asc, sql } from "drizzle-orm";
 import { db } from "../../db";
-import { auditLogs, courses, courseInstructors, users } from "../../db/schema";
+import { auditLogs, courses, courseInstructors, enrollments, users } from "../../db/schema";
 import { resolveActiveCategoryName } from "../categories/category.service";
 
 type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0];
@@ -260,6 +260,69 @@ export const listCourses = async (
     .limit(limit)
     .offset((page - 1) * limit);
   return rows;
+};
+
+export const listRankings = async (limit = 10) => {
+  const n = Math.min(Math.max(limit, 1), 50);
+  // Hanya kursus published; hitung enrollment aktif + selesai.
+  // Termasuk kursus tanpa peserta (0) agar halaman tidak kosong sia-sia.
+  const rows = await db
+    .select({
+      courseId: courses.id,
+      title: courses.title,
+      category: courses.category,
+      level: courses.level,
+      image: courses.image,
+      priceLabel: courses.priceLabel,
+      priceNominal: courses.priceNominal,
+      period: courses.period,
+      studentCount: sql<number>`count(distinct case when ${enrollments.status} in ('active', 'completed') then ${enrollments.userId} end)`,
+    })
+    .from(courses)
+    .leftJoin(
+      enrollments,
+      and(
+        eq(enrollments.courseId, courses.id),
+        inArray(enrollments.status, ["active", "completed"])
+      )
+    )
+    .where(eq(courses.status, "published"))
+    .groupBy(courses.id)
+    .orderBy(sql`count(distinct case when ${enrollments.status} in ('active', 'completed') then ${enrollments.userId} end) desc, ${courses.id} asc`)
+    .limit(n);
+  if (rows.length === 0) return [];
+  const ids = rows.map((r) => r.courseId);
+  // Nama pengampu: pembuat + penugasan, satu query untuk semua baris.
+  const [creators, assigned] = await Promise.all([
+    db
+      .select({ courseId: courses.id, name: users.name })
+      .from(courses)
+      .innerJoin(users, eq(users.id, courses.createdBy))
+      .where(inArray(courses.id, ids)),
+    db
+      .select({ courseId: courseInstructors.courseId, name: users.name })
+      .from(courseInstructors)
+      .innerJoin(users, eq(users.id, courseInstructors.userId))
+      .where(inArray(courseInstructors.courseId, ids)),
+  ]);
+  const names = new Map<number, string[]>();
+  for (const r of [...creators, ...assigned]) {
+    const list = names.get(r.courseId) ?? [];
+    if (!list.includes(r.name)) list.push(r.name);
+    names.set(r.courseId, list);
+  }
+  return rows.map((r) => ({
+    courseId: r.courseId,
+    title: r.title,
+    category: r.category,
+    level: r.level,
+    image: r.image,
+    priceLabel: r.priceLabel,
+    priceNominal: r.priceNominal,
+    period: r.period,
+    studentCount: Number(r.studentCount ?? 0),
+    instructorNames: names.get(r.courseId) ?? [],
+  }));
 };
 
 export const listMyCourses = async (

@@ -6,6 +6,7 @@
 	import { fetchAdminCourseList } from '$lib/api/admin';
 	import type { BackendCourse } from '$lib/api/courses';
 	import { fetchAdminCategory, type AdminCategory } from '$lib/api/categories';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Kursus per kategori (admin): header identitas kategori + daftar kursus
@@ -59,6 +60,7 @@
 				courses = [];
 			} else {
 				loadError = e instanceof Error ? e.message : 'Gagal memuat kursus kategori.';
+				toast.error(loadError);
 			}
 		} finally {
 			if (my === loadSeq) loading = false;

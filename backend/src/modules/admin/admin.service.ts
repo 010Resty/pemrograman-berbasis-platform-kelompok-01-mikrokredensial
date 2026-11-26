@@ -13,7 +13,7 @@ import {
   users,
   voucherRedemptions,
 } from "../../db/schema";
-import { getInstructorDashboard } from "../dashboard/dashboard.service";
+import { getCourseStatsMap } from "../dashboard/dashboard.service";
 
 export class AdminError extends Error {
   readonly http: number;
@@ -575,6 +575,19 @@ export interface AdminReportInsights {
   note: string;
 }
 
+export interface AdminReportMonthRow {
+  /** Bulan kalender `YYYY-MM`. */
+  month: string;
+  /** Pendapatan terverifikasi (sum amountPaid) bulan itu. */
+  revenue: number;
+  /** Pembayaran diverifikasi bulan itu. */
+  payments: number;
+  /** Enrollment baru bulan itu. */
+  enrollments: number;
+  /** Sertifikat terbit bulan itu. */
+  certificates: number;
+}
+
 export interface AdminReports {
   summary: {
     totalStudents: number;
@@ -594,6 +607,8 @@ export interface AdminReports {
   filters: { from?: string; to?: string; courseId?: number };
   paging: { page: number; limit: number; total: number };
   insights: AdminReportInsights;
+  /** Deret bulanan (selalu 12 bulan terakhir, atau rentang filter bila from+to diisi, maks 24). */
+  monthly: AdminReportMonthRow[];
 }
 
 /**
@@ -637,10 +652,9 @@ export const getAdminReports = async (
   if (courseId !== undefined) voucherConds.push(eq(voucherRedemptions.courseId, courseId));
   const voucherWhere = voucherConds.length > 0 ? and(...voucherConds) : undefined;
 
-  const [overview, dash, payRows, enrRows, certRows, voucherRows, courseCountRows, courseRows, certifiedCountRows] =
+  const [overview, payRows, enrRows, certRows, voucherRows, courseCountRows, courseRows, certifiedCountRows] =
     await Promise.all([
       getAdminOverview(),
-      getInstructorDashboard(0, "admin"),
       db
         .select({
           status: payments.status,
@@ -697,15 +711,19 @@ export const getAdminReports = async (
 
   // Rincian per kursus mengikuti halaman yang diminta (sudah paginasi server).
   const targetIds = courseRows.map((c) => c.id);
-  const [revRows, pendRows, denyRows, certCourseRows] =
+  // Statistik dasbor (peserta/progres/antrean) hanya untuk kursus di halaman
+  // ini — dulu agregat seluruh katalog via getInstructorDashboard.
+  const [statsMap, revRows, pendRows, denyRows, certCourseRows] =
     targetIds.length === 0
       ? [
+          new Map() as Awaited<ReturnType<typeof getCourseStatsMap>>,
           [],
           [],
           [],
           [] as Array<{ courseId: number; status: string; n: number }>,
         ]
       : await Promise.all([
+          getCourseStatsMap(targetIds),
           db
             .select({
               courseId: payments.courseId,
@@ -778,7 +796,7 @@ export const getAdminReports = async (
   for (const r of certCourseRows as Array<{ courseId: number; status: string; n: number }>) {
     certByCourse.set(`${r.courseId}:${r.status}`, num(r.n));
   }
-  const dashByCourse = new Map(dash.courses.map((c) => [c.id, c]));
+  const dashByCourse = statsMap;
 
   const perCourse: AdminReportCourseRow[] = courseRows.map((c) => {
     const d = dashByCourse.get(c.id);
@@ -856,6 +874,105 @@ export const getAdminReports = async (
   }));
 
   const isoDay = (d: Date): string => d.toISOString().slice(0, 10);
+
+  // Deret bulanan untuk diagram tren: 12 bulan terakhir bila filter tanggal
+  // tidak lengkap, atau bulan-bulan dalam rentang from–to (maks 24).
+  // Menghormati filter courseId; bulan tanpa data diisi nol.
+  const monthList: string[] = (() => {
+    const key = (y: number, m: number): string =>
+      `${y}-${String(m + 1).padStart(2, "0")}`;
+    if (from && to) {
+      const out: string[] = [];
+      const y = from.getFullYear();
+      let yy = y;
+      let mm = from.getMonth();
+      while (out.length < 24 && (yy < to.getFullYear() || (yy === to.getFullYear() && mm <= to.getMonth()))) {
+        out.push(key(yy, mm));
+        mm += 1;
+        if (mm > 11) {
+          mm = 0;
+          yy += 1;
+        }
+      }
+      return out.length > 0 ? out : [key(to.getFullYear(), to.getMonth())];
+    }
+    const now = new Date();
+    const out: string[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      out.push(key(d.getFullYear(), d.getMonth()));
+    }
+    return out;
+  })();
+  const firstMonth = monthList[0];
+  const lastMonth = monthList[monthList.length - 1];
+  const monthStart = new Date(`${firstMonth}-01T00:00:00Z`);
+  const afterLast = new Date(`${lastMonth}-01T00:00:00Z`);
+  afterLast.setUTCMonth(afterLast.getUTCMonth() + 1);
+  const monthPayKey = sql<string>`date_format(${payments.createdAt}, '%Y-%m')`;
+  const monthEnrKey = sql<string>`date_format(${enrollments.enrolledAt}, '%Y-%m')`;
+  const monthCertKey = sql<string>`date_format(${certificates.issuedAt}, '%Y-%m')`;
+  const [monthPayRows, monthEnrRows, monthCertRows] = await Promise.all([
+    db
+      .select({
+        month: monthPayKey,
+        revenue: sql<number>`coalesce(sum(${payments.amountPaid}), 0)`,
+        n: sql<number>`count(*)`,
+      })
+      .from(payments)
+      .where(
+        and(
+          eq(payments.status, "diverifikasi"),
+          gte(payments.createdAt, monthStart),
+          sql`${payments.createdAt} < ${afterLast}`,
+          ...(courseId !== undefined ? [eq(payments.courseId, courseId)] : [])
+        )
+      )
+      .groupBy(monthPayKey),
+    db
+      .select({ month: monthEnrKey, n: sql<number>`count(*)` })
+      .from(enrollments)
+      .where(
+        and(
+          gte(enrollments.enrolledAt, monthStart),
+          sql`${enrollments.enrolledAt} < ${afterLast}`,
+          ...(courseId !== undefined ? [eq(enrollments.courseId, courseId)] : [])
+        )
+      )
+      .groupBy(monthEnrKey),
+    db
+      .select({ month: monthCertKey, n: sql<number>`count(*)` })
+      .from(certificates)
+      .where(
+        and(
+          eq(certificates.status, "issued"),
+          gte(certificates.issuedAt, monthStart),
+          sql`${certificates.issuedAt} < ${afterLast}`,
+          ...(courseId !== undefined ? [eq(certificates.courseId, courseId)] : [])
+        )
+      )
+      .groupBy(monthCertKey),
+  ]);
+  const payByMonth = new Map(
+    (monthPayRows as Array<{ month: string; revenue: number; n: number }>).map((r) => [
+      r.month,
+      { revenue: num(r.revenue), n: num(r.n) },
+    ])
+  );
+  const enrByMonth = new Map(
+    (monthEnrRows as Array<{ month: string; n: number }>).map((r) => [r.month, num(r.n)])
+  );
+  const certByMonth = new Map(
+    (monthCertRows as Array<{ month: string; n: number }>).map((r) => [r.month, num(r.n)])
+  );
+  const monthly: AdminReportMonthRow[] = monthList.map((m) => ({
+    month: m,
+    revenue: payByMonth.get(m)?.revenue ?? 0,
+    payments: payByMonth.get(m)?.n ?? 0,
+    enrollments: enrByMonth.get(m) ?? 0,
+    certificates: certByMonth.get(m) ?? 0,
+  }));
+
   return {
     summary: {
       totalStudents: overview.totalStudents,
@@ -897,5 +1014,6 @@ export const getAdminReports = async (
       },
       note: "Seluruh tahap memakai lingkup filter tanggal/kursus yang sama: tahap 1 = pendaftar periode ini (atau peserta unik kursus bila filter kursus diisi). Tiap tahap dihitung independen dari tabelnya (bukan satu kohort yang sama mengalir), sehingga tahap berikutnya bisa lebih besar — mis. sertifikat terbit tanpa pembayaran pada kursus gratis/voucher.",
     },
+    monthly,
   };
 };

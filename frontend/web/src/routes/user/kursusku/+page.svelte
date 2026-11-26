@@ -9,6 +9,7 @@
 	} from '$lib/api/courses';
 	import { redeemVoucher } from '$lib/api/vouchers';
 	import { syncEnrollmentsFromServer } from '$lib/stores/enrollment.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 	import { periodBadgeClass, periodIcon, type CoursePeriod } from '$lib/data/course-meta';
 
 	type Status = 'all' | 'in-progress' | 'completed' | 'not-started';
@@ -86,6 +87,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat kursus.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}
@@ -157,6 +159,7 @@
 		if (!voucherCode.trim()) {
 			voucherStatus = 'error';
 			voucherMessage = 'Masukkan kode voucher.';
+			toast.error(voucherMessage);
 			return;
 		}
 		voucherStatus = 'loading';
@@ -171,6 +174,7 @@
 		} catch (err) {
 			voucherStatus = 'error';
 			voucherMessage = err instanceof Error ? err.message : 'Penukaran gagal. Coba lagi.';
+			toast.error(voucherMessage);
 		}
 	}
 </script>

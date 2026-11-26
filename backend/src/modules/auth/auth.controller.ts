@@ -3,6 +3,8 @@ import { Request, Response, NextFunction } from "express";
 import { eq } from "drizzle-orm";
 import { db } from "../../db";
 import { users } from "../../db/schema";
+import { resolveAvatarUrl } from "../../utils/avatar";
+import { getUniraPhoto } from "./unira-photo.service";
 import {
   loginUser,
   registerUser,
@@ -12,6 +14,7 @@ import {
   verifyEmail,
   verifyResetCode,
 } from "./auth.service";
+import { loginWithUnira } from "./unira.service";
 import {
   logoutSchema,
   refreshSchema,
@@ -145,6 +148,24 @@ export const login = async (
   }
 };
 
+export const uniraLoginHandler = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const result = await loginWithUnira(req.body);
+
+    res.status(200).json({
+      status: "success",
+      message: "Login berhasil",
+      data: result,
+    });
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const refreshHandler = async (
   req: Request,
   res: Response,
@@ -201,6 +222,47 @@ export const logoutHandler = async (
   }
 };
 
+export const uniraPhotoHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    // Publik per-user seperti berkas avatar (setara /files/:id/content):
+    // <img> tidak mengirim token, jadi identitas diambil dari path.
+    const userId = Number(
+      (req as unknown as { params?: { userId?: string } }).params?.userId
+    );
+    if (!Number.isInteger(userId) || userId <= 0) {
+      res.status(404).json({
+        status: "error",
+        message: "Foto tidak tersedia",
+        data: null,
+      });
+      return;
+    }
+    const photo = await getUniraPhoto(userId);
+    if (!photo) {
+      res.status(404).json({
+        status: "error",
+        message: "Foto tidak tersedia",
+        data: null,
+      });
+      return;
+    }
+    res.set("Content-Type", photo.contentType);
+    res.set("Cache-Control", "public, max-age=3600");
+    res.set("Content-Length", String(photo.data.length));
+    // Halaman frontend beda origin (mis. :5173 vs API :3000) sehingga header
+    // CORP same-origin bawaan Helmet memblokir <img> (NotSameOrigin).
+    // Endpoint ini setara berkas avatar publik → izinkan embed lintas-origin.
+    res.set("Cross-Origin-Resource-Policy", "cross-origin");
+    res.status(200).end(photo.data);
+  } catch (error) {
+    next(error);
+  }
+};
+
 export const me = async (
   req: AuthenticatedRequest,
   res: Response,
@@ -226,6 +288,7 @@ export const me = async (
         email: users.email,
         role: users.role,
         avatarFileId: users.avatarFileId,
+        photoUrl: users.photoUrl,
       })
       .from(users)
       .where(eq(users.id, Number(req.user.id)))
@@ -248,7 +311,7 @@ export const me = async (
       data: {
         user: {
           ...user,
-          avatarUrl: user.avatarFileId ? `/api/v1/files/${user.avatarFileId}/content` : null,
+          avatarUrl: resolveAvatarUrl(user.avatarFileId, user.photoUrl ?? null, user.id),
         },
       },
     });

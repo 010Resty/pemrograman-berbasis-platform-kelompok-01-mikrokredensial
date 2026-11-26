@@ -12,6 +12,7 @@ import {
 	resendEmailOtp,
 	resetPasswordRequest,
 	revokeSession,
+	uniraLoginRequest,
 	verifyEmailRequest,
 	verifyResetCodeRequest,
 	type BackendUser
@@ -22,6 +23,7 @@ import {
 	createUnauthorizedCoordinator,
 	type RequestFailureKind
 } from '$lib/api/request-policy';
+import { clearCache as clearGetCache } from '$lib/api/cache';
 
 /** Peran portal: student → /user, teacher → /instruktur, admin → /admin. */
 export type Role = 'student' | 'teacher' | 'admin';
@@ -51,6 +53,18 @@ export const ROLE_LABEL: Record<Role, string> = {
 	teacher: 'Teacher',
 	admin: 'Administrator'
 };
+
+/** Label peran sesuai bahasa UI (id: Mahasiswa/Pengajar). */
+export const ROLE_LABEL_ID: Record<Role, string> = {
+	student: 'Mahasiswa',
+	teacher: 'Pengajar',
+	admin: 'Administrator'
+};
+
+/** Label peran sesuai bahasa ('id' → Indonesia, selain itu Inggris). */
+export function roleLabelFor(role: Role, lang: string): string {
+	return lang === 'id' ? ROLE_LABEL_ID[role] : ROLE_LABEL[role];
+}
 
 export const ROLE_HOME: Record<Role, string> = {
 	student: '/user',
@@ -372,6 +386,31 @@ export async function loginWithBackend(
 }
 
 /**
+ * Login with UNIRA via backend (POST /api/v1/auth/unira/login).
+ * Kontrak sukses sama seperti login email (sesi + token + refresh),
+ * sehingga guard portal, badge, dan silent-refresh tidak berubah.
+ * TIDAK ada fallback sukses lokal: backend gagal = login gagal.
+ */
+export async function loginWithUniraBackend(
+	username: string,
+	password: string,
+	rememberMe: boolean
+): Promise<BackendAuthResult> {
+	try {
+		const payload = await uniraLoginRequest(username.trim(), password);
+		const session = toSession(payload.user);
+		currentUser = session;
+		persistAuth(session, payload.accessToken, payload.refreshToken ?? null, rememberMe);
+		verifiedSession = session;
+		verifiedToken = payload.accessToken;
+		sessionGeneration += 1;
+		return { ok: true, user: session };
+	} catch (err) {
+		return toUserMessage(err, 'Login UNIRA gagal. Coba lagi nanti.');
+	}
+}
+
+/**
  * Langkah 1 registrasi: minta kode OTP (TANPA membuat akun, TANPA sesi).
  * Akun permanen dibuat server hanya setelah kode diverifikasi
  * (lihat `verifyEmailWithBackend`). Berlaku semua peran; backend tetap
@@ -647,8 +686,13 @@ export function registerPrivateCacheClearer(clear: () => void): () => void {
 	};
 }
 
-/** Hapus seluruh cache privat terdaftar. Tidak pernah melempar. */
+/** Hapus seluruh cache privat terdaftar + cache GET. Tidak pernah melempar. */
 export function clearAllPrivateCaches(): void {
+	try {
+		clearGetCache();
+	} catch {
+		// abaikan
+	}
 	for (const clear of privateCacheClearers) {
 		try {
 			clear();

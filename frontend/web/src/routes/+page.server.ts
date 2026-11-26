@@ -1,15 +1,13 @@
+import { redirect } from '@sveltejs/kit';
 import type { PageServerLoad } from './$types';
-import { getSpotServer } from '$lib/server/public-catalog';
+import { COOKIE_NAME, DEFAULT_LOCALE } from '$lib/i18n/locale';
 
 /**
- * SSR daftar sorotan agar crawler menerima judul/harga/kategori kursus
- * langsung di HTML (bukan skeleton kosong). Nama pengampu tetap diisi
- * progresif di browser. `origin` dipakai untuk canonical absolut per domain.
+ * `/` bukan halaman — alihkan ke beranda sesuai bahasa.
+ * Preferensi dibaca dari cookie (ditulis LanguageSwitcher); default Indonesia.
  */
-export const load: PageServerLoad = async ({ url }) => {
-	const spot = await getSpotServer();
-	return {
-		origin: url.origin,
-		spot
-	};
+export const load: PageServerLoad = async ({ cookies, url }) => {
+	const pref = cookies.get(COOKIE_NAME);
+	const lang = pref === 'en' ? 'en' : DEFAULT_LOCALE;
+	throw redirect(307, `/${lang}${url.search}`);
 };

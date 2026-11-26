@@ -445,6 +445,7 @@ describe("verifikasi publik", () => {
       "recipientName",
       "revokeReason",
       "revokedAt",
+      "signatureUrl",
       "status",
     ]);
     const blob = JSON.stringify(v.json.data);

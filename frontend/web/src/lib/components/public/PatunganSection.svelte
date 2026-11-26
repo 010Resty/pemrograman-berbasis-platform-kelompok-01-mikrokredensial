@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
+	import { lp, type Locale } from '$lib/i18n/locale';
 	import type { BackendCourse } from '$lib/api/courses';
 	import { formatIDR } from '$lib/data/payment';
 	import {
@@ -17,6 +18,8 @@
 	}
 
 	let { courses, loading, patunganPrices = {} }: Props = $props();
+
+	const lang: Locale = $derived(page.params.lang === 'en' ? 'en' : 'id');
 
 	const paidCourses = $derived(courses.filter((c) => (c.priceNominal ?? 0) > 0));
 
@@ -129,16 +132,16 @@
 
 					{#if selected}
 						<a
-							href={resolve(`/patungan/setup/${selected.id}?n=${anggota}`)}
+							href={lp(lang, `/patungan/setup/${selected.id}?n=${anggota}`)}
 							class="mt-6 flex min-h-[52px] w-full items-center justify-center gap-2 rounded-xl bg-royal px-5 text-sm font-extrabold text-white shadow-lg shadow-royal/25 transition duration-200 hover:bg-royal-hover active:scale-[0.99] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ice"
 						>
 							<i class="fa-solid fa-people-group" aria-hidden="true"></i>
 							Lanjut Buat Grup Patungan
 						</a>
 						<div class="mt-3 flex items-center justify-center gap-4 text-[11px]">
-							<a href={resolve(`/modules/${selected.id}`)} class="font-bold text-ice underline decoration-ice/40 underline-offset-4 hover:text-white">Lihat detail pelatihan</a>
+							<a href={lp(lang, `/modules/${selected.id}`)} class="font-bold text-ice underline decoration-ice/40 underline-offset-4 hover:text-white">Lihat detail pelatihan</a>
 							<span aria-hidden="true" class="text-slate-500">·</span>
-							<a href={resolve('/patungan/saya')} class="font-bold text-ice underline decoration-ice/40 underline-offset-4 hover:text-white">Grup patunganku</a>
+							<a href={lp(lang, '/patungan/saya')} class="font-bold text-ice underline decoration-ice/40 underline-offset-4 hover:text-white">Grup patunganku</a>
 						</div>
 					{/if}
 				</div>

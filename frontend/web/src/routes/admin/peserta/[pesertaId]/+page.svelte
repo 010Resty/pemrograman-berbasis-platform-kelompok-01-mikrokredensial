@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import { fetchAdminUser, setAdminUserActive, type AdminUserDetail } from '$lib/api/admin';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Detail peserta dari backend (GET /api/v1/admin/users/:id).
@@ -39,6 +40,7 @@
 				user = null;
 			} else {
 				loadError = e instanceof Error ? e.message : 'Gagal memuat detail peserta.';
+				toast.error(loadError);
 			}
 		} finally {
 			if (my === loadSeq) loading = false;
@@ -83,6 +85,7 @@
 				: 'Akun dinonaktifkan. Pengguna tidak dapat masuk sampai diaktifkan lagi.';
 		} catch (e) {
 			actionError = e instanceof Error ? e.message : 'Perubahan status gagal.';
+			toast.error(actionError);
 		} finally {
 			toggling = false;
 		}

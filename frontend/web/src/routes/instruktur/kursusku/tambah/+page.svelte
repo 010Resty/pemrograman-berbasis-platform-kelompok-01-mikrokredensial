@@ -132,10 +132,12 @@
 		if (!file) return;
 		if (!file.type.startsWith('image/')) {
 			errors['cover'] = 'Berkas sampul harus berupa gambar (JPG/PNG/WebP).';
+			toast.error(errors['cover']);
 			return;
 		}
 		if (file.size > 2 * 1024 * 1024) {
 			errors['cover'] = 'Ukuran gambar maksimal 2 MB.';
+			toast.error(errors['cover']);
 			return;
 		}
 		const reader = new FileReader();
@@ -163,6 +165,8 @@
 		e.preventDefault();
 		delete errors['server'];
 		if (!validate()) {
+			const firstError = Object.values(errors)[0];
+			if (firstError) toast.error(firstError);
 			requestAnimationFrame(() => errorSummaryEl?.focus());
 			window.scrollTo({ top: 0, behavior: 'smooth' });
 			return;

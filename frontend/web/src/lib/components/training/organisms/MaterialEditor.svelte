@@ -7,6 +7,7 @@
 	import { createEditorExtensions, toEmbedUrl } from '$lib/tiptap/extensions';
 	import { formatFileSize } from '$lib/stores/material-docs';
 	import { uploadFile } from '$lib/api/uploads';
+	import ModalShell from '$lib/components/ModalShell.svelte';
 
 	/**
 	 * Editor dokumen materi (Tiptap, gaya Word/Docs): heading, paragraf,
@@ -46,6 +47,18 @@
 
 	type DialogKind = 'link' | 'image' | 'video' | 'audio' | 'pdf';
 	let dialog = $state<DialogKind | null>(null);
+	/** Judul + ikon dialog sisipkan sesuai jenis (untuk ModalShell). */
+	const dlgMeta = $derived(
+		dialog === 'link'
+			? { title: 'Sisipkan tautan', icon: 'fa-link' }
+			: dialog === 'image'
+				? { title: 'Sisipkan gambar', icon: 'fa-image' }
+				: dialog === 'video'
+					? { title: 'Sisipkan video', icon: 'fa-circle-play' }
+					: dialog === 'audio'
+						? { title: 'Sisipkan audio', icon: 'fa-headphones' }
+						: { title: 'Lampirkan PDF', icon: 'fa-file-pdf' }
+	);
 	let urlValue = $state('');
 	let dialogError = $state('');
 	let dialogInput = $state<HTMLInputElement>();
@@ -148,7 +161,7 @@
 	}
 
 	const btnBase =
-		'flex min-h-10 min-w-10 items-center justify-center rounded-lg px-2 text-sm transition-all focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-35';
+		'flex min-h-11 min-w-11 items-center justify-center rounded-lg px-2 text-sm transition-all focus-visible:outline-2 focus-visible:outline-blue-600 disabled:cursor-not-allowed disabled:opacity-35';
 	const btnTone = (on: boolean) =>
 		on
 			? 'bg-violet-700 text-white shadow-md shadow-violet-700/25'
@@ -314,17 +327,14 @@
 		}
 	}
 
-	function dialogKeydown(event: KeyboardEvent) {
-		if (event.key === 'Escape') {
-			event.preventDefault();
-			closeDialog();
-		} else if (event.key === 'Enter' && dialog !== 'pdf' && dialog !== 'audio') {
-			event.preventDefault();
-			if (dialog === 'link') applyLink();
-			else if (dialog === 'image') applyImageUrl();
-			else if (dialog === 'video') applyVideoUrl();
-			else if (dialog === 'audio') applyAudioUrl();
-		}
+	/** Enter di kolom URL = terapkan sesuai jenis dialog (Escape ditangani dialog native). */
+	function dialogEnterKey(event: KeyboardEvent) {
+		if (event.key !== 'Enter' || dialog === 'pdf') return;
+		event.preventDefault();
+		if (dialog === 'link') applyLink();
+		else if (dialog === 'image') applyImageUrl();
+		else if (dialog === 'video') applyVideoUrl();
+		else if (dialog === 'audio') applyAudioUrl();
 	}
 
 	const currentCodeLang = $derived(
@@ -338,7 +348,7 @@
 	<div
 		role="toolbar"
 		aria-label="Format dokumen materi"
-		class="flex flex-wrap items-center gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50/80 p-2"
+		class="sticky top-0 z-10 flex flex-wrap items-center gap-1 overflow-x-auto border-b border-slate-200 bg-slate-50/80 p-2"
 	>
 		<span class="flex items-center gap-1" role="group" aria-label="Riwayat">
 			<button
@@ -639,7 +649,7 @@
 			</span>
 		{/if}
 
-		<span class="ml-auto hidden items-center gap-1.5 pr-1 text-[11px] font-semibold text-slate-400 sm:flex" aria-live="polite">
+		<span class="ml-auto flex items-center gap-1.5 pr-1 text-[11px] font-semibold text-slate-400" aria-live="polite">
 			<i class="fa-solid fa-keyboard" aria-hidden="true"></i> {words} kata
 		</span>
 	</div>
@@ -673,54 +683,63 @@
 				<div use:mountEditor></div>
 			{/key}
 		{:else}
-			<p class="p-6 text-sm text-slate-400">Memuat editor…</p>
+			<p class="flex items-center gap-2 p-6 text-sm text-slate-400" role="status">
+				<i class="fa-solid fa-circle-notch fa-spin" aria-hidden="true"></i> Memuat editor…
+			</p>
 		{/if}
 	</div>
 
 	<!-- Dialog sisipkan -->
 	{#if dialog}
-		<div class="fixed inset-0 z-[70] flex items-end justify-center bg-slate-900/50 p-4 sm:items-center" role="presentation">
-			<div
-				role="dialog"
-				aria-modal="true"
-				tabindex="-1"
-				aria-label={dialog === 'link'
-					? 'Sisipkan atau ubah tautan'
-					: dialog === 'image'
-						? 'Sisipkan gambar'
-						: dialog === 'video'
-							? 'Sisipkan video'
-							: dialog === 'audio'
-								? 'Sisipkan audio'
-								: 'Lampirkan PDF'}
-				onkeydown={dialogKeydown}
-				class="w-full max-w-md overflow-hidden rounded-2xl bg-white shadow-2xl"
-			>
-				<div class="flex items-center justify-between gap-3 border-b border-slate-100 p-4">
-					<h3 class="text-sm font-extrabold text-slate-900">
-						{#if dialog === 'link'}
-							<i class="fa-solid fa-link mr-1.5 text-blue-600" aria-hidden="true"></i>Tautan
-						{:else if dialog === 'image'}
-							<i class="fa-solid fa-image mr-1.5 text-blue-600" aria-hidden="true"></i>Gambar
-						{:else if dialog === 'video'}
-							<i class="fa-solid fa-circle-play mr-1.5 text-blue-600" aria-hidden="true"></i>Video
-						{:else if dialog === 'audio'}
-							<i class="fa-solid fa-headphones mr-1.5 text-cyan-600" aria-hidden="true"></i>Audio
-						{:else}
-							<i class="fa-solid fa-file-pdf mr-1.5 text-red-600" aria-hidden="true"></i>Lampiran PDF
-						{/if}
-					</h3>
+		<ModalShell
+			open={dialog !== null}
+			onclose={closeDialog}
+			title={dlgMeta.title}
+			icon={dlgMeta.icon}
+		>
+			{#snippet footer()}
+				<button
+					type="button"
+					onclick={closeDialog}
+					class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500 sm:flex-none sm:px-5"
+				>
+					Batal
+				</button>
+				{#if dialog === 'link'}
 					<button
 						type="button"
-						aria-label="Tutup dialog"
-						onclick={closeDialog}
-						class="flex min-h-9 min-w-9 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-2 focus-visible:outline-blue-600"
+						onclick={applyLink}
+						class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600 sm:flex-none sm:px-5"
 					>
-						<i class="fa-solid fa-xmark" aria-hidden="true"></i>
+						<i class="fa-solid fa-check" aria-hidden="true"></i> Terapkan
 					</button>
-				</div>
-
-				<div class="space-y-3 p-4">
+				{:else if dialog === 'image'}
+					<button
+						type="button"
+						onclick={applyImageUrl}
+						class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600 sm:flex-none sm:px-5"
+					>
+						<i class="fa-solid fa-check" aria-hidden="true"></i> Sisipkan URL
+					</button>
+				{:else if dialog === 'video'}
+					<button
+						type="button"
+						onclick={applyVideoUrl}
+						class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600 sm:flex-none sm:px-5"
+					>
+						<i class="fa-solid fa-check" aria-hidden="true"></i> Sisipkan video
+					</button>
+				{:else if dialog === 'audio'}
+					<button
+						type="button"
+						onclick={applyAudioUrl}
+						class="inline-flex min-h-11 flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-cyan-700 focus-visible:outline-2 focus-visible:outline-cyan-600 sm:flex-none sm:px-5"
+					>
+						<i class="fa-solid fa-check" aria-hidden="true"></i> Sisipkan audio
+					</button>
+				{/if}
+			{/snippet}
+			<div class="space-y-3">
 					{#if dialog === 'link'}
 						<p class="text-xs text-slate-500">
 							Pilih teks dulu lalu tempel tautan, atau kosongkan untuk melepas tautan.
@@ -733,6 +752,7 @@
 								bind:this={dialogInput}
 								bind:value={urlValue}
 								placeholder="https://contoh.com/materi"
+								onkeydown={dialogEnterKey}
 								class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 							/>
 						</div>
@@ -769,6 +789,7 @@
 								bind:this={dialogInput}
 								bind:value={urlValue}
 								placeholder="https://…/gambar.png"
+								onkeydown={dialogEnterKey}
 								class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 							/>
 						</div>
@@ -785,6 +806,7 @@
 								bind:this={dialogInput}
 								bind:value={urlValue}
 								placeholder="https://www.youtube.com/watch?v=…"
+								onkeydown={dialogEnterKey}
 								class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 							/>
 						</div>
@@ -825,6 +847,7 @@
 								bind:this={dialogInput}
 								bind:value={urlValue}
 								placeholder="https://…/audio.mp3"
+								onkeydown={dialogEnterKey}
 								class="w-full rounded-xl border border-slate-200 px-3.5 py-2.5 text-sm text-slate-800 placeholder:text-slate-400 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 							/>
 						</div>
@@ -862,49 +885,6 @@
 					{/if}
 				</div>
 
-				<div class="flex gap-2 border-t border-slate-100 p-4">
-					<button
-						type="button"
-						onclick={closeDialog}
-						class="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2 text-xs font-bold text-slate-600 transition-colors hover:bg-slate-50 focus-visible:outline-2 focus-visible:outline-slate-500"
-					>
-						Batal
-					</button>
-					{#if dialog === 'link'}
-						<button
-							type="button"
-							onclick={applyLink}
-							class="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-						>
-							<i class="fa-solid fa-check" aria-hidden="true"></i> Terapkan
-						</button>
-					{:else if dialog === 'image'}
-						<button
-							type="button"
-							onclick={applyImageUrl}
-							class="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-						>
-							<i class="fa-solid fa-check" aria-hidden="true"></i> Sisipkan URL
-						</button>
-					{:else if dialog === 'video'}
-						<button
-							type="button"
-							onclick={applyVideoUrl}
-							class="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-blue-700 focus-visible:outline-2 focus-visible:outline-blue-600"
-						>
-							<i class="fa-solid fa-check" aria-hidden="true"></i> Sisipkan video
-						</button>
-					{:else if dialog === 'audio'}
-						<button
-							type="button"
-							onclick={applyAudioUrl}
-							class="inline-flex min-h-10 flex-1 items-center justify-center gap-2 rounded-xl bg-cyan-600 px-4 py-2 text-xs font-bold text-white transition-colors hover:bg-cyan-700 focus-visible:outline-2 focus-visible:outline-cyan-600"
-						>
-							<i class="fa-solid fa-check" aria-hidden="true"></i> Sisipkan audio
-						</button>
-					{/if}
-				</div>
-			</div>
-		</div>
+		</ModalShell>
 	{/if}
 </div>

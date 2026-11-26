@@ -428,4 +428,24 @@ describe("GET /admin/reports isi", () => {
     assert.equal(p99.http, 200);
     assert.equal(p99.json.data.perCourse.length, 0);
   });
+
+  it("200 deret bulanan 12 bulan + bulan berjalan terisi", async () => {
+    const r = await api<{
+      monthly: Array<{ month: string; revenue: number; payments: number; enrollments: number; certificates: number }>;
+    }>("GET", "/api/v1/admin/reports", adminToken);
+    assert.equal(r.http, 200);
+    assert.equal(r.json.data.monthly.length, 12);
+    for (const m of r.json.data.monthly) {
+      assert.match(m.month, /^\d{4}-(0[1-9]|1[0-2])$/);
+      assert.ok(m.revenue >= 0 && m.payments >= 0 && m.enrollments >= 0 && m.certificates >= 0);
+    }
+    // Seed: 1 pembayaran terverifikasi 150rb + 1 sertifikat terbit bulan ini.
+    const now = new Date();
+    const cur = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    const row = r.json.data.monthly.find((m) => m.month === cur);
+    assert.ok(row);
+    assert.equal(row.revenue, 150000);
+    assert.equal(row.payments, 1);
+    assert.equal(row.certificates, 1);
+  });
 });

@@ -21,6 +21,7 @@
 	import { uploadFile } from '$lib/api/uploads';
 	import { fileUrl } from '$lib/api/courses';
 	import type { BackendCourse } from '$lib/api/courses';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Kelola promo kurasi (admin-only): kampanye + keanggotaan kursus per promo.
@@ -103,6 +104,7 @@
 		} catch (e) {
 			proposals = [];
 			proposalsError = e instanceof Error ? e.message : 'Gagal memuat pengajuan.';
+			toast.error(proposalsError);
 		} finally {
 			proposalsLoading = false;
 		}
@@ -134,6 +136,7 @@
 			pendingApprove = null;
 			approveOpen = false;
 			notice = e instanceof Error ? e.message : 'Gagal menyetujui pengajuan.';
+			toast.error(notice);
 		} finally {
 			approveBusy = false;
 		}
@@ -160,6 +163,7 @@
 			pendingReject = null;
 			rejectOpen = false;
 			notice = e instanceof Error ? e.message : 'Gagal menolak pengajuan.';
+			toast.error(notice);
 		} finally {
 			rejectBusy = false;
 		}
@@ -186,7 +190,7 @@
 			pendingDelete = null;
 			deleteOpen = false;
 			notice = e instanceof Error ? e.message : 'Gagal menghapus promo.';
-		} finally {
+			toast.error(notice);		} finally {
 			deleteBusy = false;
 		}
 	}
@@ -256,11 +260,13 @@
 		if (!file) return;
 		if (!file.type.startsWith('image/')) {
 			formError = 'Sampul harus berupa gambar (JPG/PNG/WebP).';
+			toast.error(formError);
 			input.value = '';
 			return;
 		}
 		if (file.size > 4 * 1024 * 1024) {
 			formError = 'Ukuran gambar maksimal 4 MB.';
+			toast.error(formError);
 			input.value = '';
 			return;
 		}
@@ -281,11 +287,13 @@
 		if (!file) return;
 		if (!file.type.startsWith('image/')) {
 			editError = 'Sampul harus berupa gambar (JPG/PNG/WebP).';
+			toast.error(editError);
 			input.value = '';
 			return;
 		}
 		if (file.size > 4 * 1024 * 1024) {
 			editError = 'Ukuran gambar maksimal 4 MB.';
+			toast.error(editError);
 			input.value = '';
 			return;
 		}
@@ -329,6 +337,7 @@
 		editError = '';
 		if (editTitle.trim().length < 3) {
 			editError = 'Judul minimal 3 karakter.';
+			toast.error(editError);
 			return;
 		}
 		let percent: number | null = null;
@@ -336,6 +345,7 @@
 			percent = Number(editPercent);
 			if (!Number.isInteger(percent) || percent < 1 || percent > 90) {
 				editError = 'Diskon persen 1–90.';
+				toast.error(editError);
 				return;
 			}
 		}
@@ -345,6 +355,7 @@
 			new Date(editStartsAt).getTime() > new Date(editEndsAt).getTime()
 		) {
 			editError = 'Waktu mulai harus sebelum atau sama dengan waktu berakhir.';
+			toast.error(editError);
 			return;
 		}
 		editBusy = true;
@@ -371,6 +382,7 @@
 			await load();
 		} catch (e) {
 			editError = e instanceof Error ? e.message : 'Gagal memperbarui promo.';
+			toast.error(editError);
 		} finally {
 			editBusy = false;
 		}
@@ -393,6 +405,7 @@
 			courses = list;
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Gagal memuat promo.';
+			toast.error(loadError);
 		} finally {
 			isLoading = false;
 		}
@@ -424,6 +437,7 @@
 			await syncMembers(slug);
 		} catch (e) {
 			memberError = e instanceof Error ? e.message : 'Gagal memuat anggota promo.';
+			toast.error(memberError);
 		} finally {
 			memberLoading = false;
 		}
@@ -439,10 +453,12 @@
 		const slug = formSlug.trim().toLowerCase();
 		if (!/^[a-z0-9-]{3,100}$/.test(slug)) {
 			formError = 'Slug 3–100 karakter (huruf kecil, angka, tanda -).';
+			toast.error(formError);
 			return;
 		}
 		if (formTitle.trim().length < 3) {
 			formError = 'Judul minimal 3 karakter.';
+			toast.error(formError);
 			return;
 		}
 		let percent: number | undefined;
@@ -450,6 +466,7 @@
 			percent = Number(formPercent);
 			if (!Number.isInteger(percent) || percent < 1 || percent > 90) {
 				formError = 'Diskon persen 1–90.';
+				toast.error(formError);
 				return;
 			}
 		}
@@ -457,6 +474,7 @@
 		if (formCoverFile) {
 			if (!formCoverPreview.startsWith('data:')) {
 				formError = 'Pilih gambar sampul dulu.';
+				toast.error(formError);
 				return;
 			}
 			try {
@@ -464,6 +482,7 @@
 				cover = uploaded.url;
 			} catch (e) {
 				formError = e instanceof Error ? e.message : 'Gagal mengunggah sampul.';
+				toast.error(formError);
 				return;
 			}
 		}
@@ -491,6 +510,7 @@
 			await load();
 		} catch (e) {
 			formError = e instanceof Error ? e.message : 'Gagal membuat promo.';
+			toast.error(formError);
 		} finally {
 			isSubmitting = false;
 		}
@@ -504,6 +524,7 @@
 			await load();
 		} catch (e) {
 			notice = e instanceof Error ? e.message : 'Gagal mengubah status.';
+			toast.error(notice);
 		}
 	}
 
@@ -513,17 +534,20 @@
 		const courseId = Number(addCourseId);
 		if (!Number.isInteger(courseId) || courseId <= 0) {
 			memberError = 'Pilih kursus dulu.';
+			toast.error(memberError);
 			return;
 		}
 		let patunganPrice: number | undefined;
 		if (addPatunganPrice.trim() !== '') {
 			if (!isPatungan) {
 				memberError = 'Harga patungan hanya untuk promo bertipe patungan.';
+				toast.error(memberError);
 				return;
 			}
 			patunganPrice = Number(addPatunganPrice.replace(/[^0-9]/g, ''));
 			if (!Number.isInteger(patunganPrice) || patunganPrice <= 0) {
 				memberError = 'Harga patungan harus angka rupiah > 0.';
+				toast.error(memberError);
 				return;
 			}
 		}
@@ -542,6 +566,7 @@
 			await Promise.all([load(), openMembersRefresh(slug)]);
 		} catch (e) {
 			memberError = e instanceof Error ? e.message : 'Gagal menambahkan kursus.';
+			toast.error(memberError);
 		} finally {
 			memberBusy = false;
 		}
@@ -567,6 +592,7 @@
 			await Promise.all([load(), openMembersRefresh(slug)]);
 		} catch (e) {
 			memberError = e instanceof Error ? e.message : 'Gagal menghapus kursus.';
+			toast.error(memberError);
 		} finally {
 			memberBusy = false;
 		}

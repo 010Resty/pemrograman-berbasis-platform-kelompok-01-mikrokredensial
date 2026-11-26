@@ -1,7 +1,10 @@
 <script lang="ts">
-	import { resolve } from '$app/paths';
+	import { page } from '$app/state';
 	import Logo from '$lib/components/Logo.svelte';
+	import LanguageSwitcher from '$lib/components/LanguageSwitcher.svelte';
 	import dropdownBg from '$lib/assets/dropdown-background.jpg';
+	import { lp, type Locale } from '$lib/i18n/locale';
+	import { t } from '$lib/i18n/index';
 
 	interface PromoItem {
 		id: number | string;
@@ -14,10 +17,9 @@
 
 	interface Props {
 		active: 'promo' | 'pelatihan' | 'peringkat' | 'tentang' | 'verifikasi' | 'menjadi-instruktur';
-		showSearch?: boolean;
 	}
 
-	let { active, showSearch = true }: Props = $props();
+	let { active }: Props = $props();
 	let menuOpen = $state(false);
 	let promoOpen = $state(false);
 	let mobilePromoOpen = $state(false);
@@ -26,23 +28,25 @@
 	let mobileTentangOpen = $state(false);
 	let tentangWrap: HTMLDivElement | undefined = $state(undefined);
 
+	const lang: Locale = $derived(page.params.lang === 'en' ? 'en' : 'id');
+
 	/**
 	 * Item dropdown Promo: 3 halaman jenis. Sengaja tanpa daftar kampanye
 	 * agar tidak duplikat/generic (judul kampanye demo sama dengan badge-nya).
 	 * Kampanye baru tetap punya halaman sendiri via /promo/[slug] + sidebar.
 	 */
-	const promoMenuItems: PromoItem[] = [
-		{ id: 'jenis-diskon', title: 'Flash Sale', desc: 'Diskon spesial dalam periode terbatas', href: resolve('/promo/diskon') },
-		{ id: 'jenis-kurasi', title: 'Pilihan Unggulan', desc: 'Kurasi pilihan dan pelatihan terbit terbaru', href: resolve('/promo/kurasi') },
-		{ id: 'jenis-patungan', title: 'Promo Patungan', desc: 'Checkout kelas bareng, bayar lebih hemat', href: resolve('/promo/patungan') }
-	];
+	const promoMenuItems = $derived<PromoItem[]>([
+		{ id: 'jenis-diskon', title: t(lang, 'nav.promoFlash'), desc: t(lang, 'nav.promoFlashDesc'), href: lp(lang, '/promo/diskon') },
+		{ id: 'jenis-kurasi', title: t(lang, 'nav.promoCurated'), desc: t(lang, 'nav.promoCuratedDesc'), href: lp(lang, '/promo/kurasi') },
+		{ id: 'jenis-patungan', title: t(lang, 'nav.promoPatungan'), desc: t(lang, 'nav.promoPatunganDesc'), href: lp(lang, '/promo/patungan') }
+	]);
 
-	const tentangMenuItems = [
-		{ id: 'arti-nama', title: 'Arti Nama', desc: 'Makna dan singkatan ARISTOTELES', href: '/tentang/arti-nama' as const },
-		{ id: 'cara-kerja', title: 'Cara Kerja', desc: 'Empat langkah menuju sertifikat', href: '/tentang/cara-kerja' as const },
-		{ id: 'kontak', title: 'Kontak Kami', desc: 'Hubungi tim ARISTOTELES', href: '/tentang/kontak' as const },
-		{ id: 'keunggulan', title: 'Keunggulan', desc: 'Kurikulum industri dan mentor praktisi', href: '/tentang/keunggulan' as const }
-	];
+	const tentangMenuItems = $derived([
+		{ id: 'arti-nama', title: t(lang, 'nav.artiNama'), desc: t(lang, 'nav.artiNamaDesc'), href: lp(lang, '/tentang/arti-nama') },
+		{ id: 'cara-kerja', title: t(lang, 'nav.caraKerja'), desc: t(lang, 'nav.caraKerjaDesc'), href: lp(lang, '/tentang/cara-kerja') },
+		{ id: 'kontak', title: t(lang, 'nav.kontak'), desc: t(lang, 'nav.kontakDesc'), href: lp(lang, '/tentang/kontak') },
+		{ id: 'keunggulan', title: t(lang, 'nav.keunggulan'), desc: t(lang, 'nav.keunggulanDesc'), href: lp(lang, '/tentang/keunggulan') }
+	]);
 
 	function closePromo(): void {
 		promoOpen = false;
@@ -69,21 +73,21 @@
 		}
 	}
 
-	const links = [
-		{ id: 'promo' as const, label: 'Promo', href: resolve('/') },
-		{ id: 'pelatihan' as const, label: 'Pelatihan', href: resolve('/pelatihan') },
-		{ id: 'peringkat' as const, label: 'Peringkat', href: resolve('/peringkat') },
-		{ id: 'tentang' as const, label: 'Tentang', href: resolve('/tentang') },
-		{ id: 'verifikasi' as const, label: 'Verifikasi', href: resolve('/verifikasi') }
-	];
+	const links = $derived([
+		{ id: 'promo' as const, label: t(lang, 'nav.promo'), href: lp(lang, '/') },
+		{ id: 'pelatihan' as const, label: t(lang, 'nav.pelatihan'), href: lp(lang, '/pelatihan') },
+		{ id: 'peringkat' as const, label: t(lang, 'nav.peringkat'), href: lp(lang, '/peringkat') },
+		{ id: 'tentang' as const, label: t(lang, 'nav.tentang'), href: lp(lang, '/tentang') },
+		{ id: 'verifikasi' as const, label: t(lang, 'nav.verifikasi'), href: lp(lang, '/verifikasi') }
+	]);
 
-	const mobileLinks = [
-		{ label: 'Promo', href: resolve('/') },
-		{ label: 'Pelatihan', href: resolve('/pelatihan') },
-		{ label: 'Peringkat', href: resolve('/peringkat') },
-		{ label: 'Tentang', href: resolve('/tentang') },
-		{ label: 'Verifikasi', href: resolve('/verifikasi') }
-	];
+	const mobileLinks = $derived([
+		{ id: 'promo' as const, label: t(lang, 'nav.promo'), href: lp(lang, '/') },
+		{ id: 'pelatihan' as const, label: t(lang, 'nav.pelatihan'), href: lp(lang, '/pelatihan') },
+		{ id: 'peringkat' as const, label: t(lang, 'nav.peringkat'), href: lp(lang, '/peringkat') },
+		{ id: 'tentang' as const, label: t(lang, 'nav.tentang'), href: lp(lang, '/tentang') },
+		{ id: 'verifikasi' as const, label: t(lang, 'nav.verifikasi'), href: lp(lang, '/verifikasi') }
+	]);
 </script>
 
 <svelte:window onclick={handleWindowClick} onkeydown={handleWindowKeydown} />
@@ -91,16 +95,16 @@
 <header class="sticky top-0 z-50 border-b border-mist bg-white/95 backdrop-blur">
 	<div class="mx-auto flex h-[72px] max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
 		<a
-			href={resolve('/')}
+			href={lp(lang, '/')}
 			class="flex shrink-0 items-center gap-2.5 rounded-lg focus-visible:outline-2 focus-visible:outline-royal"
-			aria-label="Aristoteles - Promo"
+			aria-label={t(lang, 'nav.homeLabel')}
 			aria-current={active === 'promo' ? 'page' : undefined}
 		>
 			<Logo size="md" showText={true} textSize="xl" />
 		</a>
 
 		<nav
-			aria-label="Navigasi utama"
+			aria-label={t(lang, 'nav.main')}
 			class="hidden min-w-0 flex-1 items-center justify-center gap-1 font-heading text-[15px] font-semibold lg:flex"
 		>
 			{#each links as link (link.id)}
@@ -129,12 +133,12 @@
 										<img src={dropdownBg} alt="" aria-hidden="true" class="absolute inset-0 h-full w-full object-cover" loading="lazy" />
 										<div class="absolute inset-0 bg-abyss/65" aria-hidden="true"></div>
 										<div class="relative">
-											<p class="mb-2 text-xs font-semibold tracking-wide text-teal">Penawaran Spesial</p>
-											<p class="font-heading text-xl leading-snug font-extrabold">Hemat Lebih Banyak</p>
-											<p class="mt-2 text-xs leading-relaxed text-slate-200">Dapatkan promo terbaik untuk investasi belajarmu</p>
+											<p class="mb-2 text-xs font-semibold tracking-wide text-teal">{t(lang, 'nav.promoSpecial')}</p>
+											<p class="font-heading text-xl leading-snug font-extrabold">{t(lang, 'nav.promoSaveMore')}</p>
+											<p class="mt-2 text-xs leading-relaxed text-slate-200">{t(lang, 'nav.promoBestDesc')}</p>
 										</div>
 									</div>
-									<ul id="promo-menu" role="menu" aria-label="Menu promo" class="flex w-[58%] flex-col gap-0.5 p-3">
+									<ul id="promo-menu" role="menu" aria-label={t(lang, 'nav.promoMenu')} class="flex w-[58%] flex-col gap-0.5 p-3">
 										{#each promoMenuItems as item (item.id)}
 											<li>
 												<a
@@ -155,7 +159,7 @@
 											</li>
 										{/each}
 										{#if promoMenuItems.length === 0}
-											<li class="px-4 py-3 text-sm text-slate-500">Belum ada promo saat ini.</li>
+											<li class="px-4 py-3 text-sm text-slate-500">{t(lang, 'nav.noPromo')}</li>
 										{/if}
 									</ul>
 								</div>
@@ -187,16 +191,16 @@
 										<img src={dropdownBg} alt="" aria-hidden="true" class="absolute inset-0 h-full w-full object-cover" loading="lazy" />
 										<div class="absolute inset-0 bg-abyss/65" aria-hidden="true"></div>
 										<div class="relative">
-											<p class="mb-2 text-xs font-semibold tracking-wide text-teal">Mengenal Kami</p>
-											<p class="font-heading text-xl leading-snug font-extrabold">Laboratorium Pendidikan Era AI</p>
-											<p class="mt-2 text-xs leading-relaxed text-slate-200">Praktis, terukur, dan relevan dengan dunia kerja</p>
+											<p class="mb-2 text-xs font-semibold tracking-wide text-teal">{t(lang, 'nav.aboutIntro')}</p>
+											<p class="font-heading text-xl leading-snug font-extrabold">{t(lang, 'nav.aboutLab')}</p>
+											<p class="mt-2 text-xs leading-relaxed text-slate-200">{t(lang, 'nav.aboutDesc')}</p>
 										</div>
 									</div>
-									<ul id="tentang-menu" role="menu" aria-label="Menu tentang" class="flex w-[58%] flex-col gap-0.5 p-3">
+									<ul id="tentang-menu" role="menu" aria-label={t(lang, 'nav.aboutMenu')} class="flex w-[58%] flex-col gap-0.5 p-3">
 										{#each tentangMenuItems as item (item.id)}
 											<li>
 												<a
-													href={resolve(item.href)}
+													href={item.href}
 													onclick={closeTentang}
 													class="block rounded-lg px-3 py-2 transition-colors duration-200 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-royal"
 												>
@@ -229,27 +233,20 @@
 		</nav>
 
 		<div class="hidden shrink-0 items-center gap-3 sm:flex">
-			{#if showSearch}
-				<a
-					href={resolve('/pelatihan')}
-					class="hidden items-center gap-2 rounded-[10px] border border-mist bg-slate-50 py-2 pr-3 pl-3 text-sm text-slate-500 transition-colors hover:border-royal hover:text-royal focus-visible:outline-2 focus-visible:outline-royal xl:flex"
-					aria-label="Cari program mikrokredensial di katalog pelatihan"
-				>
-					<i class="fa-solid fa-magnifying-glass text-xs text-slate-400" aria-hidden="true"></i>
-					Cari program…
-				</a>
-			{/if}
+			<LanguageSwitcher {lang} />
 			<a
-				href={resolve('/login')}
-				class="inline-flex min-h-[44px] items-center justify-center rounded-[10px] border border-mist bg-white px-5 font-heading text-sm font-bold text-abyss transition-colors duration-200 hover:border-royal hover:text-royal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+				href={lp(lang, '/login')}
+				class="group inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-mist bg-white px-5 font-heading text-sm font-bold text-abyss shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-royal/60 hover:text-royal hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
 			>
-				Masuk
+				<i class="fa-solid fa-arrow-right-to-bracket text-xs opacity-60 transition-transform duration-200 group-hover:translate-x-0.5" aria-hidden="true"></i>
+				{t(lang, 'nav.signin')}
 			</a>
 			<a
-				href={resolve('/register')}
-				class="inline-flex min-h-[44px] items-center justify-center rounded-[10px] bg-royal px-5 font-heading text-sm font-bold text-white shadow-sm transition-colors duration-200 hover:bg-royal-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
+				href={lp(lang, '/register')}
+				class="group inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-royal to-teal px-5 font-heading text-sm font-bold text-white shadow-md shadow-royal/25 transition-all duration-200 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-royal/35 hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-royal"
 			>
-				Daftar
+				{t(lang, 'nav.signup')}
+				<i class="fa-solid fa-arrow-right text-xs transition-transform duration-200 group-hover:translate-x-1" aria-hidden="true"></i>
 			</a>
 		</div>
 
@@ -258,7 +255,7 @@
 			onclick={() => (menuOpen = !menuOpen)}
 			aria-expanded={menuOpen}
 			aria-controls="public-mobile-nav"
-			aria-label={menuOpen ? 'Tutup menu navigasi' : 'Buka menu navigasi'}
+			aria-label={menuOpen ? t(lang, 'nav.closeMenu') : t(lang, 'nav.openMenu')}
 			class="flex min-h-11 min-w-11 items-center justify-center rounded-[10px] p-2 text-abyss transition-colors duration-200 hover:bg-ice focus-visible:outline-2 focus-visible:outline-royal lg:hidden"
 		>
 			<i class={`fa-solid ${menuOpen ? 'fa-xmark' : 'fa-bars'} text-lg`} aria-hidden="true"></i>
@@ -268,13 +265,13 @@
 	{#if menuOpen}
 		<nav
 			id="public-mobile-nav"
-			aria-label="Navigasi seluler"
+			aria-label={t(lang, 'nav.mobileNav')}
 			class="border-t border-mist bg-white px-4 pt-2 pb-5 sm:px-6 lg:hidden"
 		>
 			<ul class="divide-y divide-mist font-heading text-[15px] font-semibold">
-				{#each mobileLinks as link (link.href)}
+				{#each mobileLinks as link (link.id)}
 					<li>
-						{#if link.label === 'Promo'}
+						{#if link.id === 'promo'}
 							<button
 								type="button"
 								aria-expanded={mobilePromoOpen}
@@ -306,11 +303,11 @@
 										</li>
 									{/each}
 								{#if promoMenuItems.length === 0}
-										<li class="px-2 py-2.5 text-sm font-normal text-slate-500">Belum ada promo saat ini.</li>
+										<li class="px-2 py-2.5 text-sm font-normal text-slate-500">{t(lang, 'nav.noPromo')}</li>
 									{/if}
 								</ul>
 							{/if}
-						{:else if link.label === 'Tentang'}
+						{:else if link.id === 'tentang'}
 							<button
 								type="button"
 								aria-expanded={mobileTentangOpen}
@@ -325,7 +322,7 @@
 								{#each tentangMenuItems as item (item.id)}
 										<li>
 											<a
-												href={resolve(item.href)}
+												href={item.href}
 												onclick={() => (menuOpen = false)}
 												class="flex items-center justify-between gap-3 rounded-lg px-2 py-2.5 text-sm font-semibold text-slate-600 transition-colors duration-200 hover:bg-ice hover:text-abyss focus-visible:outline-2 focus-visible:outline-royal"
 											>
@@ -341,10 +338,12 @@
 								</ul>
 							{/if}
 						{:else}
+							{@const isActive = active === link.id}
 							<a
 								href={link.href}
 								onclick={() => (menuOpen = false)}
-								class="block rounded-lg px-2 py-3 transition-colors duration-200 hover:bg-ice focus-visible:outline-2 focus-visible:outline-royal {link.href === '/' && active === 'promo' ? 'text-royal' : 'text-slate-700'}"
+								aria-current={isActive ? 'page' : undefined}
+								class="block rounded-lg px-2 py-3 transition-colors duration-200 hover:bg-ice focus-visible:outline-2 focus-visible:outline-royal {isActive ? 'text-royal' : 'text-slate-700'}"
 							>
 								{link.label}
 							</a>
@@ -354,17 +353,22 @@
 			</ul>
 			<div class="mt-3 grid grid-cols-2 gap-2.5 sm:hidden">
 				<a
-					href={resolve('/login')}
-					class="inline-flex min-h-[44px] items-center justify-center rounded-[10px] border border-mist px-4 font-heading text-sm font-bold text-abyss transition-colors duration-200 hover:border-royal hover:text-royal"
+					href={lp(lang, '/login')}
+					class="group inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl border border-mist px-4 font-heading text-sm font-bold text-abyss transition-all duration-200 hover:border-royal/60 hover:text-royal"
 				>
-					Masuk
+					<i class="fa-solid fa-arrow-right-to-bracket text-xs opacity-60" aria-hidden="true"></i>
+					{t(lang, 'nav.signin')}
 				</a>
 				<a
-					href={resolve('/register')}
-					class="inline-flex min-h-[44px] items-center justify-center rounded-[10px] bg-royal px-4 font-heading text-sm font-bold text-white transition-colors duration-200 hover:bg-royal-hover"
+					href={lp(lang, '/register')}
+					class="group inline-flex min-h-[44px] items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-royal to-teal px-4 font-heading text-sm font-bold text-white shadow-md shadow-royal/25 transition-all duration-200 hover:brightness-110"
 				>
-					Daftar
+					{t(lang, 'nav.signup')}
+					<i class="fa-solid fa-arrow-right text-xs transition-transform duration-200 group-hover:translate-x-0.5" aria-hidden="true"></i>
 				</a>
+			</div>
+			<div class="mt-3 flex justify-center sm:justify-start">
+				<LanguageSwitcher {lang} />
 			</div>
 		</nav>
 	{/if}

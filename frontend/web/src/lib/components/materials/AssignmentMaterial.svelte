@@ -7,6 +7,7 @@
 	import { fetchTaskStatus, type TaskStatus } from '$lib/api/submissions';
 	import { getCurrentUser } from '$lib/stores/auth.svelte';
 	import { latestFor, pushSubmission, setHistory, submissionsByMaterial } from '$lib/stores/submissions.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	let {
 		assignment,
@@ -42,6 +43,8 @@
 
 	/** Status kelulusan server (K-06): lulus menempel, bukan dari kiriman terakhir. */
 	let taskStatus = $state<TaskStatus | null>(null);
+	/** Gagal memuat status/riwayat server (non-blokir; data lokal tetap tampil). */
+	let loadError = $state('');
 
 	$effect(() => {
 		const mid = Number(materialId);
@@ -52,10 +55,14 @@
 		let cancelled = false;
 		fetchTaskStatus(mid)
 			.then((s) => {
-				if (!cancelled) taskStatus = s;
+				if (!cancelled) {
+					taskStatus = s;
+					loadError = '';
+				}
 			})
 			.catch(() => {
 				/* best-effort; kartu kiriman tetap tampil */
+				if (!cancelled) loadError = 'Status server tak dapat dimuat — menampilkan data lokal.';
 			});
 		return () => {
 			cancelled = true;
@@ -85,9 +92,14 @@
 		let cancelled = false;
 		fetchSubmissions(materialId)
 			.then((list) => {
-				if (!cancelled) setHistory(materialId, list);
+				if (!cancelled) {
+					setHistory(materialId, list);
+					loadError = '';
+				}
 			})
-			.catch(() => {});
+			.catch(() => {
+				if (!cancelled) loadError = 'Riwayat server tak dapat dimuat — menampilkan data lokal.';
+			});
 		return () => {
 			cancelled = true;
 		};
@@ -109,6 +121,7 @@
 
 	function setError(message: string, keepUrl?: string) {
 		phase = { kind: 'error', message, previewUrl: keepUrl };
+		toast.error(message);
 	}
 
 	async function validatePdf(file: File): Promise<string | null> {
@@ -220,6 +233,7 @@
 			}
 		} catch (e) {
 			downloadError = e instanceof Error ? e.message : 'Gagal mengunduh berkas.';
+			toast.error(downloadError);
 		} finally {
 			downloading = false;
 		}
@@ -256,6 +270,12 @@
 	</div>
 
 	<!-- Status kelulusan server (K-06): lulus menempel walau kiriman terakhir belum dinilai -->
+	{#if loadError}
+		<p role="note" class="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-semibold text-amber-800">
+			<i class="fa-solid fa-triangle-exclamation shrink-0" aria-hidden="true"></i>
+			<span>{loadError}</span>
+		</p>
+	{/if}
 	{#if taskStatus && taskStatus.attempts > 0}
 		<div
 			role="status"
@@ -319,12 +339,12 @@
 					<span>Sudah terkumpul — {history.fileName}</span>
 					<span class="rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-extrabold text-white uppercase">Terbaru</span>
 					<span class="rounded-full border border-emerald-300 bg-white px-2 py-0.5 text-[10px] font-bold text-emerald-700">
-						{history.driveMode === 'drive' ? 'Tersimpan di server' : 'Simulasi lokal'}
+						{history.driveMode === 'drive' ? 'Tersimpan di server' : 'Tersimpan lokal'}
 					</span>
 				</p>
 				<p class="mt-0.5 text-xs text-emerald-700">
 					{new Date(history.createdAt).toLocaleString('id-ID')} ·
-					{history.driveMode === 'drive' ? 'tersimpan di server' : 'mode MOCK — belum terkirim'} ·
+					{history.driveMode === 'drive' ? 'tersimpan di server' : 'tersimpan lokal — menunggu sinkronisasi'} ·
 					status: {history.status}{history.score !== null ? ` · nilai ${history.score}` : ''}
 				</p>
 				<p class="mt-1 text-[11px] text-emerald-700">
@@ -373,7 +393,7 @@
 									<i class="fa-solid fa-file-pdf text-red-500" aria-hidden="true"></i>
 									<span class="max-w-48 truncate font-bold">{prev.fileName}</span>
 									<span>{new Date(prev.createdAt).toLocaleString('id-ID')}</span>
-									<span>· {prev.driveMode === 'drive' ? 'Tersimpan di server' : 'Simulasi lokal'}</span>
+									<span>· {prev.driveMode === 'drive' ? 'Tersimpan di server' : 'Tersimpan lokal'}</span>
 									<span>· {prev.status}{prev.score !== null ? ` · nilai ${prev.score}` : ''}{prev.rubricScores ? ` · rubrik ${prev.rubricScores.kelengkapan}/${prev.rubricScores.ketepatan}/${prev.rubricScores.kerapian}` : ''}</span>
 								</li>
 							{/each}
@@ -398,7 +418,7 @@
 					<p class="text-sm font-bold text-emerald-800">
 						{s.driveMode === 'drive'
 							? 'PDF terkumpul di server.'
-							: 'PDF tersimpan lokal (simulasi) — belum terkirim ke server.'}
+							: 'PDF tersimpan lokal — menunggu sinkronisasi ke server.'}
 					</p>
 					<p class="mt-0.5 text-xs text-emerald-700">
 						{s.fileName} · {formatBytes(s.fileSize)} ·

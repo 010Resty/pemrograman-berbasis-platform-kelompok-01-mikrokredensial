@@ -9,6 +9,7 @@ import {
   listHandler,
   redeemHandler,
   redemptionsHandler,
+  statsHandler,
   validateDiscountHandler,
 } from "./voucher.controller";
 
@@ -23,6 +24,7 @@ router.post("/vouchers/validate", authenticate, authOtpLimiter(), validateDiscou
 // Kelola voucher (admin). Daftarkan rute spesifik sebelum :code.
 router.post("/admin/vouchers", ...admin, createHandler);
 router.get("/admin/vouchers", ...admin, listHandler);
+router.get("/admin/vouchers/stats", ...admin, statsHandler);
 router.get("/admin/vouchers/:code/redemptions", ...admin, redemptionsHandler);
 router.post("/admin/vouchers/:code/disable", ...admin, disableHandler);
 router.post("/admin/vouchers/:code/enable", ...admin, enableHandler);

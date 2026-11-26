@@ -703,3 +703,77 @@ describe("detail voucher + filter grup status (admin)", () => {
     assert.ok(expired.json.data.items.some((v) => v.code === "GRUP-STATUS-01"));
   });
 });
+
+describe("statistik voucher (admin, 1 query)", () => {
+  it("total = aktif+habis+kedaluarsa+batal; konsisten dengan daftar + filter", async () => {
+    const mk = async (code: string) => {
+      const r = await api<{ code: string }>("POST", "/api/v1/admin/vouchers", tokens.admin, {
+        code,
+        courseId: ids.paid,
+        kind: "umum",
+        maxUses: 5,
+      });
+      assert.equal(r.http, 201, code);
+    };
+    await mk("STAT-AKTIF-01");
+    await mk("STAT-EXP-01");
+    await db
+      .update(schema.vouchers)
+      .set({ expiresAt: new Date(Date.now() - 1000) })
+      .where(eq(schema.vouchers.code, "STAT-EXP-01"));
+    await mk("STAT-BATAL-01");
+    const dis = await api("POST", "/api/v1/admin/vouchers/STAT-BATAL-01/disable", tokens.admin, {
+      reason: "Uji statistik",
+    });
+    assert.equal(dis.http, 200);
+    // Status redeemed hanya lewat penukaran penuh; untuk agregasi cukup baris langsung.
+    await db.insert(schema.vouchers).values({
+      code: "STAT-HABIS-01",
+      courseId: ids.paid,
+      kind: "umum",
+      maxUses: 1,
+      usedCount: 1,
+      status: "redeemed",
+    });
+
+    const s = await api<{
+      total: number;
+      aktif: number;
+      habis: number;
+      kedaluarsa: number;
+      batal: number;
+    }>("GET", "/api/v1/admin/vouchers/stats", tokens.admin);
+    assert.equal(s.http, 200);
+    const d = s.json.data;
+    for (const k of ["total", "aktif", "habis", "kedaluarsa", "batal"] as const) {
+      assert.equal(typeof d[k], "number", k);
+    }
+    assert.equal(d.total, d.aktif + d.habis + d.kedaluarsa + d.batal);
+    assert.ok(d.aktif >= 1 && d.habis >= 1 && d.kedaluarsa >= 1 && d.batal >= 1);
+
+    const list = await api<{ items: unknown[]; total: number }>(
+      "GET",
+      "/api/v1/admin/vouchers?limit=100",
+      tokens.admin
+    );
+    assert.equal(list.http, 200);
+    assert.equal(d.total, list.json.data.total);
+
+    const f = await api<typeof d>(
+      "GET",
+      `/api/v1/admin/vouchers/stats?courseId=${ids.paid}`,
+      tokens.admin
+    );
+    assert.equal(f.http, 200);
+    const fl = await api<{ total: number }>(
+      "GET",
+      `/api/v1/admin/vouchers?courseId=${ids.paid}&limit=100`,
+      tokens.admin
+    );
+    assert.equal(fl.http, 200);
+    assert.equal(f.json.data.total, fl.json.data.total);
+
+    const no = await api("GET", "/api/v1/admin/vouchers/stats", tokens.s1);
+    assert.equal(no.http, 403);
+  });
+});

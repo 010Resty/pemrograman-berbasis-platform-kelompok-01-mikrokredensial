@@ -45,7 +45,7 @@ test/
   ...
 ```
 
-Kontrak acuan: `frontend/shared/` (envelope, 80 endpoint, skenario K-01–K-08).
+Kontrak acuan: `frontend/shared/` (envelope, 92 endpoint, skenario K-01–K-08, contractVersion 1.6.0).
 
 Aset brand (`assets/logo/`, disalin dari `frontend/web/src/lib/assets/logo/`;
 tiap platform membundel asetnya sendiri):

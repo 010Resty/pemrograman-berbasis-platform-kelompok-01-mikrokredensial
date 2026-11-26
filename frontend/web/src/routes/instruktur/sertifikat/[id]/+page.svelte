@@ -38,6 +38,7 @@
 			phase = 'ready';
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Gagal memuat detail sertifikat.';
+			toast.error(loadError);
 			phase = 'error';
 		}
 	}
@@ -57,6 +58,7 @@
 			toast.success(`Sertifikat ${cert.code} dicabut dan tercatat di riwayat.`);
 		} catch (e) {
 			revokeError = e instanceof Error ? e.message : 'Pencabutan gagal.';
+			toast.error(revokeError);
 		} finally {
 			revoking = false;
 		}

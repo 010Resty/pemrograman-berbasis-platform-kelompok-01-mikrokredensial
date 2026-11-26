@@ -15,6 +15,7 @@
 	import { fileUrl } from '$lib/api/courses';
 	import { fetchCategories, FALLBACK_CATEGORIES } from '$lib/api/categories';
 	import { ownedCourses, setServerCourseFlags } from '$lib/stores/enrollment.svelte';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Katalog peserta dari backend (GET /courses — hanya published + archived).
@@ -109,6 +110,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat katalog.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}
@@ -225,7 +227,7 @@
 
 	<!-- Search + filter -->
 	<div class="mb-6 flex flex-col gap-3 lg:flex-row lg:items-center">
-		<div class="relative max-w-md flex-1">
+		<div class="relative w-full lg:max-w-md lg:flex-1">
 			<div
 				class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5 text-slate-400"
 			>
@@ -241,80 +243,76 @@
 				class="w-full rounded-xl border border-slate-200 bg-white py-2.5 pr-4 pl-10 text-sm text-slate-800 placeholder:text-slate-400 transition-all duration-200 ease-smooth focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 focus:outline-none"
 			/>
 		</div>
-		<div class="flex flex-wrap gap-2" role="group" aria-label="Filter kategori">
-			{#each ['Semua', ...CATEGORIES] as cat (cat)}
-				<button
-					type="button"
-					onclick={() => (activeCategory = cat)}
-					aria-pressed={activeCategory === cat}
-					class={`rounded-xl px-4 py-2 text-xs font-bold transition-all duration-200 ease-smooth active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 ${
-						activeCategory === cat
-							? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
-							: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-					}`}
+		<div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
+			<div class="relative">
+				<select
+					id="catalog-category"
+					name="kategori"
+					aria-label="Filter kategori"
+					bind:value={activeCategory}
+					class="filter-select"
 				>
-					{cat}
-				</button>
-			{/each}
+					<button type="button">
+						<span class="filter-tile filter-tile-blue" aria-hidden="true">
+							<i class="fa-solid fa-layer-group"></i>
+						</span>
+						<selectedcontent></selectedcontent>
+						<i class="fa-solid fa-chevron-down filter-chev" aria-hidden="true"></i>
+					</button>
+					<option value="Semua">Semua kategori</option>
+					{#each CATEGORIES as cat (cat)}
+						<option value={cat}>{cat}</option>
+					{/each}
+				</select>
+			</div>
+			<div class="relative">
+				<select
+					id="catalog-period"
+					name="periode"
+					aria-label="Filter periode"
+					bind:value={activePeriod}
+					class="filter-select"
+				>
+					<button type="button">
+						<span class="filter-tile filter-tile-blue" aria-hidden="true">
+							<i class="fa-solid fa-calendar-days"></i>
+						</span>
+						<selectedcontent></selectedcontent>
+						<i class="fa-solid fa-chevron-down filter-chev" aria-hidden="true"></i>
+					</button>
+					{#each periodFilters as pf (pf.value)}
+						<option value={pf.value}>{pf.label}</option>
+					{/each}
+				</select>
+			</div>
+			{#if promos.length > 0}
+				<div class="relative">
+					<select
+						id="catalog-promo"
+						name="promo"
+						aria-label="Filter promo"
+						value={activePromo ?? ''}
+						onchange={(e) => (activePromo = e.currentTarget.value || null)}
+						class="filter-select filter-select-wide"
+					>
+						<button type="button">
+							<span class="filter-tile filter-tile-red" aria-hidden="true">
+								<i class="fa-solid fa-tags"></i>
+							</span>
+							<selectedcontent></selectedcontent>
+							<i class="fa-solid fa-chevron-down filter-chev" aria-hidden="true"></i>
+						</button>
+						<option value="">Semua promo</option>
+						{#each promos as promo (promo.slug)}
+							<option value={promo.slug} title={promo.title}>
+								{promo.badgeLabel ?? promo.title}{promo.discountPercent !== null ? ` -${promo.discountPercent}%` : ''}
+							</option>
+						{/each}
+					</select>
+				</div>
+			{/if}
 		</div>
 	</div>
-	<div class="mb-6 flex flex-wrap gap-2" role="group" aria-label="Filter periode pelatihan">
-		{#each periodFilters as pf (pf.value)}
-			<button
-				type="button"
-				onclick={() => (activePeriod = pf.value)}
-				aria-pressed={activePeriod === pf.value}
-				class={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200 ease-smooth active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 ${
-					activePeriod === pf.value
-						? 'bg-blue-600 text-white shadow-lg shadow-blue-600/25'
-						: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-				}`}
-			>
-				{#if pf.value !== 'all'}
-					<i class={`fa-solid ${periodIcon(pf.value)} text-[10px]`} aria-hidden="true"></i>
-				{/if}
-				{pf.label}
-			</button>
-		{/each}
-	</div>
-
-	{#if promos.length > 0}
-		<div class="mb-6 flex flex-wrap items-center gap-2" role="group" aria-label="Filter promo">
-			<span class="inline-flex items-center gap-1.5 text-xs font-extrabold tracking-wide text-red-600 uppercase">
-				<i class="fa-solid fa-tags" aria-hidden="true"></i> Promo:
-			</span>
-			<button
-				type="button"
-				onclick={() => (activePromo = null)}
-				aria-pressed={activePromo === null}
-				class={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200 ease-smooth active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 ${
-					activePromo === null
-						? 'bg-red-600 text-white shadow-lg shadow-red-600/25'
-						: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-				}`}
-			>
-				Semua
-			</button>
-			{#each promos as promo (promo.slug)}
-				<button
-					type="button"
-					onclick={() => (activePromo = activePromo === promo.slug ? null : promo.slug)}
-					aria-pressed={activePromo === promo.slug}
-					title={promo.title}
-					class={`inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200 ease-smooth active:scale-95 focus-visible:outline-2 focus-visible:outline-blue-600 ${
-						activePromo === promo.slug
-							? 'bg-red-600 text-white shadow-lg shadow-red-600/25'
-							: 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-					}`}
-				>
-					{promo.badgeLabel ?? promo.title}
-					{#if promo.discountPercent !== null}
-						<span class={activePromo === promo.slug ? 'text-white/90' : 'text-red-600'}>-{promo.discountPercent}%</span>
-					{/if}
-				</button>
-			{/each}
-		</div>
-	{/if}
 
 	<p class="mb-4 text-xs font-medium text-slate-500" role="status">
 		Menampilkan {visibleCatalog.length} kursus

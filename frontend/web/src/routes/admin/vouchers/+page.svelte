@@ -16,6 +16,7 @@
 	} from '$lib/api/vouchers';
 	import { fetchAdminCourses } from '$lib/api/admin';
 	import type { BackendCourse } from '$lib/api/courses';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Manajemen voucher — data backend asli (K-03: resmi, admin-only,
@@ -181,6 +182,7 @@
 			courses = courseList;
 		} catch (e) {
 			loadError = e instanceof Error ? e.message : 'Gagal memuat voucher dari backend.';
+			toast.error(loadError);
 		} finally {
 			isLoading = false;
 		}
@@ -257,6 +259,7 @@
 		const courseId = Number(formCourseId);
 		if (!Number.isInteger(courseId) || courseId <= 0) {
 			formError = 'Pilih kursus tujuan. Satu voucher hanya berlaku untuk satu kursus.';
+			toast.error(formError);
 			return;
 		}
 
@@ -266,16 +269,19 @@
 			assignedEmail = formAssignee.trim().toLowerCase();
 			if (!assignedEmail) {
 				formError = 'Voucher Personal wajib menentukan email penerima terdaftar.';
+				toast.error(formError);
 				return;
 			}
 			if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assignedEmail)) {
 				formError = 'Format email penerima tidak valid.';
+				toast.error(formError);
 				return;
 			}
 		} else if (kind === 'diskon' && formAssignee.trim()) {
 			assignedEmail = formAssignee.trim().toLowerCase();
 			if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(assignedEmail)) {
 				formError = 'Format email penerima tidak valid.';
+				toast.error(formError);
 				return;
 			}
 		}
@@ -285,11 +291,13 @@
 			const raw = String(formMaxUses ?? '').trim();
 			if (!/^\d+$/.test(raw)) {
 				formError = 'Batas penggunaan harus bilangan bulat positif tanpa desimal (contoh: 20).';
+				toast.error(formError);
 				return;
 			}
 			maxUses = parseInt(raw, 10);
 			if (maxUses < 1) {
 				formError = 'Batas penggunaan minimal 1.';
+				toast.error(formError);
 				return;
 			}
 		}
@@ -301,15 +309,18 @@
 			const rawVal = formDiscountValue.trim();
 			if (!/^\d+$/.test(rawVal)) {
 				formError = 'Nilai diskon harus bilangan bulat (contoh: 20 untuk 20% atau 25000 untuk Rp25.000).';
+				toast.error(formError);
 				return;
 			}
 			discountValue = parseInt(rawVal, 10);
 			if (discountType === 'percent' && (discountValue < 1 || discountValue > 100)) {
 				formError = 'Diskon persen 1–100.';
+				toast.error(formError);
 				return;
 			}
 			if (discountType === 'nominal' && discountValue < 1) {
 				formError = 'Nominal diskon minimal Rp1.';
+				toast.error(formError);
 				return;
 			}
 		}
@@ -318,19 +329,23 @@
 		if (useExpiry) {
 			if (!formExpiry) {
 				formError = 'Tanggal kedaluwarsa wajib diisi karena masa berlaku diaktifkan.';
+				toast.error(formError);
 				return;
 			}
 			if (!/^\d{4}-\d{2}-\d{2}$/.test(formExpiry)) {
 				formError = 'Format tanggal kedaluwarsa tidak valid.';
+				toast.error(formError);
 				return;
 			}
 			const picked = new Date(`${formExpiry}T00:00:00`);
 			if (Number.isNaN(picked.getTime())) {
 				formError = 'Tanggal kedaluwarsa tidak valid.';
+				toast.error(formError);
 				return;
 			}
 			if (formExpiry < todayLocal()) {
 				formError = 'Tanggal kedaluwarsa tidak boleh sebelum hari ini.';
+				toast.error(formError);
 				return;
 			}
 			expiresAt = new Date(`${formExpiry}T23:59:59`).toISOString();
@@ -341,6 +356,7 @@
 			code = formCode.trim().toUpperCase().replace(/\s+/g, '');
 			if (!/^[A-Z0-9-]{4,32}$/.test(code)) {
 				formError = 'Kode khusus 4–32 karakter (huruf, angka, tanda -). Kosongkan untuk otomatis.';
+				toast.error(formError);
 				return;
 			}
 		}
@@ -361,6 +377,7 @@
 			await load();
 		} catch (e) {
 			formError = messageOf(e, 'Gagal membuat voucher. Coba lagi nanti.');
+			toast.error(formError);
 		} finally {
 			isSubmitting = false;
 		}
@@ -374,6 +391,7 @@
 			detail = await fetchVoucherDetail(v.code);
 		} catch (e) {
 			notice = messageOf(e, 'Gagal memuat detail voucher.');
+			toast.error(notice);
 			showDetail = false;
 		} finally {
 			detailLoading = false;
@@ -395,6 +413,7 @@
 			}, 2000);
 		} catch {
 			notice = 'Gagal menyalin otomatis. Salin manual dari kolom kode bila diperlukan.';
+			toast.error(notice);
 		}
 	}
 
@@ -436,6 +455,7 @@
 			await load();
 		} catch (e) {
 			notice = messageOf(e, 'Gagal menonaktifkan voucher.');
+			toast.error(notice);
 		} finally {
 			actionBusy = null;
 		}
@@ -451,6 +471,7 @@
 			await load();
 		} catch (e) {
 			notice = messageOf(e, 'Gagal mengaktifkan voucher.');
+			toast.error(notice);
 		} finally {
 			actionBusy = null;
 		}
@@ -652,7 +673,8 @@
 					</li>
 				{/each}
 			</ol>
-			<div class="hidden overflow-x-auto md:block">
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll region keyboard: tabel lebar perlu tabindex 0 -->
+			<div class="table-scroll hidden md:block" tabindex="0" role="region" aria-label="Tabel voucher, geser horizontal">
 				<table class="w-full min-w-[900px] text-sm">
 					<caption class="sr-only">Daftar voucher kursus resmi</caption>
 					<thead class="bg-orange-700 text-white">

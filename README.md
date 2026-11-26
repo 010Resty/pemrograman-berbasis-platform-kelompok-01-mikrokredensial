@@ -13,8 +13,9 @@
 
 ARISTOTELES adalah platform pembelajaran mikrokredensial: katalog pelatihan publik,
 portal belajar peserta, pengelolaan kursus instruktur, dan administrasi (pengguna,
-instruktur, kursus, voucher, undangan, sertifikat). Aturan bisnis K-01–K-08 disepakati
-2026-10-24 (diperbarui 2026-11-02); status implementasi per fitur lihat
+instruktur, kursus, voucher, undangan, sertifikat, pembayaran, promo/patungan,
+bagi hasil). Aturan bisnis K-01–K-08 disepakati 2026-10-24 (diperbarui 2026-11-02);
+status implementasi per fitur lihat
 `frontend/web/docs/04-inventaris-fitur.md` — keputusan bukan bukti sudah selesai di kode.
 
 # STRUKTUR REPO
@@ -49,14 +50,22 @@ npm run check          # type-check + validasi Svelte
 Opsional: `PUBLIC_API_BASE_URL` (frontend) bila backend tidak di `http://localhost:3000`;
 tanpa SMTP, email OTP/undangan hanya tercatat di log konsol backend (`MAIL_PROVIDER=log`).
 
-# STATUS JUJUR
+# STATUS JUJUR (audit statis + uji 2026-11-24)
 
-- Autentikasi nyata via backend (JWT + OTP email + undangan instruktur). Tidak ada akun
-  demo di bundle; pendaftaran publik selalu peran student (K-01).
+- Autentikasi nyata via backend (JWT + OTP email + undangan instruktur + refresh
+  rotasi). Tidak ada akun demo di bundle; pendaftaran publik selalu peran student (K-01).
+- Backend: 20 modul, ~150 endpoint `/api/v1`, 241/241 tes integrasi hijau
+  (`npm test`), 15 indeks komposit baru (migrasi 0035). Kecuali transport DOKU,
+  semua logika bisnis inti nyata (transaksional + Zod + audit).
 - Pembayaran via **QRIS dinamis DOKU** (`frontend/web/src/routes/user/pembayaran/`,
   `frontend/android/lib/features/payment/`): pindai QR → nominal tampil otomatis
   → webhook memverifikasi → akses dibuka. Tanpa konfigurasi DOKU, backend
   menjawab 503 jujur (tanpa QR palsu); pemetaan endpoint live menunggu API spec
   DOKU (`backend/src/modules/doku/` + `backend/src/modules/payments/README.md`).
+- Frontend web: `npm run check` 0 errors 0 warnings; semua portal memanggil
+  backend nyata (tanpa `DEMO_ACCOUNTS`/`VALID_CODES`/`purchaseCourse`); proxy tugas
+  502 jujur bila backend offline. Lihat `frontend/web/README.md`.
 - Detail per fitur (sudah jalan / sebagian / mock / belum ada) dan skenario uji K-01–K-08:
   `frontend/web/docs/04-inventaris-fitur.md` dan `frontend/web/docs/07-risiko-dan-validasi.md`.
+- Kontrak bersama web+Android: `frontend/shared/` (contractVersion 1.6.0, sinkron
+  dengan backend; bila beda, perilaku backend aktual yang menang).

@@ -27,14 +27,12 @@ import {
 } from "./certificate-pdf";
 import {
   canReadCourseTree,
+  countMaterialsByModules,
   getModule,
   listMaterialsByModule,
 } from "../courses/curricula.service";
-import { getBest } from "../quiz/quiz.service";
-import { getProgress } from "../progress/progress.service";
-import { getTaskStatus } from "../submissions/submission.service";
 import { hasCourseAccess } from "../enrollments/enrollment.service";
-import { getSignerSignaturePng, signatureUrlForCourse, signatureUrlsByCourse } from "./signature.service";
+import { getSignerSignaturePng, primaryBatchByCourse, signatureUrlForCourse } from "./signature.service";
 
 // ---------- Skema input ----------
 
@@ -190,6 +188,111 @@ export const getModuleEligibility = async (
     .limit(1);
   const certificate = existing[0] ?? null;
 
+  // Batch: 3 query untuk semua materi (dulu N query sekuensial).
+  // Akses kursus sudah diverifikasi di atas; guard per-materi redundan.
+  const quizIds = mats.filter((m) => m.type === "kuis").map((m) => m.id);
+  const taskIds = mats.filter((m) => m.type === "tugas").map((m) => m.id);
+  const plainIds = mats
+    .filter((m) => m.type !== "kuis" && m.type !== "tugas")
+    .map((m) => m.id);
+  const [doneRows, attemptRows, subRows] = await Promise.all([
+    plainIds.length > 0
+      ? db
+          .select({ materialId: progress.materialId })
+          .from(progress)
+          .where(
+            and(
+              eq(progress.userId, userId),
+              inArray(progress.materialId, plainIds)
+            )
+          )
+      : Promise.resolve([] as Array<{ materialId: number }>),
+    quizIds.length > 0
+      ? db
+          .select({
+            materialId: quizAttempts.materialId,
+            score: quizAttempts.score,
+            passScore: quizAttempts.passScore,
+          })
+          .from(quizAttempts)
+          .where(
+            and(
+              eq(quizAttempts.userId, userId),
+              inArray(quizAttempts.materialId, quizIds)
+            )
+          )
+      : Promise.resolve(
+          [] as Array<{ materialId: number; score: number; passScore: number }>
+        ),
+    taskIds.length > 0
+      ? db
+          .select({
+            materialId: submissions.materialId,
+            status: submissions.status,
+            score: submissions.score,
+          })
+          .from(submissions)
+          .where(
+            and(
+              eq(submissions.userId, userId),
+              inArray(submissions.materialId, taskIds)
+            )
+          )
+          .orderBy(desc(submissions.submittedAt), desc(submissions.id))
+      : Promise.resolve(
+          [] as Array<{
+            materialId: number;
+            status: string;
+            score: number | null;
+          }>
+        ),
+  ]);
+  const doneSet = new Set(doneRows.map((r) => r.materialId));
+  const quizMap = new Map<
+    number,
+    { attempts: number; best: number | null; passed: boolean }
+  >();
+  for (const r of attemptRows) {
+    const e = quizMap.get(r.materialId);
+    if (!e) {
+      quizMap.set(r.materialId, {
+        attempts: 1,
+        best: r.score,
+        passed: r.score >= r.passScore,
+      });
+    } else {
+      e.attempts++;
+      if (r.score > (e.best ?? Number.NEGATIVE_INFINITY)) e.best = r.score;
+      if (r.score >= r.passScore) e.passed = true;
+    }
+  }
+  // subRows terurut terbaru dulu: baris pertama = status terakhir.
+  const taskMap = new Map<
+    number,
+    {
+      attempts: number;
+      lastStatus: string;
+      passed: boolean;
+      best: number | null;
+    }
+  >();
+  for (const r of subRows) {
+    const e = taskMap.get(r.materialId);
+    if (!e) {
+      taskMap.set(r.materialId, {
+        attempts: 1,
+        lastStatus: r.status,
+        passed: r.status === "passed",
+        best: r.score,
+      });
+    } else {
+      e.attempts++;
+      if (r.status === "passed") e.passed = true;
+      if (r.score !== null && (e.best === null || r.score > e.best))
+        e.best = r.score;
+    }
+  }
+
   const requirements: RequirementItem[] = [];
   const failReasons: string[] = [];
   if (mats.length === 0) {
@@ -197,34 +300,40 @@ export const getModuleEligibility = async (
   }
   for (const m of mats) {
     if (m.type === "kuis") {
-      const best = await getBest(userId, m.id);
-      const passed = best.attempts > 0 && best.passed;
+      const q = quizMap.get(m.id);
+      const attempts = q?.attempts ?? 0;
+      const passed = attempts > 0 && (q?.passed ?? false);
+      const bestScore = q?.best ?? null;
       requirements.push({
         materialId: m.id,
         title: m.title,
         type: m.type,
-        state: passed ? "lulus" : best.attempts > 0 ? "belum_lulus" : "belum",
-        extra: best.attempts > 0 ? `Terbaik ${best.bestScore}` : null,
+        state: passed ? "lulus" : attempts > 0 ? "belum_lulus" : "belum",
+        extra: attempts > 0 ? `Terbaik ${bestScore}` : null,
       });
       if (!passed) failReasons.push(`Kuis belum lulus: ${m.title}`);
     } else if (m.type === "tugas") {
-      const st = await getTaskStatus(userId, role, m.id);
+      const t = taskMap.get(m.id);
+      const attempts = t?.attempts ?? 0;
+      const passed = t?.passed ?? false;
+      const lastStatus = t?.lastStatus ?? null;
+      const bestScore = t?.best ?? null;
       const waiting =
-        !st.passed &&
-        st.attempts > 0 &&
-        st.lastStatus !== null &&
-        ["submitted", "reviewed"].includes(st.lastStatus);
+        !passed &&
+        attempts > 0 &&
+        lastStatus !== null &&
+        ["submitted", "reviewed"].includes(lastStatus);
       requirements.push({
         materialId: m.id,
         title: m.title,
         type: m.type,
-        state: st.passed ? "lulus" : waiting ? "menunggu" : "belum_lulus",
+        state: passed ? "lulus" : waiting ? "menunggu" : "belum_lulus",
         extra:
-          st.attempts > 0
-            ? `${st.attempts}x kumpul${st.bestScore !== null ? `, skor ${st.bestScore}` : ""}`
+          attempts > 0
+            ? `${attempts}x kumpul${bestScore !== null ? `, skor ${bestScore}` : ""}`
             : null,
       });
-      if (!st.passed) {
+      if (!passed) {
         failReasons.push(
           waiting
             ? `Tugas menunggu penilaian: ${m.title}`
@@ -232,7 +341,7 @@ export const getModuleEligibility = async (
         );
       }
     } else {
-      const done = (await getProgress(userId, m.id)) !== null;
+      const done = doneSet.has(m.id);
       requirements.push({
         materialId: m.id,
         title: m.title,
@@ -569,11 +678,11 @@ export const tryAutoIssueCourse = async (
       .where(eq(modules.courseId, courseId));
     // Modul kosong (tanpa materi) tak pernah bersertifikat → dikecualikan,
     // kalau tidak kursus takkan pernah tuntas.
-    const certifiable: Array<{ id: number; title: string }> = [];
-    for (const m of mods) {
-      const mats = await listMaterialsByModule(m.id);
-      if (mats.length > 0) certifiable.push(m);
-    }
+    // Batch hitung (dulu N× list full MEDIUMTEXT hanya untuk cek non-kosong).
+    const matCounts = await countMaterialsByModules(mods.map((m) => m.id));
+    const certifiable: Array<{ id: number; title: string }> = mods.filter(
+      (m) => (matCounts.get(m.id) ?? 0) > 0
+    );
     if (certifiable.length === 0) return { issued: false, certificateId: null };
     const certRows = await db
       .select({ moduleId: certificates.moduleId, code: certificates.code })
@@ -743,11 +852,10 @@ export const claimCourseCertificate = async (
     .select({ id: modules.id, title: modules.title })
     .from(modules)
     .where(eq(modules.courseId, courseId));
-  const certifiable: Array<{ id: number; title: string }> = [];
-  for (const m of mods) {
-    const mats = await listMaterialsByModule(m.id);
-    if (mats.length > 0) certifiable.push(m);
-  }
+  const matCounts = await countMaterialsByModules(mods.map((m) => m.id));
+  const certifiable: Array<{ id: number; title: string }> = mods.filter(
+    (m) => (matCounts.get(m.id) ?? 0) > 0
+  );
   if (certifiable.length === 0) {
     throw new CertificateError(403, "NOT_ELIGIBLE", "Kursus ini belum memiliki modul bermateri", {
       failReasons: ["Kursus belum memiliki modul bermateri"],
@@ -793,10 +901,13 @@ export const claimCourseCertificate = async (
 // ---------- Daftar milik sendiri ----------
 
 export const listMyCertificates = async (
-  userId: number
+  userId: number,
+  limit = 200
 ): Promise<PublicCertificate[]> => {
   // Superseded disembunyikan (digantikan sertifikat kursus); riwayat utuh
   // tetap di sisi instruktur/admin + endpoint verifikasi.
+  // Cap default 200: user normal jauh di bawahnya, query tetap terbatas.
+  const safeLimit = Math.min(Math.max(Math.floor(limit) || 200, 1), 500);
   const rows = await db
     .select({
       id: certificates.id,
@@ -817,14 +928,16 @@ export const listMyCertificates = async (
     .where(
       and(eq(certificates.userId, userId), ne(certificates.status, "superseded"))
     )
-    .orderBy(desc(certificates.issuedAt), desc(certificates.id));
+    .orderBy(desc(certificates.issuedAt), desc(certificates.id))
+    .limit(safeLimit);
   const certs = rows.map(toPublicCertificate);
-  // Nama instruktur + URL tanda tangan per kursus (batch per courseId, bukan N+1 per baris).
-  const names = await instructorNamesByCourse([...new Set(certs.map((c) => c.courseId))]);
-  const sigUrls = await signatureUrlsByCourse(certs.map((c) => c.courseId));
+  // Nama instruktur + URL tanda tangan per kursus: 1 batch untuk semua
+  // courseId (dulu 2 batch terpisah yang masing-masing resolusi ulang).
+  const batch = await primaryBatchByCourse(certs.map((c) => c.courseId));
   for (const c of certs) {
-    c.instructorName = names.get(c.courseId) ?? null;
-    c.signatureUrl = sigUrls.get(c.courseId) ?? null;
+    const b = batch.get(c.courseId);
+    c.instructorName = b?.name ?? "Tim Pengajar ARISTOTELES";
+    c.signatureUrl = b?.signatureUrl ?? null;
   }
   return certs;
 };
@@ -864,22 +977,6 @@ const primaryInstructorName = async (courseId: number): Promise<string> => {
     console.error("[certificate] Gagal membaca instruktur utama:", e);
   }
   return "Tim Pengajar ARISTOTELES";
-};
-
-/**
- * Nama instruktur utama per kursus (batch). Kueri tetap ringan: 2 query
- * per kursus, bukan per baris sertifikat.
- */
-const instructorNamesByCourse = async (
-  courseIds: number[]
-): Promise<Map<number, string>> => {
-  const out = new Map<number, string>();
-  await Promise.all(
-    courseIds.map(async (courseId) => {
-      out.set(courseId, await primaryInstructorName(courseId));
-    })
-  );
-  return out;
 };
 
 export interface CertificateDownload {
@@ -1005,13 +1102,18 @@ export const verifyCertificate = async (
   }
   const row = rows[0];
   // Respons minimal publik: courseId hanya dipakai internal (instruktur).
+  // Dua lookup independen dijalankan paralel — hemat ~1 round-trip DB.
+  const [instructorName, signatureUrl] = await Promise.all([
+    primaryInstructorName(row.courseId),
+    signatureUrlForCourse(row.courseId),
+  ]);
   return {
     code: row.code,
     recipientName: row.recipientName,
     courseTitle: row.courseTitle,
     moduleTitle: row.moduleTitle,
-    instructorName: await primaryInstructorName(row.courseId),
-    signatureUrl: await signatureUrlForCourse(row.courseId),
+    instructorName,
+    signatureUrl,
     status: row.status,
     issuedAt: row.issuedAt,
     revokedAt: row.revokedAt,
@@ -2030,10 +2132,112 @@ export const getGlobalEligibilityDetail = async (
   const quizMats = mats.filter((m) => m.type === "kuis");
   const taskMats = mats.filter((m) => m.type === "tugas");
 
+  // Batch: 3 query untuk semua materi (dulu N query sekuensial).
+  const [plainDoneRows, detailAttemptRows, detailSubRows] = await Promise.all([
+    plainMats.length > 0
+      ? db
+          .select({ materialId: progress.materialId })
+          .from(progress)
+          .where(
+            and(
+              eq(progress.userId, targetUserId),
+              inArray(
+                progress.materialId,
+                plainMats.map((m) => m.id)
+              )
+            )
+          )
+      : Promise.resolve([] as Array<{ materialId: number }>),
+    quizMats.length > 0
+      ? db
+          .select({
+            materialId: quizAttempts.materialId,
+            score: quizAttempts.score,
+            passScore: quizAttempts.passScore,
+          })
+          .from(quizAttempts)
+          .where(
+            and(
+              eq(quizAttempts.userId, targetUserId),
+              inArray(
+                quizAttempts.materialId,
+                quizMats.map((m) => m.id)
+              )
+            )
+          )
+      : Promise.resolve(
+          [] as Array<{ materialId: number; score: number; passScore: number }>
+        ),
+    taskMats.length > 0
+      ? db
+          .select({
+            materialId: submissions.materialId,
+            status: submissions.status,
+            score: submissions.score,
+          })
+          .from(submissions)
+          .where(
+            and(
+              eq(submissions.userId, targetUserId),
+              inArray(
+                submissions.materialId,
+                taskMats.map((m) => m.id)
+              )
+            )
+          )
+          .orderBy(desc(submissions.submittedAt), desc(submissions.id))
+      : Promise.resolve(
+          [] as Array<{
+            materialId: number;
+            status: string;
+            score: number | null;
+          }>
+        ),
+  ]);
+  const plainDoneSet = new Set(plainDoneRows.map((r) => r.materialId));
+  const detailQuizMap = new Map<
+    number,
+    { attempts: number; best: number | null; passed: boolean }
+  >();
+  for (const r of detailAttemptRows) {
+    const e = detailQuizMap.get(r.materialId);
+    if (!e) {
+      detailQuizMap.set(r.materialId, {
+        attempts: 1,
+        best: r.score,
+        passed: r.score >= r.passScore,
+      });
+    } else {
+      e.attempts++;
+      if (r.score > (e.best ?? Number.NEGATIVE_INFINITY)) e.best = r.score;
+      if (r.score >= r.passScore) e.passed = true;
+    }
+  }
+  const detailTaskMap = new Map<
+    number,
+    { attempts: number; lastStatus: string; passed: boolean; best: number | null }
+  >();
+  for (const r of detailSubRows) {
+    const e = detailTaskMap.get(r.materialId);
+    if (!e) {
+      detailTaskMap.set(r.materialId, {
+        attempts: 1,
+        lastStatus: r.status,
+        passed: r.status === "passed",
+        best: r.score,
+      });
+    } else {
+      e.attempts++;
+      if (r.status === "passed") e.passed = true;
+      if (r.score !== null && (e.best === null || r.score > e.best))
+        e.best = r.score;
+    }
+  }
+
   let done = 0;
   const materialItems: FrontendEligibilityDetail["materials"] = [];
   for (const m of plainMats) {
-    const ok = (await getProgress(targetUserId, m.id)) !== null;
+    const ok = plainDoneSet.has(m.id);
     if (ok) done += 1;
     materialItems.push({
       id: String(m.id),
@@ -2045,29 +2249,36 @@ export const getGlobalEligibilityDetail = async (
   let quizPassed = 0;
   const quizItems: FrontendEligibilityDetail["quizzes"] = [];
   for (const m of quizMats) {
-    const best = await getBest(targetUserId, m.id);
-    if (best.passed) quizPassed += 1;
+    const q = detailQuizMap.get(m.id);
+    const attempts = q?.attempts ?? 0;
+    const passed = q?.passed ?? false;
+    const bestScore = q?.best ?? null;
+    if (passed) quizPassed += 1;
     quizItems.push({
       id: String(m.id),
       title: m.title,
-      state: best.attempts === 0 ? "belum_lulus" : best.passed ? "lulus" : "belum_lulus",
-      extra: best.attempts > 0 && best.bestScore !== null ? `Nilai terbaik ${best.bestScore}` : null,
+      state: attempts === 0 ? "belum_lulus" : passed ? "lulus" : "belum_lulus",
+      extra: attempts > 0 && bestScore !== null ? `Nilai terbaik ${bestScore}` : null,
     });
   }
   let taskPassed = 0;
   let waiting = false;
   const taskItems: FrontendEligibilityDetail["tasks"] = [];
   for (const m of taskMats) {
-    const st = await getTaskStatus(targetUserId, "student", m.id);
-    if (st.passed) taskPassed += 1;
-    else if (st.attempts > 0 && st.lastStatus && ["submitted", "reviewed"].includes(st.lastStatus)) {
+    const t = detailTaskMap.get(m.id);
+    const attempts = t?.attempts ?? 0;
+    const passed = t?.passed ?? false;
+    const lastStatus = t?.lastStatus ?? null;
+    const bestScore = t?.best ?? null;
+    if (passed) taskPassed += 1;
+    else if (attempts > 0 && lastStatus && ["submitted", "reviewed"].includes(lastStatus)) {
       waiting = true;
     }
     taskItems.push({
       id: String(m.id),
       title: m.title,
-      state: st.passed ? "lulus" : st.attempts > 0 && st.lastStatus && ["submitted", "reviewed"].includes(st.lastStatus) ? "menunggu" : "belum_lulus",
-      extra: st.attempts > 0 ? `${st.attempts}x kumpul${st.bestScore !== null ? `, skor ${st.bestScore}` : ""}` : null,
+      state: passed ? "lulus" : attempts > 0 && lastStatus && ["submitted", "reviewed"].includes(lastStatus) ? "menunggu" : "belum_lulus",
+      extra: attempts > 0 ? `${attempts}x kumpul${bestScore !== null ? `, skor ${bestScore}` : ""}` : null,
     });
   }
   const certRows = await db

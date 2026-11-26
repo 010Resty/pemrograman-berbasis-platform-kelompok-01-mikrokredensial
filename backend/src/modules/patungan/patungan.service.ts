@@ -1,8 +1,9 @@
 import { z } from "zod";
-import { and, asc, desc, eq, inArray, lt, ne } from "drizzle-orm";
+import { and, asc, desc, eq, gt, gte, inArray, isNull, lt, lte, ne, or } from "drizzle-orm";
 import { db } from "../../db";
 import {
   auditLogs,
+  courseInstructors,
   courses,
   enrollments,
   patunganGroupMembers,
@@ -12,8 +13,6 @@ import {
   promoCourses,
   users,
 } from "../../db/schema";
-import { hasCourseAccess } from "../enrollments/enrollment.service";
-import { isCampaignActive } from "../promos/promo.service";
 import { isValidUsername, normalizeUsername } from "../../utils/username";
 import {
   PATUNGAN_MAX_MEMBERS,
@@ -84,29 +83,36 @@ export const getActivePatunganForCourse = async (
   courseId: number,
   now: Date = new Date()
 ): Promise<PatunganCampaignRef | null> => {
+  // Filter aktif di SQL (dulu semua baris lalu saring di JS): status active +
+  // jendela waktu + kursus published/berbayar, id terbesar menang.
   const rows = await db
     .select({
       id: promoCampaigns.id,
       slug: promoCampaigns.slug,
       title: promoCampaigns.title,
       badgeLabel: promoCampaigns.badgeLabel,
-      status: promoCampaigns.status,
-      startsAt: promoCampaigns.startsAt,
       endsAt: promoCampaigns.endsAt,
       patunganPrice: promoCourses.patunganPrice,
-      priceNominal: courses.priceNominal,
-      courseStatus: courses.status,
     })
     .from(promoCourses)
     .innerJoin(promoCampaigns, eq(promoCampaigns.id, promoCourses.campaignId))
     .innerJoin(courses, eq(courses.id, promoCourses.courseId))
-    .where(and(eq(promoCourses.courseId, courseId), eq(promoCampaigns.type, "patungan")));
-  for (const r of rows.sort((a, b) => b.id - a.id)) {
-    if (r.courseStatus !== "published" || r.priceNominal <= 0) continue;
-    if (!isCampaignActive({ status: r.status, startsAt: r.startsAt, endsAt: r.endsAt }, now)) continue;
-    return { id: r.id, slug: r.slug, title: r.title, badgeLabel: r.badgeLabel, endsAt: r.endsAt, patunganPrice: r.patunganPrice };
-  }
-  return null;
+    .where(
+      and(
+        eq(promoCourses.courseId, courseId),
+        eq(promoCampaigns.type, "patungan"),
+        eq(promoCampaigns.status, "active"),
+        or(isNull(promoCampaigns.startsAt), lte(promoCampaigns.startsAt, now)),
+        or(isNull(promoCampaigns.endsAt), gte(promoCampaigns.endsAt, now)),
+        eq(courses.status, "published"),
+        gt(courses.priceNominal, 0)
+      )
+    )
+    .orderBy(desc(promoCampaigns.id))
+    .limit(1);
+  const r = rows[0];
+  if (!r) return null;
+  return { id: r.id, slug: r.slug, title: r.title, badgeLabel: r.badgeLabel, endsAt: r.endsAt, patunganPrice: r.patunganPrice };
 };
 
 // ---------- Resolusi anggota (dipakai validate + create) ----------
@@ -213,9 +219,44 @@ export const resolveGroupMembers = async (
   const members: ResolvedMember[] = usernames.map((u) => byUsername.get(u)!);
 
   // Blokir yang sudah punya akses (aktif/selesai, pengelola, atau admin).
+  // Batch: 3 query untuk semua orang (dulu N×hasCourseAccess ≈ N×3 query).
+  const people = [creator, ...members];
+  const peopleIds = people.map((m) => m.userId);
+  const [ownerRow, linkRows, enrRows] = await Promise.all([
+    db
+      .select({ createdBy: courses.createdBy })
+      .from(courses)
+      .where(eq(courses.id, courseId))
+      .limit(1),
+    db
+      .select({ userId: courseInstructors.userId })
+      .from(courseInstructors)
+      .where(
+        and(
+          eq(courseInstructors.courseId, courseId),
+          inArray(courseInstructors.userId, peopleIds)
+        )
+      ),
+    db
+      .select({ userId: enrollments.userId })
+      .from(enrollments)
+      .where(
+        and(
+          eq(enrollments.courseId, courseId),
+          inArray(enrollments.status, ["active", "completed"]),
+          inArray(enrollments.userId, peopleIds)
+        )
+      ),
+  ]);
+  const ownerId = ownerRow[0]?.createdBy ?? null;
+  const linkSet = new Set(linkRows.map((r) => r.userId));
+  const enrSet = new Set(enrRows.map((r) => r.userId));
   const blockedAccess: string[] = [];
-  for (const m of [creator, ...members]) {
-    if (await hasCourseAccess(m.userId, m.role, courseId)) blockedAccess.push(m.username);
+  for (const m of people) {
+    if (m.role === "admin") blockedAccess.push(m.username);
+    else if (ownerId !== null && ownerId === m.userId) blockedAccess.push(m.username);
+    else if (linkSet.has(m.userId)) blockedAccess.push(m.username);
+    else if (enrSet.has(m.userId)) blockedAccess.push(m.username);
   }
   if (blockedAccess.length > 0) {
     throw new PatunganError(

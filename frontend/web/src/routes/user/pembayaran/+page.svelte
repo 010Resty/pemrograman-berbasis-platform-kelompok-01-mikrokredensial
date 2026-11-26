@@ -3,6 +3,7 @@
 	import { resolve } from '$app/paths';
 	import EmptyState from '$lib/components/ui/EmptyState.svelte';
 	import PageHeader from '$lib/components/ui/PageHeader.svelte';
+	import StatusBadge from '$lib/components/ui/StatusBadge.svelte';
 	import WarningModal from '$lib/components/WarningModal.svelte';
 	import {
 		cancelPayment,
@@ -11,6 +12,7 @@
 		type PaymentStatus
 	} from '$lib/api/payments';
 	import { formatIDR } from '$lib/data/payment';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Riwayat pembayaran milik sendiri (GET /api/v1/me/payments).
@@ -60,6 +62,7 @@
 			await load();
 		} catch (e) {
 			cancelError = e instanceof Error ? e.message : 'Gagal membatalkan. Coba lagi.';
+			toast.error(cancelError);
 		} finally {
 			cancelling = false;
 		}
@@ -80,6 +83,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat riwayat pembayaran.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}
@@ -207,13 +211,7 @@
 							</p>
 							<p class="mt-0.5 text-xs text-slate-500">{formatDate(p.createdAt)} · {p.gateway === 'doku' ? 'QRIS dinamis' : 'Manual'}</p>
 						</div>
-						<span
-							class={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${statusClass(p.status)}`}
-						>
-							<span class="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true"></span>{statusLabel(
-								p.status
-							)}
-						</span>
+						<StatusBadge kind="payment" status={p.status} class="shrink-0 text-[11px] font-bold" />
 					</div>
 					<dl class="mt-3 space-y-1 text-xs">
 						<div class="flex justify-between gap-3">

@@ -1,4 +1,5 @@
 import { apiRequest, BackendRequestError } from './backend';
+import { invalidateCache } from './cache';
 import { getAccessToken, handlePrivateRequestError } from '$lib/stores/auth.svelte';
 
 /**
@@ -110,29 +111,35 @@ export function getApplicationRequest(id: number): Promise<PengajuanInstruktur> 
 	return authed<PengajuanInstruktur>(`/admin/instructor-applications/${id}`);
 }
 
-export function reviewApplicationRequest(
+export async function reviewApplicationRequest(
 	id: number,
 	input: { status: Exclude<ApplicationStatus, 'submitted'>; reviewNote?: string }
 ): Promise<PengajuanInstruktur> {
-	return authed<PengajuanInstruktur>(`/admin/instructor-applications/${id}`, {
+	const out = await authed<PengajuanInstruktur>(`/admin/instructor-applications/${id}`, {
 		method: 'PATCH',
 		body: input
 	});
+	invalidateCache('bell:');
+	return out;
 }
 
-export function deleteApplicationRequest(id: number): Promise<{ id: number }> {
-	return authed<{ id: number }>(`/admin/instructor-applications/${id}`, {
+export async function deleteApplicationRequest(id: number): Promise<{ id: number }> {
+	const out = await authed<{ id: number }>(`/admin/instructor-applications/${id}`, {
 		method: 'DELETE'
 	});
+	invalidateCache('bell:');
+	return out;
 }
 
-export function inviteApplicationRequest(
+export async function inviteApplicationRequest(
 	id: number
 ): Promise<{ application: PengajuanInstruktur; invitation: InvitationResult }> {
-	return authed<{ application: PengajuanInstruktur; invitation: InvitationResult }>(
+	const out = await authed<{ application: PengajuanInstruktur; invitation: InvitationResult }>(
 		`/admin/instructor-applications/${id}/invite`,
 		{ method: 'POST', body: {} }
 	);
+	invalidateCache('bell:');
+	return out;
 }
 
 /** Unduh byte berkas applicant (butuh token admin) sebagai Blob. */

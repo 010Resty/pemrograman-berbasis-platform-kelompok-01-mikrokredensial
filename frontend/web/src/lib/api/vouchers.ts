@@ -111,23 +111,34 @@ export function fetchVouchers(params: VoucherListParams = {}): Promise<{ items: 
 }
 
 /** Hitungan voucher per grup status dari server (untuk kartu statistik skala penuh). */
-export async function fetchVoucherCounts(base: Omit<VoucherListParams, 'status' | 'limit' | 'page'> = {}): Promise<{
+export function fetchVoucherCounts(base: Omit<VoucherListParams, 'status' | 'limit' | 'page'> = {}): Promise<{
 	total: number;
 	aktif: number;
 	habis: number;
 	kedaluarsa: number;
 	batal: number;
 }> {
-	const count = (status?: VoucherListParams['status']) =>
-		fetchVouchers({ ...base, status, limit: 1 }).then((r) => r.total);
-	const [total, aktif, habis, kedaluarsa, batal] = await Promise.all([
-		count(undefined),
-		count('active'),
-		count('redeemed'),
-		count('expired'),
-		count('revoked')
-	]);
-	return { total, aktif, habis, kedaluarsa, batal };
+	// Satu agregat server (GET /admin/vouchers/stats); fallback ke 5× daftar
+	// bila backend lama belum menyediakan endpoint statistik.
+	const sp = new URLSearchParams();
+	if (base.courseId !== undefined) sp.set('courseId', String(base.courseId));
+	if (base.kind) sp.set('kind', base.kind);
+	if (base.q?.trim()) sp.set('q', base.q.trim());
+	const qs = sp.toString();
+	return req<{ total: number; aktif: number; habis: number; kedaluarsa: number; batal: number }>(
+		`/admin/vouchers/stats${qs ? `?${qs}` : ''}`
+	).catch(async () => {
+		const count = (status?: VoucherListParams['status']) =>
+			fetchVouchers({ ...base, status, limit: 1 }).then((r) => r.total);
+		const [total, aktif, habis, kedaluarsa, batal] = await Promise.all([
+			count(undefined),
+			count('active'),
+			count('redeemed'),
+			count('expired'),
+			count('revoked')
+		]);
+		return { total, aktif, habis, kedaluarsa, batal };
+	});
 }
 
 /** Buat voucher (POST /api/v1/admin/vouchers). Personal wajib penerima; diskon wajib jenis+nilai. */

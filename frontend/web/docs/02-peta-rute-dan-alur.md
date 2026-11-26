@@ -1,62 +1,56 @@
 # 02 — Peta Rute dan Alur ARISTOTELES
 
-> Penanda: `[Terverifikasi]` dari kode, `[Keputusan pengguna]` K-01–K-08, `[Belum diputuskan]` butuh jawaban. Tidak ada nomor baris karangan — hanya path + nama simbol.
+> Penanda: `[Terverifikasi]` dari kode 2026-11-24. Jalur publik memakai prefix bahasa `[lang]` = `id` | `en`. Diperbarui 2026-11-24.
 
 ## Publik [Terverifikasi]
 
 | URL | File | Guard / komponen |
 |---|---|---|
-| `/` | `src/routes/+page.svelte` | Publik, `Logo.svelte`, tombol verifikasi tanpa handler |
-| `/modules` | `src/routes/modules/+page.svelte` | Filter lokal kategori/periode |
-| `/modules/[courseId]` | `src/routes/modules/[courseId]/+page.svelte` | `TrainingHero`, `LearningPathRoadmap`, `ModuleLearningPath`, `TrainingActionCard` |
-| `/login`, `/register`, `/with_UNIRA` | `src/routes/login/+page.svelte`, `src/routes/register/+page.svelte`, `src/routes/with_UNIRA/+page.svelte` | `login`, `register`, `loginWithUnita` di `auth.svelte.ts` |
-| `/promo`, `/promo/[slug]` | `src/routes/promo/+page.svelte`, `src/routes/promo/[slug]/+page.svelte` | Indeks kampanye aktif + detail per kampanye (diskon/unggulan/patungan, kalkulator patungan) |
-| `/patungan/setup/[courseId]`, `/patungan/saya`, `/patungan/[groupId]` | `src/routes/patungan/*/+page.svelte` | Buat/kelola grup patungan (hanya kursus anggota promo patungan aktif) |
+| `/` | `src/routes/+page.svelte` (+ `+page.server.ts` redirect) | Redirect 307 ke `/id` (cookie bahasa) |
+| `/[lang]/` | `src/routes/[lang]/+page.svelte` (+ SSR `+page.server.ts`, cache 60 dtk) | Landing, `PublicHeader`, SeoHead |
+| `/[lang]/pelatihan` | `.../pelatihan/+page.svelte` (+ SSR 8 awal) | Katalog + filter kategori/periode/level |
+| `/[lang]/modules/[courseId]` (+`[moduleId]`, +`[moduleId]/[subId]`) | `.../modules/...` (detail SSR + cache) | `TrainingHero`, learning path, kunci sekuensial dalam sub-modul |
+| `/[lang]/peringkat` | `.../peringkat/+page.svelte` | Peringkat publik real (`GET /courses/rankings`) |
+| `/[lang]/promo`, `/[lang]/promo/[slug]`, `/[lang]/promo/diskon\|kurasi\|patungan` | `.../promo/*` | Indeks kampanye aktif + detail (harga server, CTA) |
+| `/[lang]/patungan/setup/[courseId]`, `/[lang]/patungan/saya`, `/[lang]/patungan/[groupId]` | `.../patungan/*` | Buat/kelola grup patungan (hanya kursus promo patungan aktif) |
+| `/[lang]/login`, `/[lang]/register`, `/[lang]/verify-email`, `/[lang]/lupa-password`, `/[lang]/reset-password` | auth pages | OTP + guard peran, label peran per bahasa |
+| `/[lang]/invite/[token]` | `.../invite/[token]/+page.svelte` | Aktivasi undangan (token 1x pakai), tema token portal |
+| `/[lang]/verifikasi` | `.../verifikasi/+page.svelte` | Verifikasi sertifikat publik (`?code=`) |
+| `/[lang]/menjadi-instruktur` (+`/daftar`), `/[lang]/tentang/*`, `/[lang]/kebijakan-privasi`, `/[lang]/syarat-ketentuan`, `/[lang]/segera-hadir`, `/[lang]/with_UNIRA` | statis/formulir | Kebijakan/syarat di-prerender (id+en) |
 
 ## Peserta [Terverifikasi]
 
-- Shell: `src/routes/user/+layout.svelte` — guard `$effect` + `loadSession()` + `goto('/login')` bila tanpa sesi, `goto(homeFor(role))` bila peran salah, `Sidebar.svelte` kecuali halaman materi full-frame.
-- `src/routes/user/+page.svelte` — dashboard statis.
-- `src/routes/user/kursusku/+page.svelte` — `courses.filter(canAccessCourse)` via `enrollment.svelte.ts`, voucher `VALID_CODES` lokal.
-- `src/routes/user/kursusku/[courseId]/+page.svelte` — `canAccessCourse`, `isPeriodLocked` via `enrollment.svelte.ts`, locking via `isModuleLocked/isSubModuleLocked` di `courses.ts`, progres via `training.ts` + `doneMaterials` di `progress.svelte.ts`.
-- `src/routes/user/kursusku/[courseId]/[moduleId]/[materialId]/+page.svelte` — `flat = getModuleMaterials()`, `isMaterialLocked`, `MaterialRenderer` dengan `onComplete=markDone`.
-- `.../hasil/+page.svelte` — `getQuizResult` + `normalizePassScore` + `DEFAULT_PASS_SCORE` di `quiz-drafts.ts`.
-- `src/routes/user/semua-kursus/+page.svelte`, `semua-kursus/[courseId]/+page.svelte` (`CoursePreview`), `pembayaran/[courseId]/+page.svelte`, `sertifikat/+page.svelte`.
-- `src/routes/user/promo/+page.svelte`, `promo/[slug]/+page.svelte` — etalase + detail per kampanye (harga server, owned-check, CTA beli/grup patungan).
+- Shell: `src/routes/user/+layout.svelte` — guard student (verifikasi server), bell notifikasi (`useBadgePolling` + cache 45 dtk), `Sidebar.svelte` (Promo = grup collapsible 3 jenis).
+- `user/+page.svelte` — dashboard dari backend.
+- `user/kursusku/+page.svelte` — enrollment server; `user/kursusku/[courseId]/+page.svelte` — akses + progres server, kunci hanya dalam sub-modul.
+- `user/kursusku/[courseId]/[moduleId]/[materialId]/+page.svelte` — `MaterialRenderer` 6 tipe; kuis via `QuizMaterial` (skor server); tugas via `AssignmentMaterial` (status server).
+- `.../hasil/+page.svelte` — ringkasan hasil (terbaik + riwayat server).
+- `user/semua-kursus/` (+`[courseId]`), `user/promo/*`, `user/pembayaran/` (riwayat + `StatusBadge`), `user/pembayaran/[courseId]` (QRIS DOKU: polling 5 dtk + countdown + banner offline + auto-refresh QR), `user/sertifikat/` (badge + unduh PDF), `user/profile/`.
 
-Alur peserta: Kursusku → detail kursus → materi via `MaterialRenderer` → kuis lolos `score >= effectivePass` di `QuizMaterial.svelte` → `hasil` → materi berikut bila `markDone`. Tugas via `AssignmentMaterial.svelte` → `onSubmit=markDone`.
+Alur peserta: Kursusku → detail kursus → materi via `MaterialRenderer` → kuis lulus di server → progres tercatat → sertifikat modul terbit otomatis bila syarat penuh.
 
 ## Instruktur [Terverifikasi]
 
-- Shell: `src/routes/instruktur/+layout.svelte` — guard teacher.
-- `kursusku/+page.svelte` — filter ID `[1,5,3,4]`.
-- `kursusku/[courseId]/+page.svelte` — `LearningPathManager.svelte` + `CourseRoadmap` preview + `loadCurriculumDraft/saveCurriculumDraft/withSyncedFlat` di `curriculum.ts`.
-- `kursusku/[courseId]/[moduleId]/+page.svelte` — CRUD sub-modul inline.
-- `kursusku/[courseId]/[moduleId]/[subId]/+page.svelte` — CRUD materi inline + `refreshDocMeta` (`loadQuizDraft/loadTaskDraft/getMaterialDocMeta`).
-- `.../[materialId]/+page.svelte` — `normalizeMaterialType` → `QuizBuilder` / `TaskBriefBuilder` / `MaterialEditor`, tab `tulis/pratinjau`, `WarningModal` bila `dirty`.
-- `kursusku/tambah/+page.svelte` — simpan `instruktur-draft-course`, `modules: []`.
-- `penilaian/+page.svelte`, `penilaian/[courseId]/+page.svelte`, `penilaian/[courseId]/[materialId]/+page.svelte` — `grading.svelte.ts` (`reviewMap`, `ensureGradingLoaded`, `submitReviewScore`) + `grading.ts` (`tasksOfCourse`, `resolveTaskKey`).
-- `pendapatan/+page.svelte`, `sertifikat/+page.svelte` — state lokal statis.
+- Shell: `src/routes/instruktur/+layout.svelte` — guard teacher, bell (`useBadgePolling`).
+- `kursusku/` — daftar kelola; `kursusku/[courseId]/…/[materialId]/+page.svelte` — drill-down + `QuizBuilder` / `TaskBriefBuilder` / `MaterialEditor` (dinamis via `AsyncMaterialEditor`), `WarningModal` bila kotor.
+- `kursusku/tambah/` — tambah kursus (selalu draft).
+- `penilaian/` + `penilaian/[courseId]/` (agregat 1 request `review-queue?courseId=` + paginasi klien) + `penilaian/[courseId]/[materialId]/` (rubrik 3 kriteria + placeholder keputusan wajib + unduh per-baris + `StatusBadge`).
+- `pendapatan/`, `sertifikat/` (ringkasan, tab eligibility/riwayat + paginasi), `promo/` (usulkan kursus ke kampanye), `profile/`.
 
 ## Admin [Terverifikasi]
 
-- `src/routes/admin/+layout.svelte` — guard admin klien.
-- `admin/+page.svelte`, `admin/courses/+page.svelte`, `admin/users/+page.svelte`, `admin/users/[userId]/+page.svelte`, `admin/instrukturs/+page.svelte` — tabel/kartu + tambah lokal, aksi Reset/Nonaktifkan hanya `flash()`.
+- Shell: `src/routes/admin/+layout.svelte` — guard admin, bell (`useBadgePolling` + cache).
+- `+page` (dasbor), `laporan/` (tab Ringkasan/Tren/Per kursus, filter tanggal + Kursus ID tervalidasi, CSV + peringatan 100 baris), `pembayaran/` (dialog verifikasi `ModalShell`; antrean manual; DOKU otomatis), `bagi-hasil/`, `promos/`, `vouchers/` (statistik 1-query + tabel + `StatusBadge`), `invitations/` (token sekali-tampil + salin), `courses/`, `kategori/`, `peserta/`, `instrukturs/` (+ubah), `pengajuan-instruktur/`, `profile/`.
 
 ## Navigasi sidebar [Terverifikasi]
 
-Sidebar (`src/lib/components/Sidebar.svelte`) mendukung item tunggal dan grup
-sub-menu (`NavItem.children`): label grup tampil sebagai judul kecil di atas,
-menu anggotanya tampil di bawahnya; grup bertanda `collapsible` bisa
-dilipat/dibentangkan lewat tombol (default terbuka bila halaman aktif ada di
-dalamnya), dan bila `linkable` labelnya sekaligus tautan (menu Promo peserta).
-Pengelompokan per portal:
+`Sidebar.svelte` dukung item + grup sub-menu (`NavItem.children`); grup `collapsible`; `linkable` menjadikan label tautan (dipakai Promo peserta).
 
-- Peserta: Belajar (Dashboard, Kursusku, Semua Kursus, Sertifikat), Promo tautan + *dropdown* (maks. 6 kampanye aktif), Akun (Profil).
-- Instruktur: Mengajar (Dashboard, Kursusku, Penilaian), Hasil (Pendapatan, Sertifikat), Akun (Profil).
-- Admin: Ringkasan (Dasbor, Laporan), Pengguna (Peserta, Instruktur, Pengajuan, Undangan), Katalog (Kursus, Voucher, Promo, Pembayaran), Akun (Profil).
+- Peserta: Belajar (Dashboard, Kursusku, Semua Kursus, Riwayat Pembayaran, Sertifikat), Promo collapsible (Flash Sale, Pilihan Unggulan, Promo Patungan), Akun (Profil).
+- Instruktur: Mengajar (Dashboard, Kursusku, Ajukan Promo, Penilaian), Hasil (Pendapatan, Sertifikat), Akun (Profil).
+- Admin: Ringkasan (Dasbor, Laporan), Pengguna (Peserta, Instruktur, Pengajuan, Undangan), Katalog (Kursus, Kategori, Voucher, Promo, Pembayaran), Akun (Profil).
 
 ## Gap vs keputusan
 
-- K-04 [Keputusan pengguna] materi biasa selesai via Berikutnya — sudah tercermin via `markDone` navigasi [Terverifikasi].
-- K-07 [Keputusan pengguna] modul independen — belum tercermin, kode masih `isModuleLocked` antar-modul di `courses.ts`. Dicatat sebagai pekerjaan lanjutan.
+- K-04 [Keputusan pengguna] materi biasa selesai via Berikutnya — tercermin via `markDone` navigasi [Terverifikasi].
+- K-07 [Keputusan pengguna] modul independen — tercermin: kunci hanya dalam sub-modul (`isMaterialLocked`) [Terverifikasi].

@@ -332,10 +332,7 @@ export const listVouchers = async (
     const us = await db
       .select({ id: users.id, email: users.email })
       .from(users)
-      .where(
-        // drizzle inArray diimpor di bawah bila perlu; pakai or sederhana untuk jumlah kecil
-        or(...assignedIds.map((id) => eq(users.id, id)))
-      );
+      .where(inArray(users.id, assignedIds));
     for (const u of us) emailById.set(u.id, u.email);
   }
   return {
@@ -345,6 +342,51 @@ export const listVouchers = async (
       remaining: Math.max(r.maxUses - r.usedCount, 0),
     })),
     total: Number(countRows[0]?.n ?? 0),
+  };
+};
+
+/** Hitungan voucher per grup status UI dalam 1 query (ganti 5× list limit:1).
+ * Grup sama persis dengan filter `listVouchers`: aktif = available/assigned
+ * belum lewat tanggal; kedaluarsa = status expired ATAU lewat tanggal. */
+export const getVoucherStats = async (
+  filter: { courseId?: number; kind?: "personal" | "umum" | "diskon"; q?: string } = {}
+): Promise<{ total: number; aktif: number; habis: number; kedaluarsa: number; batal: number }> => {
+  const now = new Date();
+  const conditions = [];
+  if (filter.courseId !== undefined) conditions.push(eq(vouchers.courseId, filter.courseId));
+  if (filter.kind !== undefined) conditions.push(eq(vouchers.kind, filter.kind));
+  if (filter.q) {
+    const q = escapeLike(filter.q);
+    conditions.push(
+      or(
+        like(vouchers.code, `%${q}%`),
+        like(courses.title, `%${q}%`)
+      )
+    );
+  }
+  const where = conditions.length > 0 ? and(...conditions) : undefined;
+  const rows = await db
+    .select({
+      total: sql<number>`count(*)`,
+      aktif:
+        sql<number>`coalesce(sum(case when ${vouchers.status} in ('available','assigned') and (${vouchers.expiresAt} is null or ${vouchers.expiresAt} > ${now}) then 1 else 0 end), 0)`,
+      habis:
+        sql<number>`coalesce(sum(case when ${vouchers.status} = 'redeemed' then 1 else 0 end), 0)`,
+      kedaluarsa:
+        sql<number>`coalesce(sum(case when ${vouchers.status} = 'expired' or (${vouchers.status} in ('available','assigned') and ${vouchers.expiresAt} <= ${now}) then 1 else 0 end), 0)`,
+      batal:
+        sql<number>`coalesce(sum(case when ${vouchers.status} = 'revoked' then 1 else 0 end), 0)`,
+    })
+    .from(vouchers)
+    .leftJoin(courses, eq(courses.id, vouchers.courseId))
+    .where(where);
+  const r = rows[0];
+  return {
+    total: Number(r?.total ?? 0),
+    aktif: Number(r?.aktif ?? 0),
+    habis: Number(r?.habis ?? 0),
+    kedaluarsa: Number(r?.kedaluarsa ?? 0),
+    batal: Number(r?.batal ?? 0),
   };
 };
 

@@ -2,12 +2,13 @@
 	import { browser } from '$app/environment';
 	import { goto } from '$app/navigation';
 	import { resolve } from '$app/paths';
-	import '../../app.css';
 	import Logo from '$lib/components/Logo.svelte';
 	import Sidebar, { type NavItem } from '$lib/components/Sidebar.svelte';
 	import { getCurrentUser, homeFor, logout, verifySession } from '$lib/stores/auth.svelte';
 	import { clearInstructorCourseCaches } from '$lib/stores/instructor-courses.svelte';
 	import { fetchInstructorDashboard } from '$lib/api/dashboard';
+	import { cachedGet } from '$lib/api/cache';
+	import { useBadgePolling } from '$lib/stores/badge-poll.svelte';
 	import { fetchCertificateSummary } from '$lib/api/certificates';
 	import { fetchMyPromoProposals } from '$lib/api/promos';
 	import { fileUrl } from '$lib/api/courses';
@@ -73,11 +74,13 @@
 	);
 
 	async function loadBadges(): Promise<void> {
+		// Badge bell boleh basi ≤45 dtk; keputusan promo/nilai memicu refresh eksplisit.
+		const BELL_MS = 45_000;
 		try {
 			const [dashboard, summary, myProposals] = await Promise.all([
-				fetchInstructorDashboard(),
-				fetchCertificateSummary(),
-				fetchMyPromoProposals().catch((): [] => [])
+				cachedGet('bell:ins:dash', BELL_MS, () => fetchInstructorDashboard()),
+				cachedGet('bell:ins:certs', BELL_MS, () => fetchCertificateSummary()),
+				cachedGet('bell:ins:promos', BELL_MS, () => fetchMyPromoProposals().catch((): [] => []))
 			]);
 			courseBadge = String(dashboard.totals.activeCourses);
 			reviewBadge = String(dashboard.totals.pendingReviews);
@@ -90,6 +93,13 @@
 		}
 	}
 
+	// Bell instruktur ikut segar seperti portal lain (visibility/fokus/event/60 dtk).
+	useBadgePolling({
+		load: () => void loadBadges(),
+		isReady: () => phase === 'ready',
+		eventName: 'instruktur:notif-refresh'
+	});
+
 	// Shell sama persis dengan portal user, hanya menu + identitas yang berbeda.
 	const navItems = $derived<NavItem[]>([
 		{
@@ -99,7 +109,7 @@
 			children: [
 				{ label: 'Dashboard', icon: 'fa-house', href: '/instruktur' },
 				{ label: 'Kursusku', icon: 'fa-book-open', href: '/instruktur/kursusku', badge: courseBadge },
-				{ label: 'Promo', icon: 'fa-tags', href: '/instruktur/promo', badge: promoBadge },
+				{ label: 'Ajukan Promo', icon: 'fa-tags', href: '/instruktur/promo', badge: promoBadge },
 				{ label: 'Penilaian', icon: 'fa-clipboard-check', href: '/instruktur/penilaian', badge: reviewBadge }
 			]
 		},
@@ -155,6 +165,10 @@
 	// Foto dari sesi (relatif server) → absolut backend; null = inisial.
 	const avatarSrc = $derived(session?.avatarUrl ? fileUrl(session.avatarUrl) : null);
 </script>
+
+<svelte:head>
+	<meta name="robots" content="noindex, nofollow" />
+</svelte:head>
 
 <svelte:window onkeydown={handleWindowKeydown} />
 

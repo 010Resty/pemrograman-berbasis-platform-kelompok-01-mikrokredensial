@@ -2,6 +2,7 @@ import { z } from "zod";
 import { and, eq, ne } from "drizzle-orm";
 import { db } from "../../db";
 import { auditLogs, files, users } from "../../db/schema";
+import { resolveAvatarUrl } from "../../utils/avatar";
 
 /**
  * Profil milik sendiri (semua peran). Dibaca/diubah pemilik akun;
@@ -99,6 +100,7 @@ const toPublicProfile = (row: {
   birthPlace: string | null;
   birthDate: Date | null;
   avatarFileId: number | null;
+  photoUrl: string | null;
   coverFileId: number | null;
   emailVerifiedAt: Date | null;
   createdAt: Date;
@@ -113,7 +115,7 @@ const toPublicProfile = (row: {
   birthPlace: row.birthPlace,
   birthDate: row.birthDate ? toISODate(row.birthDate) : null,
   avatarFileId: row.avatarFileId,
-  avatarUrl: row.avatarFileId ? `/api/v1/files/${row.avatarFileId}/content` : null,
+  avatarUrl: resolveAvatarUrl(row.avatarFileId, row.photoUrl ?? null, row.id),
   coverFileId: row.coverFileId,
   coverUrl: row.coverFileId ? `/api/v1/files/${row.coverFileId}/content` : null,
   emailVerified: row.emailVerifiedAt !== null,
@@ -142,6 +144,7 @@ export const getMyProfile = async (userId: number): Promise<PublicProfile> => {
       birthPlace: users.birthPlace,
       birthDate: users.birthDate,
       avatarFileId: users.avatarFileId,
+      photoUrl: users.photoUrl,
       coverFileId: users.coverFileId,
       emailVerifiedAt: users.emailVerifiedAt,
       createdAt: users.createdAt,

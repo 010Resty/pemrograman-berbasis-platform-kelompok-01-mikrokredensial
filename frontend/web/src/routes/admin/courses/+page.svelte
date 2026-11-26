@@ -20,6 +20,7 @@
 	} from '$lib/api/courses';
 	import { fetchCategories, FALLBACK_CATEGORIES } from '$lib/api/categories';
 	import { BackendRequestError } from '$lib/api/backend';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Kelola kursus dari backend (GET /api/v1/instructor/courses — admin melihat semua).
@@ -263,6 +264,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = serverMessage(e, 'Gagal memuat kursus.');
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}
@@ -404,6 +406,7 @@
 		const err = validateCourseForm(createFormState());
 		if (err) {
 			formError = err;
+			toast.error(formError);
 			return;
 		}
 		isSubmitting = true;
@@ -415,6 +418,7 @@
 			await load();
 		} catch (e) {
 			formError = serverMessage(e, 'Gagal membuat kursus.');
+			toast.error(formError);
 		} finally {
 			isSubmitting = false;
 		}
@@ -432,6 +436,7 @@
 			detailCourse = await fetchCourseDetail(id);
 		} catch (e) {
 			detailError = serverMessage(e, 'Gagal memuat detail kursus.');
+			toast.error(detailError);
 		} finally {
 			detailLoading = false;
 		}
@@ -471,6 +476,7 @@
 			eStatus = d.status;
 		} catch (e) {
 			editError = serverMessage(e, 'Gagal memuat data kursus untuk diubah.');
+			toast.error(editError);
 		} finally {
 			editLoading = false;
 		}
@@ -492,11 +498,13 @@
 		const err = validateCourseForm(editFormState());
 		if (err) {
 			formEditError = err;
+			toast.error(formEditError);
 			return;
 		}
 		const email = eAssignEmail.trim();
 		if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
 			formEditError = 'Format email pengampu tidak valid.';
+			toast.error(formEditError);
 			return;
 		}
 		isEditing = true;
@@ -510,6 +518,7 @@
 				} catch (e) {
 					assignNote = ` Namun penugasan pengampu gagal: ${serverMessage(e, 'gagal menugaskan pengampu.')}`;
 					actionError = `Kursus “${updated.title}” diperbarui, tetapi penugasan ${email} gagal: ${serverMessage(e, 'gagal.')}`;
+					toast.error(actionError);
 				}
 			}
 			if (!assignNote) {
@@ -522,6 +531,7 @@
 			await load();
 		} catch (e) {
 			formEditError = serverMessage(e, 'Gagal menyimpan perubahan.');
+			toast.error(formEditError);
 		} finally {
 			isEditing = false;
 		}
@@ -549,6 +559,7 @@
 			await load();
 		} catch (e) {
 			actionError = serverMessage(e, 'Gagal menghapus kursus.');
+			toast.error(actionError);
 			showDelete = false;
 		} finally {
 			isDeleting = false;
@@ -582,6 +593,7 @@
 			}
 		} catch (e) {
 			actionError = serverMessage(e, 'Gagal mengubah fase batch.');
+			toast.error(actionError);
 			showPhase = false;
 		} finally {
 			isPhasing = false;
@@ -695,7 +707,8 @@
 					</li>
 				{/each}
 			</ol>
-			<div class="hidden overflow-x-auto md:block">
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll region keyboard: tabel lebar perlu tabindex 0 -->
+			<div class="table-scroll hidden md:block" tabindex="0" role="region" aria-label="Tabel kursus, geser horizontal">
 				<table class="w-full min-w-[640px] text-sm">
 					<caption class="sr-only">Daftar kursus platform Aristoteles</caption>
 					<thead class="bg-emerald-700 text-white">

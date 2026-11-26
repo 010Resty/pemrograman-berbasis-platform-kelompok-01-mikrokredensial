@@ -1,13 +1,16 @@
 import { Router } from "express";
 import { authenticate, optionalAuthenticate, requireRole } from "../../middlewares/auth.middleware";
 import { publicReadLimiter } from "../../middlewares/rate-limit.middleware";
-import { create, listPublic, listMine, detail, update, remove } from "./course.controller";
+import { create, listPublic, listRankingsPublic, listMine, detail, update, remove } from "./course.controller";
 
 const router = Router();
 const instructorRouter = Router();
 
 // Katalog publik (hanya published).
 router.get("/", publicReadLimiter(), listPublic);
+
+// Peringkat publik per jumlah peserta — SEBELUM "/:id" agar tidak tertelan.
+router.get("/rankings", publicReadLimiter(), listRankingsPublic);
 
 // Daftar kursus instruktur/admin.
 instructorRouter.get(

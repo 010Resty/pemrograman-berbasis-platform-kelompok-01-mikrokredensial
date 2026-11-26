@@ -207,6 +207,15 @@ export interface AdminReportInsights {
 	note: string;
 }
 
+export interface AdminReportMonth {
+	/** Bulan kalender `YYYY-MM`. */
+	month: string;
+	revenue: number;
+	payments: number;
+	enrollments: number;
+	certificates: number;
+}
+
 export interface AdminReports {
 	summary: {
 		totalStudents: number;
@@ -226,6 +235,8 @@ export interface AdminReports {
 	filters: { from?: string; to?: string; courseId?: number };
 	paging: { page: number; limit: number; total: number };
 	insights: AdminReportInsights;
+	/** Deret bulanan (12 bulan terakhir, atau rentang filter bila from+to diisi). */
+	monthly: AdminReportMonth[];
 }
 
 export interface AdminReportsParams {

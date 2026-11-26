@@ -130,6 +130,30 @@ export async function fetchPublicCourseList(
 	return Array.isArray(data) ? data : (data.courses ?? []);
 }
 
+/**
+ * Peringkat publik per jumlah peserta (tanpa login, tanpa rating).
+ * Top kursus published diurutkan enrollment aktif terbanyak.
+ */
+export interface CourseRanking {
+	courseId: number;
+	title: string;
+	category: string | null;
+	level: string;
+	image: string | null;
+	priceLabel: string;
+	priceNominal: number;
+	period: string;
+	studentCount: number;
+	instructorNames: string[];
+}
+
+export async function fetchCourseRankings(limit = 10): Promise<CourseRanking[]> {
+	const data = await apiRequest<CourseRanking[]>(
+		`/courses/rankings?limit=${Math.min(Math.max(limit, 1), 50)}`
+	);
+	return Array.isArray(data) ? data : [];
+}
+
 export async function fetchCourseDetail(id: number): Promise<BackendCourse> {
 	const data = await req<{ course?: BackendCourse } | BackendCourse>(`/courses/${id}`);
 	return (data as { course?: BackendCourse }).course ?? (data as BackendCourse);

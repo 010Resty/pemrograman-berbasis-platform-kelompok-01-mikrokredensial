@@ -45,6 +45,10 @@ export const users = mysqlTable("users", {
       onUpdate: "cascade",
     }
   ),
+  // Foto profil eksternal (URL https) dari provider SSO kampus (UNIRA/SIMAT
+  // `thumbnail`). NULL = belum ada. Upload manual (avatarFileId) selalu
+  // menang saat render — lihat utils/avatar.ts.
+  photoUrl: varchar("avatar_url", { length: 500 }),
   // Sampul banner profil (opsional, milik sendiri, kind=profile_cover).
   // Anotasi sama demi siklus inferensi (lihat avatar).
   coverFileId: int("cover_file_id").references(
@@ -75,6 +79,11 @@ export const users = mysqlTable("users", {
     // Filter daftar admin: role / isActive (admin.service.ts).
     userRoleIdx: index("users_role_idx").on(table.role),
     userActiveIdx: index("users_is_active_idx").on(table.isActive),
+    // Corong admin per peran + rentang tanggal (admin.service.ts).
+    userRoleCreatedIdx: index("users_role_created_idx").on(
+      table.role,
+      table.createdAt
+    ),
   })
 );
 
@@ -108,6 +117,10 @@ export const refreshTokens = mysqlTable(
     refreshUserRevokedIdx: index("refresh_tokens_user_revoked_idx").on(
       table.userId,
       table.revokedAt
+    ),
+    // Susur rantai grace: cari penerus via replacedByTokenHash (refresh.service.ts).
+    refreshReplacedIdx: index("refresh_tokens_replaced_idx").on(
+      table.replacedByTokenHash
     ),
   })
 );
@@ -428,6 +441,11 @@ export const enrollments = mysqlTable(
       table.courseId,
       table.status
     ),
+    // Laporan admin: filter status + rentang tanggal (admin.service.ts).
+    enrollmentStatusEnrolledIdx: index("enrollments_status_enrolled_idx").on(
+      table.status,
+      table.enrolledAt
+    ),
   })
 );
 
@@ -491,6 +509,11 @@ export const quizAttempts = mysqlTable("quiz_attempts", {
   userMaterialIdx: index("quiz_attempts_user_material_idx").on(
     table.userId,
     table.materialId
+  ),
+  // Batch eligibility per materi: filter materialId (+userId) (certificate.service.ts).
+  materialUserIdx: index("quiz_attempts_material_user_idx").on(
+    table.materialId,
+    table.userId
   ),
 }));
 
@@ -611,6 +634,13 @@ export const submissions = mysqlTable(
     ),
     // Riwayat per peserta + antrean nilai per materi (dashboard, certificates).
     submissionUserIdx: index("submissions_user_idx").on(table.userId),
+    // Proteksi akses berkas via fileId (submission.service.ts).
+    submissionFileIdx: index("submissions_file_idx").on(table.fileId),
+    // Agregat antrean per materi+status (dashboard.service.ts).
+    submissionMaterialStatusIdx: index("submissions_material_status_idx").on(
+      table.materialId,
+      table.status
+    ),
   })
 );
 
@@ -678,6 +708,11 @@ export const vouchers = mysqlTable(
     voucherStatusIdx: index("vouchers_status_idx").on(table.status),
     voucherKindIdx: index("vouchers_kind_idx").on(table.kind),
     voucherAssignedIdx: index("vouchers_assigned_idx").on(table.assignedUserId),
+    // Grup status active/expired memakai expiresAt (voucher.service.ts).
+    voucherStatusExpiresIdx: index("vouchers_status_expires_idx").on(
+      table.status,
+      table.expiresAt
+    ),
   })
 );
 
@@ -802,6 +837,100 @@ export const payments = mysqlTable(
     ),
     // Rekonsiliasi promo patungan (promo.service.ts).
     paymentPromoSlugIdx: index("payments_promo_slug_idx").on(table.promoSlug),
+    // Laporan admin: filter status + rentang tanggal (admin.service.ts).
+    paymentStatusCreatedIdx: index("payments_status_created_idx").on(
+      table.status,
+      table.createdAt
+    ),
+  })
+);
+
+// Bagi hasil instruktur: persen global (satu baris id=1) + minimal penarikan.
+// Diubah admin; snapshot persen per pembayaran dicatat di revenue_ledger
+// agar perubahan tidak mengubah hak yang sudah terjadi.
+export const revenueSettings = mysqlTable("revenue_settings", {
+  id: int("id").autoincrement().primaryKey(),
+  instructorPercent: int("instructor_percent").notNull().default(70),
+  minWithdrawal: int("min_withdrawal").notNull().default(100000),
+  updatedBy: int("updated_by").references(() => users.id, {
+    onDelete: "set null",
+    onUpdate: "cascade",
+  }),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+});
+
+// Snapshot hak instruktur per pembayaran terverifikasi (anti-retroaktif).
+// Satu baris per paymentId; diisi saat grant sukses (manual + webhook DOKU).
+export const revenueLedger = mysqlTable(
+  "revenue_ledger",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    paymentId: int("payment_id")
+      .notNull()
+      .unique()
+      .references(() => payments.id, {
+        onDelete: "restrict",
+        onUpdate: "cascade",
+      }),
+    instructorId: int("instructor_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    courseId: int("course_id")
+      .notNull()
+      .references(() => courses.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    amountPaid: int("amount_paid").notNull(),
+    percent: int("percent").notNull(),
+    amount: int("amount").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    ledgerInstructorIdx: index("revenue_ledger_instructor_idx").on(table.instructorId),
+    ledgerCourseIdx: index("revenue_ledger_course_idx").on(table.courseId),
+  })
+);
+
+// Pengajuan penarikan instruktur: rekening diisi tiap pengajuan
+// (tanpa rekening tersimpan). Transfer dilakukan manual di luar sistem;
+// admin menandai berhasil / menolak dengan alasan.
+export const payouts = mysqlTable(
+  "payouts",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    instructorId: int("instructor_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    amount: int("amount").notNull(),
+    bankName: varchar("bank_name", { length: 100 }).notNull(),
+    accountNumber: varchar("account_number", { length: 50 }).notNull(),
+    accountName: varchar("account_name", { length: 150 }).notNull(),
+    status: mysqlEnum("status", ["diajukan", "diproses", "berhasil", "ditolak"])
+      .notNull()
+      .default("diajukan"),
+    rejectReason: varchar("reject_reason", { length: 500 }),
+    decidedBy: int("decided_by").references(() => users.id, {
+      onDelete: "set null",
+      onUpdate: "cascade",
+    }),
+    decidedAt: timestamp("decided_at"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (table) => ({
+    payoutsInstructorIdx: index("payouts_instructor_idx").on(table.instructorId),
+    payoutsStatusIdx: index("payouts_status_idx").on(table.status),
+    // Ringkasan per instruktur + status (revenue.service.ts).
+    payoutsInstructorStatusIdx: index("payouts_instructor_status_idx").on(
+      table.instructorId,
+      table.status
+    ),
   })
 );
 
@@ -915,6 +1044,15 @@ export const certificates = mysqlTable(
       table.userId,
       table.courseId
     ),
+    // Daftar milik sendiri: userId + status + urut terbit (certificate.service.ts).
+    certificateUserStatusIssuedIdx: index(
+      "certificates_user_status_issued_idx"
+    ).on(table.userId, table.status, table.issuedAt),
+    // Laporan admin: filter status + rentang terbit (admin.service.ts).
+    certificateStatusIssuedIdx: index("certificates_status_issued_idx").on(
+      table.status,
+      table.issuedAt
+    ),
   })
 );
 
@@ -934,7 +1072,13 @@ export const emailVerificationPending = mysqlTable(
     attempts: int("attempts").notNull().default(0),
     lastSentAt: timestamp("last_sent_at").defaultNow().notNull(),
     createdAt: timestamp("created_at").defaultNow().notNull(),
-  }
+  },
+  (table) => ({
+    // Cek keunikan username lintas antrean + users (auth.service.ts).
+    pendingUsernameIdx: index("email_verification_pending_username_idx").on(
+      table.username
+    ),
+  })
 );
 
 // Pengajuan minat menjadi instruktur (formulir publik /menjadi-instruktur).
@@ -1034,6 +1178,11 @@ export const promoCampaigns = mysqlTable(
     promoStatusIdx: index("promo_campaigns_status_idx").on(table.status),
     // Filter tipe patungan + status aktif (patungan.service.ts).
     promoTypeIdx: index("promo_campaigns_type_idx").on(table.type),
+    // Pencarian kampanye aktif per tipe + status (promo/patungan.service.ts).
+    promoTypeStatusIdx: index("promo_campaigns_type_status_idx").on(
+      table.type,
+      table.status
+    ),
   })
 );
 
@@ -1171,6 +1320,10 @@ export const patunganGroups = mysqlTable(
       table.promoSlug,
       table.status
     ),
+    // Lazy-expiry: pending + lewat batas (patungan.service.ts).
+    patunganGroupStatusExpiresIdx: index(
+      "patungan_groups_status_expires_idx"
+    ).on(table.status, table.expiresAt),
   })
 );
 
@@ -1222,5 +1375,44 @@ export const patunganGroupMembers = mysqlTable(
     patunganMemberGroupPaymentIdx: index(
       "patungan_members_group_payment_idx"
     ).on(table.groupId, table.paymentStatus),
+    // Filter anggota aktif vs keluar per grup (patungan.service.ts).
+    patunganMemberGroupInviteIdx: index(
+      "patungan_members_group_invite_idx"
+    ).on(table.groupId, table.inviteStatus),
+  })
+);
+
+// Relasi identitas provider eksternal (SSO kampus UNIRA/SIMAT).
+// Satu user bisa punya banyak provider; satu identitas provider hanya
+// menunjuk satu user. UNIQUE(provider, provider_user_id) mencegah duplikat
+// saat dua login UNIRA bersamaan membuat akun (lihat unira.service.ts).
+// NIM disimpan di provider_username untuk pencarian; identifier stabil
+// (bila profil resmi sudah terkonfirmasi) di provider_user_id.
+export const userAuthProviders = mysqlTable(
+  "user_auth_providers",
+  {
+    id: int("id").autoincrement().primaryKey(),
+    userId: int("user_id")
+      .notNull()
+      .references(() => users.id, {
+        onDelete: "cascade",
+        onUpdate: "cascade",
+      }),
+    provider: varchar("provider", { length: 50 }).notNull().default("unira"),
+    providerUserId: varchar("provider_user_id", { length: 191 }).notNull(),
+    providerUsername: varchar("provider_username", { length: 100 }),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+  },
+  (table) => ({
+    providerUserUniq: uniqueIndex("user_auth_providers_provider_uid_uniq").on(
+      table.provider,
+      table.providerUserId
+    ),
+    providerUserIdx: index("user_auth_providers_user_idx").on(table.userId),
+    providerUsernameIdx: index("user_auth_providers_username_idx").on(
+      table.provider,
+      table.providerUsername
+    ),
   })
 );

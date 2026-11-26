@@ -3,10 +3,10 @@
 		DEFAULT_OG_IMAGE,
 		DEFAULT_OG_IMAGE_HEIGHT,
 		DEFAULT_OG_IMAGE_WIDTH,
-		SITE_LOCALE,
 		SITE_NAME,
 		canonicalPath
 	} from '$lib/seo/site';
+	import { ogLocale, type Locale } from '$lib/i18n/locale';
 
 	interface Props {
 		/** Judul penuh <= 60 karakter, unik per halaman, kata kunci di depan. */
@@ -27,6 +27,13 @@
 		imageAlt?: string;
 		/** Structured data JSON-LD (objek tunggal). Render apa adanya. */
 		jsonLd?: Record<string, unknown> | Array<Record<string, unknown>>;
+		/** Locale halaman ('id' default). Mengatur og:locale. */
+		lang?: Locale;
+		/**
+		 * Alternatif bahasa untuk hreflang, mis. hasil `altUrls(path, origin)`.
+		 * Hanya diisi halaman ber-URL per bahasa; portal tanpa prefix tidak pakai.
+		 */
+		alternates?: Array<{ hreflang: string; href: string }>;
 	}
 
 	let {
@@ -38,7 +45,9 @@
 		noindex = false,
 		image = DEFAULT_OG_IMAGE,
 		imageAlt,
-		jsonLd
+		jsonLd,
+		lang = 'id',
+		alternates = []
 	}: Props = $props();
 
 	const canonical = $derived(canonicalPath(path, origin));
@@ -75,11 +84,14 @@
 	<meta name="description" content={description} />
 	<meta name="robots" content={robots} />
 	<link rel="canonical" href={canonical} />
+	{#each alternates as alt (alt.hreflang)}
+		<link rel="alternate" hreflang={alt.hreflang} href={alt.href} />
+	{/each}
 
 	<!-- Open Graph -->
 	<meta property="og:type" content={type} />
 	<meta property="og:site_name" content={SITE_NAME} />
-	<meta property="og:locale" content={SITE_LOCALE} />
+	<meta property="og:locale" content={ogLocale(lang)} />
 	<meta property="og:title" content={title} />
 	<meta property="og:description" content={description} />
 	<meta property="og:url" content={canonical} />

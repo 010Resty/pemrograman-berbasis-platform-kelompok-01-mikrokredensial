@@ -9,6 +9,7 @@
 		type QuizAttemptRow,
 		type QuizBest
 	} from '$lib/api/quiz';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Hasil kuis — server-only (K-02).
@@ -68,6 +69,7 @@
 			serverBest = null;
 			serverHistory = [];
 			serverError = e instanceof Error ? e.message : 'Gagal memuat nilai dari server.';
+			toast.error(serverError);
 		} finally {
 			if (my === serverSeq) loaded = true;
 		}

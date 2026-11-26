@@ -84,6 +84,9 @@ export function loadQuizDraft(
 	}
 }
 
+/** Indeks memori materialId → passScore (hindari scan localStorage tiap panggil). */
+const passScoreIndex = new Map<string, number>();
+
 /** Simpan draf kuis. False bila storage penuh / tidak tersedia. */
 export function saveQuizDraft(
 	courseId: number,
@@ -95,6 +98,7 @@ export function saveQuizDraft(
 	if (!storageAvailable()) return false;
 	try {
 		localStorage.setItem(quizKey(courseId, moduleId, subId, materialId), JSON.stringify(draft));
+		passScoreIndex.set(materialId, normalizePassScore(draft.passScore));
 		return true;
 	} catch {
 		return false;
@@ -109,6 +113,7 @@ export function clearQuizDraft(
 	materialId: string
 ): void {
 	if (!storageAvailable()) return;
+	passScoreIndex.delete(materialId);
 	try {
 		localStorage.removeItem(quizKey(courseId, moduleId, subId, materialId));
 	} catch {
@@ -147,6 +152,9 @@ export function validateQuizDraft(draft: QuizDraft): string | null {
  */
 export function findQuizPassScoreByMaterial(materialId: string): number | null {
 	if (!storageAvailable() || !materialId) return null;
+	// Cepat: indeks memori dari sesi ini (ditulis tiap saveQuizDraft).
+	const cached = passScoreIndex.get(materialId);
+	if (cached !== undefined) return cached;
 	try {
 		for (let i = 0; i < localStorage.length; i++) {
 			const key = localStorage.key(i);
@@ -155,7 +163,9 @@ export function findQuizPassScoreByMaterial(materialId: string): number | null {
 			if (!raw) continue;
 			const parsed = JSON.parse(raw) as Partial<QuizDraft>;
 			if (parsed && typeof parsed.passScore !== 'undefined') {
-				return normalizePassScore(parsed.passScore);
+				const v = normalizePassScore(parsed.passScore);
+				passScoreIndex.set(materialId, v);
+				return v;
 			}
 		}
 	} catch {

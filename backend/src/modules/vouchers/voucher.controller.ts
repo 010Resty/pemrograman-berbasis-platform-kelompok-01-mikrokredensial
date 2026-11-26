@@ -6,6 +6,7 @@ import {
   createVoucherSchema,
   getCoursePrice,
   getVoucherDetail,
+  getVoucherStats,
   listRedemptions,
   listVouchers,
   redeemSchema,
@@ -123,6 +124,32 @@ export const listHandler = async (
       status: "success",
       message: "Daftar voucher",
       data: { items, total },
+    });
+  } catch (e) {
+    next(e);
+  }
+};
+
+// GET /api/v1/admin/vouchers/stats — hitungan per grup status (admin, 1 query).
+export const statsHandler = async (
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction
+) => {
+  try {
+    const userId = needAuth(req, res);
+    if (userId === null) return;
+    void userId;
+    const q = req.query;
+    const kind = q.kind === "personal" || q.kind === "umum" || q.kind === "diskon" ? q.kind : undefined;
+    res.status(200).json({
+      status: "success",
+      message: "Statistik voucher",
+      data: await getVoucherStats({
+        courseId: num(q.courseId),
+        kind,
+        q: typeof q.q === "string" && q.q.trim() !== "" ? q.q.trim().slice(0, 100) : undefined,
+      }),
     });
   } catch (e) {
     next(e);

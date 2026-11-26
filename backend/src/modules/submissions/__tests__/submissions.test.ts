@@ -652,4 +652,41 @@ describe("GET /instructor/review-queue — agregat antrean", () => {
     assert.ok(json.data.pendingTotal >= 1 && json.data.gradedTotal >= 1);
     assert.equal(typeof json.data.avgScore, "number");
   });
+
+  it("filter ?courseId= melingkupi satu kursus; bukan pengelola dapat kosong", async () => {
+    const full = await api<{
+      courses: Array<{ id: number; pending: number; graded: number; total: number }>;
+      pendingTotal: number;
+      gradedTotal: number;
+    }>("GET", "/api/v1/instructor/review-queue", tokens.teacher);
+    assert.equal(full.http, 200);
+    const scoped = await api<typeof full.json.data>(
+      "GET",
+      `/api/v1/instructor/review-queue?courseId=${ids.freePub}`,
+      tokens.teacher
+    );
+    assert.equal(scoped.http, 200);
+    assert.equal(scoped.json.data.courses.length, 1);
+    assert.equal(scoped.json.data.courses[0].id, ids.freePub);
+    const want = full.json.data.courses.find((c) => c.id === ids.freePub);
+    assert.ok(want);
+    assert.deepEqual(scoped.json.data.courses[0], want);
+    assert.equal(scoped.json.data.pendingTotal, want.pending);
+    assert.equal(scoped.json.data.gradedTotal, want.graded);
+
+    // Kursus tak dikenal / bukan kelolaan → kosong tanpa bocor.
+    for (const [tok, cid] of [
+      [tokens.teacher, 999999],
+      [tokens.teacher2, ids.freePub],
+    ] as const) {
+      const r = await api<typeof full.json.data>(
+        "GET",
+        `/api/v1/instructor/review-queue?courseId=${cid}`,
+        tok
+      );
+      assert.equal(r.http, 200);
+      assert.deepEqual(r.json.data.courses, []);
+      assert.equal(r.json.data.pendingTotal, 0);
+    }
+  });
 });

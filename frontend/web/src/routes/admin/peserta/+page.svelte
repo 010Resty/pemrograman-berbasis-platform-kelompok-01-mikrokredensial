@@ -6,6 +6,7 @@
 	import Pagination from '$lib/components/Pagination.svelte';
 	import UserAvatar from '$lib/components/ui/UserAvatar.svelte';
 	import { fetchAdminUsers, type AdminUser } from '$lib/api/admin';
+	import { toast } from '$lib/stores/toast.svelte';
 
 	/**
 	 * Daftar peserta dari backend (GET /api/v1/admin/users?role=student).
@@ -63,6 +64,7 @@
 		} catch (e) {
 			if (my !== loadSeq) return;
 			loadError = e instanceof Error ? e.message : 'Gagal memuat peserta.';
+			toast.error(loadError);
 		} finally {
 			if (my === loadSeq) loading = false;
 		}
@@ -187,7 +189,8 @@
 					</li>
 				{/each}
 			</ol>
-			<div class="hidden overflow-x-auto md:block">
+			<!-- svelte-ignore a11y_no_noninteractive_tabindex -- scroll region keyboard: tabel lebar perlu tabindex 0 -->
+			<div class="table-scroll hidden md:block" tabindex="0" role="region" aria-label="Tabel peserta, geser horizontal">
 				<table class="w-full min-w-[640px] text-sm">
 					<caption class="sr-only">Daftar peserta platform Aristoteles</caption>
 					<thead class="bg-blue-700 text-white">
